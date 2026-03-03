@@ -12,6 +12,9 @@ import { UserAvatar } from "@/entities/user";
 import { useConnectivity } from "@/shared/lib/connectivity";
 import { useCallService } from "@/features/video-calls/model/call-service";
 import type { CallType } from "@/entities/call";
+import { useWallet } from "@/features/wallet";
+import DonateModal from "@/features/wallet/ui/DonateModal.vue";
+import { hexEncode, hexDecode } from "@/shared/lib/matrix/functions";
 
 const chatStore = useChatStore();
 const authStore = useAuthStore();
@@ -31,6 +34,22 @@ const showInfoPanel = ref(false);
 const messageListRef = ref<InstanceType<typeof MessageList>>();
 
 const callService = useCallService();
+const { isAvailable: walletAvailable } = useWallet();
+const showDonateModal = ref(false);
+
+/** Get the other member's Pocketnet address in a 1:1 chat.
+ *  room.members stores hex-encoded addresses; we compare in hex then decode to Base58. */
+const otherMemberAddress = computed(() => {
+  const room = chatStore.activeRoom;
+  if (!room || room.isGroup) return "";
+  const myHex = authStore.address ? hexEncode(authStore.address) : "";
+  const hexAddr = room.members.find((m) => m !== myHex) ?? "";
+  return hexAddr ? hexDecode(hexAddr) : "";
+});
+
+const otherMemberName = computed(() =>
+  otherMemberAddress.value ? chatStore.getDisplayName(otherMemberAddress.value) : "",
+);
 
 const startCallFromHeader = (type: CallType) => {
   const roomId = chatStore.activeRoomId;
@@ -332,7 +351,12 @@ onUnmounted(() => {
             @copy="handleSelectionCopy"
             @delete="handleSelectionDelete"
           />
-          <MessageInput v-else key="input" />
+          <MessageInput
+            v-else
+            key="input"
+            :show-donate="!chatStore.activeRoom?.isGroup && walletAvailable"
+            @donate="showDonateModal = true"
+          />
         </transition>
         <ForwardPicker
           :show="showForwardPicker"
@@ -341,7 +365,13 @@ onUnmounted(() => {
       </template>
     </template>
 
-    <ChatInfoPanel :show="showInfoPanel" @close="showInfoPanel = false" />
+    <ChatInfoPanel :show="showInfoPanel" @close="showInfoPanel = false" @open-search="showSearch = true" />
+    <DonateModal
+      :show="showDonateModal"
+      :receiver-address="otherMemberAddress"
+      :receiver-name="otherMemberName"
+      @close="showDonateModal = false"
+    />
   </div>
 </template>
 
