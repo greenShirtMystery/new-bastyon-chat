@@ -128,7 +128,7 @@ const startCall = (type: "voice" | "video") => {
                     <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
                   </svg>
                 </div>
-                <span class="text-[11px] text-text-color/60">{{ t("chatInfo.chat") }}</span>
+                <span class="text-[11px] text-text-on-main-bg-color">{{ t("chatInfo.chat") }}</span>
               </button>
 
               <!-- Call button -->
@@ -138,7 +138,7 @@ const startCall = (type: "voice" | "video") => {
                     <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
                   </svg>
                 </div>
-                <span class="text-[11px] text-text-color/60">{{ t("chatInfo.call") }}</span>
+                <span class="text-[11px] text-text-on-main-bg-color">{{ t("chatInfo.call") }}</span>
               </button>
 
               <!-- More button (video call) -->
@@ -149,7 +149,7 @@ const startCall = (type: "voice" | "video") => {
                     <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
                   </svg>
                 </div>
-                <span class="text-[11px] text-text-color/60">{{ t("chatInfo.videoCall") }}</span>
+                <span class="text-[11px] text-text-on-main-bg-color">{{ t("chatInfo.videoCall") }}</span>
               </button>
             </div>
 
@@ -157,20 +157,20 @@ const startCall = (type: "voice" | "video") => {
             <div class="border-t border-neutral-grad-0 px-4 py-3">
               <!-- About -->
               <div v-if="userData?.about" class="mb-3">
-                <div class="mb-1 text-xs text-text-color/40">{{ t("chatInfo.about") }}</div>
+                <div class="mb-1 text-xs text-text-on-main-bg-color">{{ t("chatInfo.about") }}</div>
                 <div class="text-sm text-text-color">{{ userData.about }}</div>
               </div>
               <!-- Website -->
               <div v-if="userData?.site" class="mb-3">
-                <div class="mb-1 text-xs text-text-color/40">{{ t("chatInfo.website") }}</div>
+                <div class="mb-1 text-xs text-text-on-main-bg-color">{{ t("chatInfo.website") }}</div>
                 <a :href="userData.site" target="_blank" class="text-sm text-color-txt-ac hover:underline">{{ userData.site }}</a>
               </div>
               <!-- Bastyon Address -->
               <div v-if="props.address">
-                <div class="mb-1 text-xs text-text-color/40">{{ t("chatInfo.address") }}</div>
+                <div class="mb-1 text-xs text-text-on-main-bg-color">{{ t("chatInfo.address") }}</div>
                 <button class="group flex items-center gap-2 text-sm text-text-color" @click="copyAddress">
                   <span class="font-mono text-xs">{{ props.address }}</span>
-                  <svg v-if="!copiedAddress" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-text-color/30 transition-colors group-hover:text-text-color/60">
+                  <svg v-if="!copiedAddress" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-color-txt-gray transition-colors group-hover:text-text-on-main-bg-color">
                     <rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
                   </svg>
                   <span v-else class="text-xs text-green-500">{{ t("chatInfo.copied") }}</span>

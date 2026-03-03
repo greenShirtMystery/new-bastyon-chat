@@ -79,16 +79,16 @@ function openLink(url: string): void {
 
 <template>
   <div v-if="grouped.length === 0" class="flex flex-col items-center justify-center py-16">
-    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="text-text-color/20">
+    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="text-text-on-main-bg-color">
       <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
       <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
     </svg>
-    <span class="mt-3 text-sm text-text-color/40">{{ t("chatInfo.noLinks") }}</span>
+    <span class="mt-3 text-sm text-text-on-main-bg-color">{{ t("chatInfo.noLinks") }}</span>
   </div>
 
   <div v-else>
     <div v-for="group in grouped" :key="group.label" class="mb-1">
-      <div class="px-3 pb-1 pt-3 text-[13px] font-medium text-text-color/50">
+      <div class="px-3 pb-1 pt-3 text-[13px] font-medium text-text-on-main-bg-color">
         {{ group.label }}
       </div>
       <button
@@ -111,10 +111,10 @@ function openLink(url: string): void {
           <div class="truncate text-sm font-medium text-color-txt-ac">
             {{ getDomain(item.url) }}
           </div>
-          <div class="truncate text-xs text-text-color/40">
+          <div class="truncate text-xs text-text-on-main-bg-color">
             {{ item.context }}
           </div>
-          <div class="text-xs text-text-color/30">
+          <div class="text-xs text-color-txt-gray">
             {{ formatDate(new Date(item.timestamp)) }}
           </div>
         </div>

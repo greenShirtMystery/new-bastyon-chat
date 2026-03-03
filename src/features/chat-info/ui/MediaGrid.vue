@@ -48,17 +48,17 @@ const ensureLoaded = (msg: Message) => {
 
 <template>
   <div v-if="messages.length === 0" class="flex flex-col items-center justify-center py-16">
-    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="text-text-color/20">
+    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="text-text-on-main-bg-color">
       <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
       <circle cx="8.5" cy="8.5" r="1.5" />
       <polyline points="21 15 16 10 5 21" />
     </svg>
-    <span class="mt-3 text-sm text-text-color/40">{{ t("chatInfo.noMedia") }}</span>
+    <span class="mt-3 text-sm text-text-on-main-bg-color">{{ t("chatInfo.noMedia") }}</span>
   </div>
 
   <div v-else>
     <div v-for="group in grouped" :key="group.label" class="mb-2">
-      <div class="px-3 pb-1 pt-3 text-[13px] font-medium text-text-color/50">
+      <div class="px-3 pb-1 pt-3 text-[13px] font-medium text-text-on-main-bg-color">
         {{ group.label }}
       </div>
       <div class="grid grid-cols-3 gap-0.5 px-0.5">

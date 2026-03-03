@@ -109,7 +109,7 @@ const underlineStyle = computed(() => {
         :class="
           activeTab === tab.id
             ? 'text-color-txt-ac'
-            : 'text-text-color/50 hover:text-text-color/70'
+            : 'text-text-on-main-bg-color hover:text-text-color'
         "
         @click="activeTab = tab.id"
       >
