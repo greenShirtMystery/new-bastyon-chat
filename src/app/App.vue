@@ -49,8 +49,11 @@ onMounted(async () => {
     console.error("[App] fetchUserInfo error:", e);
   }
 
-  // Initialize Matrix on reload if already logged in
-  if (authStore.isAuthenticated && !authStore.matrixReady) {
+  // If registration is still pending from a previous session, resume polling
+  if (authStore.isAuthenticated && authStore.registrationPending) {
+    authStore.resumeRegistrationPoll();
+  } else if (authStore.isAuthenticated && !authStore.matrixReady) {
+    // Initialize Matrix on reload if already logged in
     await authStore.initMatrix();
   }
 });

@@ -42,7 +42,7 @@ export class AppInitializer {
     this._available = true;
   }
 
-  private syncNodeTime() {
+  syncNodeTime() {
     if (!this.api || !this.actions) return Promise.resolve();
     return this.api.rpc("getnodeinfo").then(getnodeinfoResult => {
       const timeDifference =
@@ -50,6 +50,96 @@ export class AppInitializer {
       PocketnetInstanceConfigurator.setTimeDifference(timeDifference);
       this.actions!.prepare();
     });
+  }
+
+  /** Find a proxy node that has a registration wallet.
+   *  Ensures the API is initialized and ready before querying. */
+  async getRegistrationProxy(): Promise<{ id: string } | null> {
+    if (!this.api) return null;
+    try {
+      await this.initApi();
+      await this.waitForApiReady();
+      // Use proxywithwallet() instead of proxywithwalletls() to avoid
+      // globalpreloader() which depends on jQuery ($) not available in chat app
+      const proxy = await this.api.get.proxywithwallet();
+      return proxy ? { id: proxy.id ?? proxy } : null;
+    } catch (e) {
+      console.error("[appInit] getRegistrationProxy error:", e);
+      return null;
+    }
+  }
+
+  /** Fetch a captcha image from the proxy node.
+   *  Response shape: { id, img (SVG string), done } — possibly wrapped in `data`. */
+  async getCaptcha(proxyId: string, currentCaptchaId?: string) {
+    if (!this.api) return null;
+    try {
+      const payload: Record<string, unknown> = { captcha: currentCaptchaId || null };
+      const raw = await this.api.fetchauth("captcha", payload, { proxy: proxyId });
+      // fetchauth may return { data: { id, img, done } } or { id, img, done } directly
+      const result = raw?.data ?? raw;
+      return result;
+    } catch (e) {
+      console.error("[appInit] getCaptcha error:", e);
+      return null;
+    }
+  }
+
+  /** Submit captcha solution to the proxy node.
+   *  Response shape: { id, done: true } on success. */
+  async solveCaptcha(proxyId: string, captchaId: string, text: string) {
+    if (!this.api) return null;
+    try {
+      const raw = await this.api.fetchauth(
+        "makecaptcha",
+        { captcha: captchaId, text, angles: null },
+        { proxy: proxyId }
+      );
+      const result = raw?.data ?? raw;
+      return result;
+    } catch (e) {
+      console.error("[appInit] solveCaptcha error:", e);
+      return null;
+    }
+  }
+
+  /** Request free registration PKOIN from the proxy node.
+   *  Uses the same endpoint as Bastyon: free/balance with key='registration'. */
+  async requestFreeRegistration(address: string, captchaId: string, proxyId: string) {
+    if (!this.api) return null;
+    try {
+      const raw = await this.api.fetchauth(
+        "free/balance",
+        { address, captcha: captchaId, key: "registration" },
+        { proxy: proxyId }
+      );
+      const result = raw?.data ?? raw;
+      return result;
+    } catch (e) {
+      console.error("[appInit] requestFreeRegistration error:", e);
+      throw e;
+    }
+  }
+
+  /** Broadcast a UserInfo transaction for a newly registered account.
+   *  Includes encryption public keys so other users can encrypt messages for this account. */
+  async registerUserProfile(
+    address: string,
+    profile: { name: string; language: string; about: string },
+    encryptionPublicKeys?: string[],
+    image?: string
+  ) {
+    if (!this.actions) return null;
+    const userInfo = new UserInfo();
+    userInfo.name.set(superXSS(profile.name));
+    userInfo.language.set(superXSS(profile.language));
+    userInfo.about.set(superXSS(profile.about));
+    userInfo.image.set(superXSS(image || ""));
+    userInfo.site.set("");
+    userInfo.addresses.set([]);
+    userInfo.ref.set(null);
+    userInfo.keys.set(encryptionPublicKeys ?? null);
+    return this.actions.addActionAndSendIfCan(userInfo, null, address);
   }
 
   async editUserData({
@@ -166,7 +256,6 @@ export class AppInitializer {
     }
     try {
       const data = await this.api.rpc("getrawtransactionwithmessagebyid", [[txid]]);
-      console.log("[appInit] loadPost raw response:", data);
 
       // Response may be a single object or an array — normalize
       let raw: Record<string, unknown> | undefined;
@@ -207,6 +296,35 @@ export class AppInitializer {
     } catch (e) {
       console.error("[appInit] loadPost error:", e);
       return null;
+    }
+  }
+
+  /** Check if address has unspent outputs (PKOIN balance) via txunspent RPC.
+   *  Used to verify that free registration PKOIN has arrived before broadcasting UserInfo. */
+  async checkUnspents(address: string): Promise<boolean> {
+    if (!this.api) return false;
+    try {
+      await this.initApi();
+      await this.waitForApiReady();
+      const data = await this.api.rpc("txunspent", [[address], 1, 9999999]);
+      return Array.isArray(data) && data.length > 0;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Check if user account exists on the blockchain via getuserstate RPC.
+   *  Returns true if the account is confirmed, false if still pending. */
+  async checkUserState(address: string): Promise<boolean> {
+    if (!this.api) return false;
+    try {
+      await this.initApi();
+      const result = await this.api.rpc("getuserstate", [address]);
+      // If the RPC returns data, the account exists on-chain
+      return !!(result && (result as Record<string, unknown>).address);
+    } catch {
+      // "unknown" or error means not found yet
+      return false;
     }
   }
 

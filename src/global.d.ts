@@ -12,6 +12,7 @@ interface BitcoinLib {
     validateMnemonic(mnemonic: string): boolean;
     mnemonicToSeedSync(mnemonic: string): Buffer;
     entropyToMnemonic(entropy: Buffer): string;
+    generateMnemonic(): string;
   };
   bip32: {
     fromSeed(seed: Buffer): {
@@ -120,7 +121,15 @@ interface PocketnetInstanceType {
   };
   user: {
     address: { value: string | null };
-    keys: (() => { privateKey: Buffer; publicKey: Buffer }) | null;
+    keys: (() => { privateKey: Buffer; publicKey: Buffer; sign?: (hash: Buffer) => Buffer }) | null;
+    getstate?: () => number;
+    signature?: (session?: string) => {
+      nonce: string;
+      signature: string;
+      pubkey: string;
+      address: string;
+      v: number;
+    };
   };
 }
 
@@ -129,6 +138,16 @@ declare var Api: new (instance: PocketnetInstanceType) => {
   initIf(): Promise<void>;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   rpc(method: string, params?: unknown[]): Promise<any>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  fetchauth(path: string, data?: unknown, options?: { proxy?: string }): Promise<any>;
+  get: {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    proxywithwallet(): Promise<any>;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    proxywithwalletls(): Promise<any>;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    byid(id: string): any;
+  };
   wait: { ready(type: string, timeout: number): Promise<void> };
   ready: { use: boolean };
 };
