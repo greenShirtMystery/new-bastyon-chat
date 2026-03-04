@@ -234,20 +234,25 @@ export const useAuthStore = defineStore(NAMESPACE, () => {
       chatStore.setHelpers(matrixKit.value!, cryptoInstance);
 
       matrixService.setHandlers({
-        onSync: () => {
-          chatStore.refreshRooms();
+        onSync: (state) => {
+          chatStore.refreshRooms(state);
         },
         onTimeline: (event: unknown, room: unknown) => {
-          chatStore.handleTimelineEvent(event, room as string);
+          const roomId = typeof room === "string" ? room : (room as any)?.roomId;
+          if (roomId) chatStore.markRoomChanged(roomId);
+          if (roomId) chatStore.handleTimelineEvent(event, roomId);
         },
-        onMembership: () => {
+        onMembership: (_event: unknown, member: unknown) => {
+          const roomId = (member as any)?.roomId as string;
+          if (roomId) chatStore.markRoomChanged(roomId);
           chatStore.refreshRooms();
         },
         onMyMembership: (_room: unknown, membership: string, prevMembership: string | undefined) => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const roomId = (_room as any)?.roomId as string;
+          if (roomId) chatStore.markRoomChanged(roomId);
           // When kicked/banned from a room, remove it immediately from the UI
           if (prevMembership === "join" && (membership === "leave" || membership === "ban")) {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const roomId = (_room as any)?.roomId as string;
             if (roomId) {
               console.log("[auth] myMembership: kicked from room", roomId);
               chatStore.handleKicked(roomId);

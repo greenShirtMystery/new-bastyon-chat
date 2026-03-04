@@ -18,7 +18,7 @@ import { getmatrixid } from "@/shared/lib/matrix/functions";
 
 import type { MatrixCredentials, MatrixClient, MatrixSDK } from "./types";
 
-export type SyncCallback = () => void;
+export type SyncCallback = (state: "PREPARED" | "SYNCING") => void;
 export type TimelineCallback = (event: unknown, room: unknown) => void;
 export type MembershipCallback = (event: unknown, member: unknown) => void;
 export type TypingCallback = (event: unknown, member: unknown) => void;
@@ -196,11 +196,25 @@ export class MatrixClientService {
     this.client = userClient;
     this.initEvents();
 
+    // Sync filter: lazy-load members + minimal timeline for scalability (10K+ rooms)
+    const syncFilter = sdk.Filter.fromJson(
+      userData.user_id,
+      "bastion_sync_filter",
+      {
+        room: {
+          state: { lazy_load_members: true },
+          timeline: { limit: 1 },
+        },
+      },
+    );
+
     await userClient.startClient({
       pollTimeout: 60000,
-      resolveInvitesToProfiles: true,
-      initialSyncLimit: 20,
-      disablePresence: true
+      resolveInvitesToProfiles: false,
+      initialSyncLimit: 1,
+      disablePresence: true,
+      lazyLoadMembers: true,
+      filter: syncFilter,
     });
 
     return userClient;
@@ -318,7 +332,7 @@ export class MatrixClientService {
           this.chatsReady = true;
           console.log("[matrix-client] chatsReady = true");
         }
-        this.onSync?.();
+        this.onSync?.(state as "PREPARED" | "SYNCING");
       }
     });
   }
