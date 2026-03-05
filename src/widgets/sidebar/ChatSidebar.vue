@@ -38,21 +38,26 @@ watch(activeTab, (newVal, oldVal) => {
 
 const roomsLoading = ref(true);
 
-// Hide skeleton once rooms appear OR first room refresh completes (even if empty)
+// Hide loader only when rooms + user names are both ready
 let stopWatch: ReturnType<typeof watch> | undefined;
 const cancelLoading = () => {
   roomsLoading.value = false;
   stopWatch?.();
 };
 stopWatch = watch(
-  [() => chatStore.sortedRooms.length, () => chatStore.roomsInitialized],
-  ([len, initialized]) => {
-    if (len > 0 || initialized) cancelLoading();
+  [() => chatStore.sortedRooms.length, () => chatStore.namesReady],
+  ([len, names]) => {
+    // Both rooms and names loaded — reveal everything at once
+    if (len > 0 && names) cancelLoading();
   },
   { immediate: true },
 );
-// Safety fallback: 30s max (initial sync in new browser can be slow)
-setTimeout(cancelLoading, 30000);
+// Fallback: if rooms loaded but namesReady never fires (API fail) — show after 15s
+setTimeout(() => {
+  if (chatStore.sortedRooms.length > 0) cancelLoading();
+}, 15000);
+// Absolute fallback: 60s (user truly has no chats, or everything failed)
+setTimeout(cancelLoading, 60000);
 
 // Auto-switch away from "invites" tab when no invites remain
 watch(
@@ -158,7 +163,7 @@ const handleRoomCreated = () => {
         <FolderTabs v-model="activeFilter" />
 
         <div class="relative flex-1 overflow-hidden">
-          <RoomListSkeleton v-if="roomsLoading" />
+          <RoomListSkeleton v-if="roomsLoading" :first-load="true" />
           <transition v-else :name="'tab-slide-' + slideDirection">
             <ContactList
               :key="activeFilter"

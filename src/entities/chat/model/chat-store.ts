@@ -2,8 +2,10 @@ import { getMatrixClientService } from "@/entities/matrix";
 import type { MatrixKit } from "@/entities/matrix";
 import type { Pcrypto, PcryptoRoomInstance } from "@/entities/matrix/model/matrix-crypto";
 import { getmatrixid, hexEncode, hexDecode } from "@/shared/lib/matrix/functions";
-import { matrixIdToAddress, messageTypeFromMime, parseFileInfo, looksLikeProperName } from "../lib/chat-helpers";
+import { matrixIdToAddress, messageTypeFromMime, parseFileInfo, cleanMatrixIds, looksLikeProperName } from "../lib/chat-helpers";
 import { cacheRooms, getCachedRooms, cacheMessages, getCachedMessages } from "@/shared/lib/cache/chat-cache";
+import { useAuthStore } from "@/entities/auth/model/stores";
+import { useUserStore } from "@/entities/user/model";
 import { defineStore } from "pinia";
 import { computed, ref, shallowRef, triggerRef } from "vue";
 
@@ -109,14 +111,16 @@ function matrixRoomToChatRoom(room: any, kit: MatrixKit, myUserId: string, nameH
           : senderName;
         const isSelf = targetAddr === sender;
         let text = "";
-        if (membership === "join") text = isSelf ? `${senderName} joined the chat` : `${senderName} added ${targetName}`;
-        else if (membership === "leave") text = isSelf ? `${senderName} left the chat` : `${senderName} removed ${targetName}`;
-        else if (membership === "invite") text = `${senderName} invited ${targetName}`;
+        let template = "";
+        if (membership === "join") { text = isSelf ? `${senderName} joined the chat` : `${senderName} added ${targetName}`; template = isSelf ? "{sender} joined the chat" : "{sender} added {target}"; }
+        else if (membership === "leave") { text = isSelf ? `${senderName} left the chat` : `${senderName} removed ${targetName}`; template = isSelf ? "{sender} left the chat" : "{sender} removed {target}"; }
+        else if (membership === "invite") { text = `${senderName} invited ${targetName}`; template = "{sender} invited {target}"; }
         if (text) {
           lastSystemMessage = {
             id: raw.event_id as string, roomId, senderId: sender,
             content: text, timestamp: (raw.origin_server_ts as number) ?? 0,
             status: MessageStatus.sent, type: MessageType.system,
+            systemMeta: { template, senderAddr: sender, targetAddr: targetAddr !== sender ? targetAddr : undefined },
           };
         }
       } else if (raw.type === "m.call.hangup") {
@@ -128,11 +132,13 @@ function matrixRoomToChatRoom(room: any, kit: MatrixKit, myUserId: string, nameH
         const sender = matrixIdToAddress(raw.sender as string);
         const senderName = nameHints?.[sender] || sender.slice(0, 8) + "...";
         const text = reason === "invite_timeout" ? `Missed call from ${senderName}` : `Call with ${senderName}`;
+        const callTemplate = reason === "invite_timeout" ? "Missed call from {sender}" : "Call with {sender}";
         lastSystemMessage = {
           id: raw.event_id as string, roomId, senderId: sender,
           content: text, timestamp: (raw.origin_server_ts as number) ?? 0,
           status: MessageStatus.sent, type: MessageType.system,
           callInfo: { callType: isVideo ? "video" : "voice", missed: reason === "invite_timeout", duration: Math.round(durationMs / 1000) },
+          systemMeta: { template: callTemplate, senderAddr: sender },
         };
       }
     }
@@ -228,6 +234,8 @@ export const useChatStore = defineStore(NAMESPACE, () => {
 
   /** True after the first refreshRoomsImmediate completes (rooms list is authoritative) */
   const roomsInitialized = ref(false);
+  /** True after user profiles have been loaded for room members */
+  const namesReady = ref(false);
 
   // Cache for decrypted room previews — persists across refreshRooms() rebuilds
   const decryptedPreviewCache = new Map<string, string>();
@@ -240,6 +248,7 @@ export const useChatStore = defineStore(NAMESPACE, () => {
   let lastSyncState: "PREPARED" | "SYNCING" | null = null;
   let lastFullRefresh = 0;
   const FULL_REFRESH_INTERVAL = 60_000; // Reconciliation fallback
+  let membersLoadedOnce = false; // One-time member loading for stale lazy-load cache
 
   /** Mark a room as changed so the next incremental refresh processes it */
   const markRoomChanged = (roomId: string) => {
@@ -287,22 +296,30 @@ export const useChatStore = defineStore(NAMESPACE, () => {
   const userDisplayNames = ref<Record<string, string>>({});
 
   /** Look up a user's display name; falls back to truncated address.
-   *  Accepts both raw Bastyon addresses and hex-encoded IDs (from room.members). */
+   *  Accepts both raw Bastyon addresses and hex-encoded IDs (from room.members).
+   *  Also checks the user store (restored from localStorage on startup) to avoid
+   *  showing raw addresses while Matrix sync is still in progress. */
   const getDisplayName = (address: string): string => {
     if (!address) return "?";
     // Direct lookup (raw address)
     const cached = userDisplayNames.value[address];
     if (cached) return cached;
     // Try hex-decoded lookup (room.members stores hex IDs, cache uses raw addresses)
+    let resolvedAddr = address;
     if (/^[a-f0-9]+$/i.test(address)) {
       try {
         const decoded = hexDecode(address);
-        if (decoded !== address) {
+        if (decoded !== address && /^[A-Za-z0-9]+$/.test(decoded)) {
           const decodedCached = userDisplayNames.value[decoded];
           if (decodedCached) return decodedCached;
+          resolvedAddr = decoded;
         }
       } catch { /* not a valid hex string */ }
     }
+    // Check user store (synchronously restored from localStorage — available before Matrix sync)
+    const uStore = useUserStore();
+    const userProfile = uStore.users[resolvedAddr];
+    if (userProfile?.name) return userProfile.name;
     // Fallback: truncated address
     if (address.length > 16) return address.slice(0, 8) + "\u2026" + address.slice(-4);
     return address;
@@ -465,14 +482,16 @@ export const useChatStore = defineStore(NAMESPACE, () => {
   );
 
   const sortedRooms = computed(() =>
-    [...rooms.value].sort((a, b) => {
-      // Pinned rooms first
-      const aPinned = pinnedRoomIds.value.has(a.id) ? 1 : 0;
-      const bPinned = pinnedRoomIds.value.has(b.id) ? 1 : 0;
-      if (aPinned !== bPinned) return bPinned - aPinned;
-      // Chronological — most recent activity first (matches original bastyon-chat)
-      return b.updatedAt - a.updatedAt;
-    })
+    [...rooms.value]
+      .filter(r => !deletedRoomIds.value.has(r.id))
+      .sort((a, b) => {
+        // Pinned rooms first
+        const aPinned = pinnedRoomIds.value.has(a.id) ? 1 : 0;
+        const bPinned = pinnedRoomIds.value.has(b.id) ? 1 : 0;
+        if (aPinned !== bPinned) return bPinned - aPinned;
+        // Chronological — most recent activity first (matches original bastyon-chat)
+        return b.updatedAt - a.updatedAt;
+      })
   );
 
   const totalUnread = computed(() =>
@@ -524,12 +543,24 @@ export const useChatStore = defineStore(NAMESPACE, () => {
     // Preserve existing room data — addRoom/addMessage/cache may have set data that Matrix can't resolve yet
     const prevNameMap = new Map(rooms.value.map(r => [r.id, r.name]));
     const prevLastMessageMap = new Map(rooms.value.map(r => [r.id, r.lastMessage]));
+    const prevMembersMap = new Map(rooms.value.map(r => [r.id, r.members]));
+    const prevAvatarMap = new Map(rooms.value.map(r => [r.id, r.avatar]));
     const prevActiveRoom = activeRoomId.value ? getRoomById(activeRoomId.value) : undefined;
 
     const interactiveRooms = filterInteractiveRooms(matrixRooms);
 
     const newRooms = interactiveRooms
-      .map((r) => buildChatRoom(r, kit, myUserId, prevNameMap, prevLastMessageMap));
+      .map((r) => {
+        const room = buildChatRoom(r, kit, myUserId, prevNameMap, prevLastMessageMap);
+        // Preserve cached members if Matrix SDK returned fewer (lazy-load issue)
+        const prevMembers = prevMembersMap.get(room.id);
+        if (prevMembers && prevMembers.length > room.members.length) {
+          room.members = prevMembers;
+          const prevAvatar = prevAvatarMap.get(room.id);
+          if (prevAvatar) room.avatar = prevAvatar;
+        }
+        return room;
+      });
 
     // Ensure active room is in the list before assigning (prevents "no chat selected" flash)
     if (prevActiveRoom && !newRooms.some(r => r.id === prevActiveRoom.id)) {
@@ -540,11 +571,114 @@ export const useChatStore = defineStore(NAMESPACE, () => {
     rebuildRoomsMap();
 
     // Build user display name cache from room members
-    updateDisplayNames(interactiveRooms, kit);
+    // Only run loadMissingMembers once AND only when we have actual rooms
+    const willLoadMembers = !membersLoadedOnce && interactiveRooms.length > 0;
+    updateDisplayNames(interactiveRooms, kit, willLoadMembers);
+
+    // One-time: load members for rooms with stale lazy-load cache (only 1 member = self)
+    if (willLoadMembers) {
+      membersLoadedOnce = true;
+      loadMissingMembers(interactiveRooms, kit, myUserId);
+    }
 
     // Decrypt [encrypted] previews asynchronously — results go to cache
     decryptRoomPreviews(interactiveRooms).then(() => debouncedCacheRooms());
     debouncedCacheRooms();
+  };
+
+  /** One-time: load members from server for rooms with only self as member.
+   *  Also loads user profiles for ALL room members (including rooms with summary.members).
+   *  Collects all updates, then applies once at the end to avoid reactive cascades. */
+  const loadMissingMembers = async (matrixRooms: any[], kit: MatrixKit, myUserId: string) => {
+    const myHexId = getmatrixid(myUserId);
+    const toLoad: any[] = [];
+    const allAddresses = new Set<string>();
+
+    // Collect addresses from ALL rooms + find rooms that need member loading
+    for (const mr of matrixRooms) {
+      const members = kit.getRoomMembers(mr);
+      const memberIds = members.map((m: Record<string, unknown>) => getmatrixid(m.userId as string));
+      const others = memberIds.filter(id => id !== myHexId);
+
+      // Collect addresses from every room member
+      for (const mid of memberIds) {
+        const addr = hexDecode(mid);
+        if (/^[A-Za-z0-9]+$/.test(addr)) allAddresses.add(addr);
+      }
+
+      // Also collect from our cached ChatRoom members
+      const room = getRoomById(mr.roomId as string);
+      if (room) {
+        for (const mid of room.members) {
+          const addr = hexDecode(mid);
+          if (/^[A-Za-z0-9]+$/.test(addr)) allAddresses.add(addr);
+        }
+      }
+
+      if (others.length === 0 && typeof mr.loadMembersIfNeeded === "function") {
+        toLoad.push(mr);
+      }
+    }
+
+    // Phase 1: Load missing members from server (no reactive updates)
+    if (toLoad.length > 0) {
+      const BATCH = 20;
+      for (let i = 0; i < toLoad.length; i += BATCH) {
+        const batch = toLoad.slice(i, i + BATCH);
+        await Promise.all(batch.map(async (mr: any) => {
+          try { await mr.loadMembersIfNeeded(); } catch { /* ignore */ }
+        }));
+        await new Promise(r => setTimeout(r, 0));
+      }
+
+      // Collect newly loaded member addresses + room updates
+      for (const mr of toLoad) {
+        const members = kit.getRoomMembers(mr);
+        for (const m of members) {
+          const addr = hexDecode(getmatrixid((m as Record<string, unknown>).userId as string));
+          if (/^[A-Za-z0-9]+$/.test(addr)) allAddresses.add(addr);
+        }
+      }
+    }
+
+    // Phase 2: Load ALL user profiles in one batch
+    const uStore = useUserStore();
+    if (allAddresses.size > 0) {
+      await uStore.loadUsersBatch([...allAddresses]);
+    }
+
+    // Phase 3: Apply room member updates from loaded rooms
+    const roomUpdates: Array<{ room: ChatRoom; memberIds: string[]; avatar?: string }> = [];
+    for (const mr of toLoad) {
+      const roomId = mr.roomId as string;
+      const room = getRoomById(roomId);
+      if (!room) continue;
+      const members = kit.getRoomMembers(mr);
+      const memberIds = members.map((m: Record<string, unknown>) => getmatrixid(m.userId as string));
+      if (memberIds.length <= room.members.length) continue;
+      let avatar: string | undefined;
+      if (!room.isGroup) {
+        const otherHex = memberIds.find(id => id !== myHexId);
+        if (otherHex) {
+          const decoded = hexDecode(otherHex);
+          if (/^[A-Za-z0-9]+$/.test(decoded)) {
+            avatar = `__pocketnet__:${decoded}`;
+          }
+        }
+      }
+      roomUpdates.push({ room, memberIds, avatar });
+    }
+
+    // Single reactive update
+    for (const { room, memberIds, avatar } of roomUpdates) {
+      room.members = memberIds;
+      if (avatar) room.avatar = avatar;
+    }
+    if (roomUpdates.length > 0) triggerRef(rooms);
+
+    // Persist and signal ready
+    debouncedCacheRooms();
+    namesReady.value = true;
   };
 
   /** Incremental room refresh — only processes changed rooms */
@@ -593,6 +727,11 @@ export const useChatStore = defineStore(NAMESPACE, () => {
       const chatRoom = buildChatRoom(matrixRoom, kit, myUserId);
       const existing = roomsMap.get(roomId);
       if (existing) {
+        // Preserve richer members list from cache/previous load
+        if (existing.members.length > chatRoom.members.length) {
+          chatRoom.members = existing.members;
+          chatRoom.avatar = existing.avatar;
+        }
         // Update in-place to preserve Vue reactivity references
         Object.assign(existing, chatRoom);
       } else {
@@ -694,8 +833,11 @@ export const useChatStore = defineStore(NAMESPACE, () => {
     return chatRoom;
   };
 
-  /** Update display name cache from room members */
-  const updateDisplayNames = (matrixRooms: any[], kit: MatrixKit) => {
+  /** Update display name cache from room members and batch-load user profiles.
+   *  @param skipNamesReady — if true, don't set namesReady (loadMissingMembers will do it) */
+  const updateDisplayNames = (matrixRooms: any[], kit: MatrixKit, skipNamesReady = false) => {
+    const uStore = useUserStore();
+    const addressesToLoad: string[] = [];
     for (const r of matrixRooms) {
       const members = kit.getRoomMembers(r);
       for (const m of members) {
@@ -705,7 +847,18 @@ export const useChatStore = defineStore(NAMESPACE, () => {
         if (addr && dn && dn !== addr) {
           userDisplayNames.value[addr] = dn;
         }
+        // Collect valid addresses for batch loading (like original bastyon-chat usersInfo)
+        if (addr && /^[A-Za-z0-9]+$/.test(addr)) {
+          addressesToLoad.push(addr);
+        }
       }
+    }
+    // Batch-load all user profiles in one API call
+    if (addressesToLoad.length > 0) {
+      uStore.loadUsersBatch([...new Set(addressesToLoad)])
+        .finally(() => { if (!skipNamesReady) namesReady.value = true; });
+    } else if (!skipNamesReady && rooms.value.length > 0) {
+      namesReady.value = true;
     }
   };
 
@@ -773,10 +926,10 @@ export const useChatStore = defineStore(NAMESPACE, () => {
       const roomId = matrixRoom.roomId as string;
       if (onlyRoomIds && !onlyRoomIds.has(roomId)) continue;
       if (decryptedPreviewCache.has(roomId)) continue; // already decrypted
-      const failure = decryptFailedRooms.get(roomId);
-      if (failure) {
-        if (failure.count >= DECRYPT_MAX_RETRIES) continue; // exhausted retries
-        if (Date.now() - failure.lastAttempt < DECRYPT_RETRY_DELAY) continue; // too soon
+      const failInfo = decryptFailedRooms.get(roomId);
+      if (failInfo) {
+        if (failInfo.count >= DECRYPT_MAX_RETRIES) continue;
+        if (Date.now() - failInfo.lastAttempt < DECRYPT_RETRY_DELAY) continue;
       }
       const room = getRoomById(roomId);
       if (!room?.lastMessage || room.lastMessage.content !== "[encrypted]") continue;
@@ -785,7 +938,7 @@ export const useChatStore = defineStore(NAMESPACE, () => {
     if (toDecrypt.length === 0) return;
 
     // Cap at 20 rooms per cycle to avoid blocking
-    const capped = toDecrypt.slice(0, 50);
+    const capped = toDecrypt.slice(0, 20);
 
     // Decrypt in small batches (5 at a time) with incremental UI updates
     const BATCH = 5;
@@ -825,14 +978,12 @@ export const useChatStore = defineStore(NAMESPACE, () => {
                 }
               }
             } catch {
-              const prev = decryptFailedRooms.get(roomId);
-              decryptFailedRooms.set(roomId, { count: (prev?.count ?? 0) + 1, lastAttempt: Date.now() });
+              decryptFailedRooms.set(roomId, { count: (decryptFailedRooms.get(roomId)?.count ?? 0) + 1, lastAttempt: Date.now() });
             }
             break;
           }
         } catch {
-          const prev = decryptFailedRooms.get(roomId);
-          decryptFailedRooms.set(roomId, { count: (prev?.count ?? 0) + 1, lastAttempt: Date.now() });
+          decryptFailedRooms.set(roomId, { count: (decryptFailedRooms.get(roomId)?.count ?? 0) + 1, lastAttempt: Date.now() });
         }
       }));
 
@@ -919,8 +1070,9 @@ export const useChatStore = defineStore(NAMESPACE, () => {
 
   /** Decline an invite: leave the room and remove from list */
   const declineInvite = async (roomId: string) => {
-    // Mark as deleted so refreshRooms won't re-add
+    // Mark as deleted so refreshRooms won't re-add (persisted to localStorage)
     deletedRoomIds.value = new Set([...deletedRoomIds.value, roomId]);
+    saveDeletedRooms(deletedRoomIds.value);
 
     // Optimistic: remove from UI
     rooms.value = rooms.value.filter((r) => r.id !== roomId);
@@ -951,14 +1103,25 @@ export const useChatStore = defineStore(NAMESPACE, () => {
   };
 
   // Client-side deleted rooms set (matches bastyon-chat's deletedrooms map).
-  // Prevents refreshRooms from re-adding a room before the server sync catches up.
-  const deletedRoomIds = ref<Set<string>>(new Set());
+  // Persisted to localStorage so deletions survive page reload.
+  const DELETED_ROOMS_KEY = "bastyon-chat-deleted-rooms";
+  const loadDeletedRooms = (): Set<string> => {
+    try {
+      const stored = localStorage.getItem(DELETED_ROOMS_KEY);
+      return stored ? new Set(JSON.parse(stored)) : new Set();
+    } catch { return new Set(); }
+  };
+  const saveDeletedRooms = (ids: Set<string>) => {
+    try { localStorage.setItem(DELETED_ROOMS_KEY, JSON.stringify([...ids])); } catch { /* ignore */ }
+  };
+  const deletedRoomIds = ref<Set<string>>(loadDeletedRooms());
 
   /** Remove a room: kick other members → leave → forget → remove from local state.
    *  Kicks all other joined members so the chat disappears for everyone (both 1:1 and groups). */
   const removeRoom = async (roomId: string) => {
-    // Mark as deleted so refreshRooms won't re-add it
+    // Mark as deleted so refreshRooms won't re-add it (persisted to localStorage)
     deletedRoomIds.value = new Set([...deletedRoomIds.value, roomId]);
+    saveDeletedRooms(deletedRoomIds.value);
 
     // Optimistic: remove from UI immediately
     rooms.value = rooms.value.filter((r) => r.id !== roomId);
@@ -996,6 +1159,19 @@ export const useChatStore = defineStore(NAMESPACE, () => {
         console.warn("[chat-store] removeRoom kick members error:", e);
       }
 
+      // Delete room alias before leaving (so the alias can be reused for new chats)
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const matrixRoom = matrixService.getRoom(roomId) as any;
+        const canonicalAlias = matrixRoom?.getCanonicalAlias?.() as string | undefined;
+        if (canonicalAlias) {
+          await matrixService.deleteAlias(canonicalAlias);
+          console.log("[chat-store] removeRoom: deleted alias", canonicalAlias);
+        }
+      } catch (aliasErr) {
+        console.warn("[chat-store] removeRoom: deleteAlias failed:", aliasErr);
+      }
+
       await matrixService.leaveRoom(roomId);
       await matrixService.forgetRoom(roomId);
     } catch (e) {
@@ -1006,6 +1182,7 @@ export const useChatStore = defineStore(NAMESPACE, () => {
   /** Leave a group chat without kicking other members. */
   const leaveGroup = async (roomId: string) => {
     deletedRoomIds.value = new Set([...deletedRoomIds.value, roomId]);
+    saveDeletedRooms(deletedRoomIds.value);
 
     // Optimistic: remove from UI
     rooms.value = rooms.value.filter((r) => r.id !== roomId);
@@ -1136,7 +1313,7 @@ export const useChatStore = defineStore(NAMESPACE, () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       return banned.map((m: any) => ({
         userId: m.userId as string,
-        name: (m.rawDisplayName as string) || (m.name as string) || matrixIdToAddress(m.userId as string),
+        name: (m.rawDisplayName as string) || (m.name as string) || (() => { const a = matrixIdToAddress(m.userId as string); return /^[A-Za-z0-9]+$/.test(a) ? a : "?"; })(),
       }));
     } catch {
       return [];
@@ -1273,7 +1450,25 @@ export const useChatStore = defineStore(NAMESPACE, () => {
   const removeMessage = (roomId: string, messageId: string) => {
     const roomMessages = messages.value[roomId];
     if (roomMessages) {
-      messages.value[roomId] = roomMessages.filter((m) => m.id !== messageId);
+      const msg = roomMessages.find((m) => m.id === messageId);
+      if (msg) {
+        // Mark as deleted instead of removing — shows "Message deleted" like WhatsApp
+        msg.deleted = true;
+        msg.content = "";
+        msg.fileInfo = undefined;
+        msg.replyTo = undefined;
+        msg.reactions = undefined;
+        msg.pollInfo = undefined;
+        msg.transferInfo = undefined;
+        msg.forwardedFrom = undefined;
+        triggerRef(messages);
+      }
+      // Update room's lastMessage to show "Message deleted"
+      const room = getRoomById(roomId);
+      if (room && msg) {
+        room.lastMessage = { ...msg };
+        triggerRef(rooms);
+      }
     }
   };
 
@@ -1308,7 +1503,9 @@ export const useChatStore = defineStore(NAMESPACE, () => {
     }
   };
 
-  /** Build a human-readable system message for room state events */
+  /** Build a human-readable system message for room state events.
+   *  Stores a template + raw addresses in systemMeta so names can be
+   *  re-resolved at render time (avoids stale truncated addresses). */
   const buildSystemMessage = (raw: Record<string, unknown>, roomId: string): Message | null => {
     const content = raw.content as Record<string, unknown>;
     const eventType = raw.type as string;
@@ -1316,11 +1513,13 @@ export const useChatStore = defineStore(NAMESPACE, () => {
     const senderName = getDisplayName(sender) || sender.slice(0, 8) + "...";
 
     let text = "";
+    let template = "";
+    let targetAddr: string | undefined;
 
     if (eventType === "m.room.member") {
       const membership = content.membership as string;
       const stateKey = raw.state_key as string | undefined;
-      const targetAddr = stateKey ? matrixIdToAddress(stateKey) : sender;
+      targetAddr = stateKey ? matrixIdToAddress(stateKey) : sender;
       const targetName = targetAddr !== sender
         ? (getDisplayName(targetAddr) || targetAddr.slice(0, 8) + "...")
         : senderName;
@@ -1328,12 +1527,16 @@ export const useChatStore = defineStore(NAMESPACE, () => {
 
       if (membership === "join") {
         text = isSelf ? `${senderName} joined the chat` : `${senderName} added ${targetName}`;
+        template = isSelf ? "{sender} joined the chat" : "{sender} added {target}";
       } else if (membership === "leave") {
         text = isSelf ? `${senderName} left the chat` : `${senderName} removed ${targetName}`;
+        template = isSelf ? "{sender} left the chat" : "{sender} removed {target}";
       } else if (membership === "ban") {
         text = `${senderName} banned ${targetName}`;
+        template = "{sender} banned {target}";
       } else if (membership === "invite") {
         text = `${senderName} invited ${targetName}`;
+        template = "{sender} invited {target}";
       } else {
         return null;
       }
@@ -1344,20 +1547,28 @@ export const useChatStore = defineStore(NAMESPACE, () => {
       const isHash = /^#?[0-9a-f]{20,}$/i.test(newName);
       if (isHash || !newName) {
         text = `${senderName} updated the room`;
+        template = "{sender} updated the room";
       } else {
         text = `${senderName} changed the room name to "${newName}"`;
+        template = `{sender} changed the room name to "${newName}"`;
       }
     } else if (eventType === "m.room.power_levels") {
       text = `${senderName} changed room permissions`;
+      template = "{sender} changed room permissions";
     } else if (eventType === "m.room.avatar") {
       text = `${senderName} changed the room photo`;
+      template = "{sender} changed the room photo";
     } else if (eventType === "m.room.topic") {
       const newTopic = (content.topic as string) || "";
       text = newTopic
         ? `${senderName} set the room description`
         : `${senderName} cleared the room description`;
+      template = newTopic
+        ? "{sender} set the room description"
+        : "{sender} cleared the room description";
     } else if (eventType === "m.room.pinned_events") {
       text = `${senderName} pinned a message`;
+      template = "{sender} pinned a message";
     } else {
       return null;
     }
@@ -1366,10 +1577,11 @@ export const useChatStore = defineStore(NAMESPACE, () => {
       id: raw.event_id as string,
       roomId,
       senderId: sender,
-      content: text,
+      content: cleanMatrixIds(text),
       timestamp: (raw.origin_server_ts as number) ?? 0,
       status: MessageStatus.sent,
       type: MessageType.system,
+      systemMeta: { template, senderAddr: sender, targetAddr: targetAddr !== sender ? targetAddr : undefined },
     };
   };
 
@@ -1444,6 +1656,22 @@ export const useChatStore = defineStore(NAMESPACE, () => {
     if (raw.type !== "m.room.message") return null;
 
     const content = raw.content as Record<string, unknown>;
+
+    // Redacted message — return deleted placeholder
+    const contentKeys = content ? Object.keys(content) : [];
+    const isRedacted = contentKeys.length === 0 || (raw.unsigned as any)?.redacted_because;
+    if (isRedacted) {
+      return {
+        id: raw.event_id as string,
+        roomId,
+        senderId: matrixIdToAddress(raw.sender as string),
+        content: "",
+        timestamp: (raw.origin_server_ts as number) ?? 0,
+        status: MessageStatus.sent,
+        type: MessageType.text,
+        deleted: true,
+      };
+    }
 
     // Skip edit events — they're handled separately in parseTimelineEvents
     const relTo = content["m.relates_to"] as Record<string, unknown> | undefined;
@@ -1594,12 +1822,23 @@ export const useChatStore = defineStore(NAMESPACE, () => {
       } else if (raw.type === "org.matrix.msc3381.poll.end" && raw.content) {
         pollEndEvents.push(raw);
       } else if (raw.type === "m.room.message" && raw.content) {
-        const rel = (raw.content as Record<string, unknown>)["m.relates_to"] as Record<string, unknown> | undefined;
-        if (rel?.rel_type === "m.replace" && rel?.event_id) {
-          editEvents.push(raw);
-        } else {
+        // Check if this message has been redacted (content cleared by server)
+        const contentKeys = Object.keys(raw.content as Record<string, unknown>);
+        const isRedacted = contentKeys.length === 0 || (raw.unsigned as any)?.redacted_because;
+        if (isRedacted) {
+          // Still include as a deleted placeholder
           messageEvents.push(event);
+        } else {
+          const rel = (raw.content as Record<string, unknown>)["m.relates_to"] as Record<string, unknown> | undefined;
+          if (rel?.rel_type === "m.replace" && rel?.event_id) {
+            editEvents.push(raw);
+          } else {
+            messageEvents.push(event);
+          }
         }
+      } else if (raw.type === "m.room.message") {
+        // Redacted message with empty/null content — include as deleted placeholder
+        messageEvents.push(event);
       } else if (stateEventTypes.includes(raw.type as string) && raw.content) {
         // State events: membership changes, room name changes, power level changes
         messageEvents.push(event);
@@ -1613,7 +1852,7 @@ export const useChatStore = defineStore(NAMESPACE, () => {
       messageEvents.map((event) => parseSingleEvent(event, roomId, roomCrypto).catch(() => null))
     );
 
-    const msgs = results.filter((m): m is Message => m !== null && m.content !== "");
+    const msgs = results.filter((m): m is Message => m !== null && (m.content !== "" || m.deleted === true));
 
     // Apply edits to messages (decrypt if needed)
     const msgMap = new Map(msgs.map(m => [m.id, m]));
@@ -1805,25 +2044,41 @@ export const useChatStore = defineStore(NAMESPACE, () => {
         return;
       }
 
-      // Always scrollback when timeline has fewer events than threshold.
-      // With sync filter limiting events per room, the SDK may only have a handful
-      // of events after sync — scrollback ensures the user sees enough history.
-      const MIN_EVENTS_THRESHOLD = 15;
+      // Count how many actual message events sync has provided.
+      // Sync typically only provides 1-2 recent events per room (for preview).
+      // We need scrollback to fetch enough messages for a proper chat view.
       let timelineEvents = getTimelineEvents(matrixRoom);
+      const MIN_MESSAGES = 20;
+      const MAX_SCROLLBACK_ATTEMPTS = 5;
 
-      if (timelineEvents.length < MIN_EVENTS_THRESHOLD) {
-        try {
-          await matrixService.scrollback(roomId, 30);
-        } catch (e) {
-          console.warn("[chat-store] scrollback failed:", e);
-        }
-        timelineEvents = getTimelineEvents(matrixRoom);
+      const countMessages = (events: unknown[]) =>
+        events.filter((ev) => {
+          const raw = getRawEvent(ev);
+          return raw?.type === "m.room.message";
+        }).length;
 
-        // Retry once if timeline is still empty — sync may not have populated it yet
+      let msgCount = countMessages(timelineEvents);
+
+      if (msgCount < MIN_MESSAGES) {
+        // Retry once if timeline is completely empty — sync may not have populated it yet
         if (timelineEvents.length === 0) {
           await new Promise(r => setTimeout(r, 1500));
-          try { await matrixService.scrollback(roomId, 30); } catch { /* ignore */ }
+        }
+
+        // Keep scrolling back until we have enough messages or hit the beginning
+        for (let attempt = 0; attempt < MAX_SCROLLBACK_ATTEMPTS && msgCount < MIN_MESSAGES; attempt++) {
+          const prevCount = timelineEvents.length;
+          try {
+            await matrixService.scrollback(roomId, 50);
+          } catch (e) {
+            console.warn("[chat-store] scrollback failed:", e);
+            break;
+          }
           timelineEvents = getTimelineEvents(matrixRoom);
+          msgCount = countMessages(timelineEvents);
+
+          // No new events loaded — we've reached the beginning of the room
+          if (timelineEvents.length === prevCount) break;
         }
       }
 
@@ -1861,7 +2116,7 @@ export const useChatStore = defineStore(NAMESPACE, () => {
       const prevCount = getTimelineEvents(matrixRoom).length;
 
       try {
-        await matrixService.scrollback(roomId, 25);
+        await matrixService.scrollback(roomId, 50);
       } catch (e) {
         console.warn("[chat-store] loadMoreMessages scrollback failed:", e);
         return false;
@@ -2074,9 +2329,15 @@ export const useChatStore = defineStore(NAMESPACE, () => {
 
       // Handle poll start events (MSC3381)
       if (raw.type === "org.matrix.msc3381.poll.start") {
-        const matrixService = getMatrixClientService();
-        const myUserId = matrixService.getUserId();
-        if (myUserId && raw.sender === myUserId) return; // skip own events
+        const matrixService2 = getMatrixClientService();
+        const myUserId2 = matrixService2.getUserId();
+        if (myUserId2 && raw.sender === myUserId2) {
+          const roomMsgs2 = messages.value[roomId];
+          const hasPending2 = roomMsgs2?.some(
+            (m) => m.senderId === matrixIdToAddress(myUserId2) && m.status === MessageStatus.sending
+          );
+          if (hasPending2) return; // skip own echo on sending device
+        }
         const pollContent = raw.content as Record<string, unknown>;
         const pollStart = (pollContent["org.matrix.msc3381.poll.start"] ?? pollContent) as Record<string, unknown>;
         const question = ((pollStart.question as Record<string, unknown>)?.body as string) ?? (pollStart.question as string) ?? "";
@@ -2176,13 +2437,20 @@ export const useChatStore = defineStore(NAMESPACE, () => {
         return;
       }
 
-      // Skip our own events — they're already in the list via optimistic add.
-      // Processing them here causes race conditions: the timeline echo may arrive
-      // before updateMessageId replaces tempId → duplicate check fails → decrypt
-      // errors appear because the event gets re-processed.
+      // Cross-device sync: only skip own echo on the SENDING device.
+      // If there's a pending optimistic message (status=sending) in this room,
+      // this is the sending device's echo — skip it (updateMessageId handles it).
+      // Otherwise, this is from another device — process it normally.
       const matrixService = getMatrixClientService();
       const myUserId = matrixService.getUserId();
-      if (myUserId && raw.sender === myUserId) return;
+      if (myUserId && raw.sender === myUserId) {
+        const roomMsgs = messages.value[roomId];
+        const hasPending = roomMsgs?.some(
+          (m) => m.senderId === matrixIdToAddress(myUserId) && m.status === MessageStatus.sending
+        );
+        if (hasPending) return;
+        // No pending optimistic → message is from another device, continue processing
+      }
 
       // Handle donation/transfer messages (m.notice with txId)
       const mtype0 = content.msgtype as string;
@@ -2415,7 +2683,28 @@ export const useChatStore = defineStore(NAMESPACE, () => {
         }
       }
 
-      // If we didn't find it as a known reaction eventId, re-parse reactions
+      // Check if the redacted event is a message — mark as deleted
+      const redactedMsg = roomMessages.find(m => m.id === redactedEventId);
+      if (redactedMsg && !redactedMsg.deleted) {
+        redactedMsg.deleted = true;
+        redactedMsg.content = "";
+        redactedMsg.fileInfo = undefined;
+        redactedMsg.replyTo = undefined;
+        redactedMsg.reactions = undefined;
+        redactedMsg.pollInfo = undefined;
+        redactedMsg.transferInfo = undefined;
+        redactedMsg.forwardedFrom = undefined;
+        // Update room lastMessage preview
+        const chatRoom = getRoomById(roomId);
+        if (chatRoom && chatRoom.lastMessage?.id === redactedEventId) {
+          chatRoom.lastMessage = { ...redactedMsg };
+          triggerRef(rooms);
+        }
+        triggerRef(messages);
+        return;
+      }
+
+      // If we didn't find it as a known reaction eventId or message, re-parse reactions
       // from the Matrix room timeline to get accurate state
       const matrixService = getMatrixClientService();
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -2507,7 +2796,20 @@ export const useChatStore = defineStore(NAMESPACE, () => {
         // Backfill callInfo for lastMessage in cached rooms
         const lastMsgs = cachedRooms.map(r => r.lastMessage).filter((m): m is Message => !!m);
         backfillCallInfo(lastMsgs);
+        // Sanitize cached system messages that may contain raw Matrix IDs
+        for (const m of lastMsgs) {
+          if (m.content.includes("@") && /@[a-f0-9]{20,}:/i.test(m.content)) {
+            m.content = cleanMatrixIds(m.content);
+          }
+        }
+        // Room names are NOT patched here — resolved at render time.
         rooms.value = cachedRooms;
+        // User profiles loaded synchronously from localStorage — check if enough for name resolution
+        const uStore = useUserStore();
+        const cachedUserCount = Object.keys(uStore.users).length;
+        if (cachedUserCount > 5) {
+          namesReady.value = true;
+        }
       }
     } catch (e) {
       console.warn("[chat-store] loadCachedRooms failed:", e);
@@ -2539,6 +2841,12 @@ export const useChatStore = defineStore(NAMESPACE, () => {
       if (cached.length > 0 && !messages.value[roomId]?.length) {
         const msgs = cached as Message[];
         backfillCallInfo(msgs);
+        // Sanitize cached messages that may contain raw Matrix IDs
+        for (const m of msgs) {
+          if (m.content.includes("@") && /@[a-f0-9]{20,}:/i.test(m.content)) {
+            m.content = cleanMatrixIds(m.content);
+          }
+        }
         messages.value[roomId] = msgs;
       }
     } catch (e) {
@@ -2596,6 +2904,7 @@ export const useChatStore = defineStore(NAMESPACE, () => {
     removeMessage,
     removeRoom,
     roomsInitialized,
+    namesReady,
     replyingTo,
     rooms,
     selectedMessageIds,

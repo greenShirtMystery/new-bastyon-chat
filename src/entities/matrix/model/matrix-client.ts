@@ -196,25 +196,13 @@ export class MatrixClientService {
     this.client = userClient;
     this.initEvents();
 
-    // Sync filter: lazy-load members + minimal timeline for scalability (10K+ rooms)
-    const syncFilter = sdk.Filter.fromJson(
-      userData.user_id,
-      "bastion_sync_filter",
-      {
-        room: {
-          state: { lazy_load_members: true },
-          timeline: { limit: 10 },
-        },
-      },
-    );
-
+    // Sync config: lazy loading for speed, members loaded explicitly when needed
     await userClient.startClient({
       pollTimeout: 60000,
-      resolveInvitesToProfiles: false,
+      resolveInvitesToProfiles: true,
       initialSyncLimit: 10,
       disablePresence: true,
       lazyLoadMembers: true,
-      filter: syncFilter,
     });
 
     return userClient;
@@ -262,9 +250,9 @@ export class MatrixClientService {
         return;
       }
 
-      if (msg.getSender() !== userId) {
-        this.onTimeline?.(message, msg.event.room_id);
-      }
+      // Pass all messages (including own) so cross-device sync works.
+      // The chat-store's handleTimelineEvent handles dedup for the sending device.
+      this.onTimeline?.(message, msg.event.room_id);
     });
 
     this.client.on("RoomMember.typing", (event: unknown, member: unknown) => {

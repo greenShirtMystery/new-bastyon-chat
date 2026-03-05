@@ -7,10 +7,13 @@ import MessageStatusIcon from "@/features/messaging/ui/MessageStatusIcon.vue";
 import { useAuthStore } from "@/entities/auth";
 import { formatRelativeTime } from "@/shared/lib/format";
 import { stripMentionAddresses, stripBastyonLinks } from "@/shared/lib/message-format";
+import { hexDecode, hexEncode } from "@/shared/lib/matrix/functions";
+import { cleanMatrixIds, resolveSystemText } from "@/entities/chat/lib/chat-helpers";
 import { useLongPress } from "@/shared/lib/gestures";
 import { ContextMenu } from "@/shared/ui/context-menu";
 import type { ContextMenuItem } from "@/shared/ui/context-menu";
 import { UserAvatar } from "@/entities/user";
+import { useUserStore } from "@/entities/user/model";
 import { RecycleScroller } from "vue-virtual-scroller";
 import "vue-virtual-scroller/dist/vue-virtual-scroller.css";
 import { getDraft } from "@/shared/lib/drafts";
@@ -23,6 +26,7 @@ const props = withDefaults(defineProps<Props>(), { filter: "all" });
 
 const chatStore = useChatStore();
 const authStore = useAuthStore();
+const userStore = useUserStore();
 const { t } = useI18n();
 const emit = defineEmits<{ selectRoom: [roomId: string] }>();
 
@@ -32,9 +36,103 @@ const handleSelect = (room: ChatRoom) => {
   emit("selectRoom", room.id);
 };
 
+/** Reactive map of room ID → resolved display name.
+ *  Using a computed ensures RecycleScroller re-renders when userStore.users changes. */
+const roomNameMap = computed(() => {
+  const allUsers = userStore.users;
+  const myHexId = authStore.address ? hexEncode(authStore.address) : "";
+  const map: Record<string, string> = {};
+  let resolved = 0;
+  let unresolved = 0;
+  for (const room of chatStore.sortedRooms) {
+    const name = _resolveRoomName(room, allUsers, myHexId);
+    map[room.id] = name;
+    if (!room.isGroup && room.members.length <= 1) unresolved++;
+    else resolved++;
+  }
+  console.log(`[roomNameMap] total=${chatStore.sortedRooms.length}, resolved=${resolved}, noMembers=${unresolved}, usersInStore=${Object.keys(allUsers).length}`);
+  return map;
+});
+
+/** Resolve room display name — matches original bastyon-chat name.vue exactly:
+ *  1. For 1:1: get other members → hexDecode(hexId) → look up name in userStore → join with ", "
+ *  2. If no names found → "-"
+ *  3. If room name starts with "@" → strip "@"
+ *  4. For groups/public: use room name as-is */
+/** Check if name looks like an unresolved hash/hex (not human-readable) */
+function _isUnresolvedName(name: string): boolean {
+  if (!name || name.length < 2) return true;
+  if (/^#?[a-f0-9]{16,}$/i.test(name)) return true; // hex hash or #hex alias
+  if (/^[a-f0-9]{8}…$/i.test(name)) return true; // truncated hex
+  return false;
+}
+
+// Cache hexDecode results to avoid repeated computation
+const hexDecodeCache = new Map<string, string>();
+function cachedHexDecode(hex: string): string {
+  let result = hexDecodeCache.get(hex);
+  if (result === undefined) {
+    result = hexDecode(hex);
+    hexDecodeCache.set(hex, result);
+  }
+  return result;
+}
+
+/** Resolve member names from userStore — shared between 1:1 and group resolution */
+function _resolveMemberNames(room: ChatRoom, allUsers: Record<string, any>, myHexId: string): string[] {
+  const otherMembers = room.members.filter(m => m !== myHexId);
+
+  const names: string[] = [];
+  for (const hexId of otherMembers) {
+    const addr = cachedHexDecode(hexId);
+    if (/^[A-Za-z0-9]+$/.test(addr)) {
+      const user = allUsers[addr];
+      if (user?.name) { names.push(user.name); continue; }
+    }
+  }
+
+  // Fallback: try avatar address
+  if (names.length === 0 && room.avatar?.startsWith("__pocketnet__:")) {
+    const avatarAddr = room.avatar.slice("__pocketnet__:".length);
+    const user = allUsers[avatarAddr];
+    if (user?.name && user.name !== avatarAddr) names.push(user.name);
+  }
+
+  return names;
+}
+
+function _resolveRoomName(room: ChatRoom, allUsers: Record<string, any>, myHexId: string): string {
+  if (!room.isGroup) {
+    const names = _resolveMemberNames(room, allUsers, myHexId);
+    if (names.length > 0) return names.join(", ");
+    // Fallback: show address from avatar or decoded member hex
+    if (room.avatar?.startsWith("__pocketnet__:")) {
+      return room.avatar.slice("__pocketnet__:".length);
+    }
+    const otherMembers = room.members.filter(m => m !== myHexId);
+    if (otherMembers.length > 0) {
+      const addr = cachedHexDecode(otherMembers[0]);
+      if (/^[A-Za-z0-9]+$/.test(addr)) return addr;
+    }
+    return cleanMatrixIds(room.name);
+  }
+  if (room.name?.startsWith("@")) return room.name.slice(1);
+  if (!_isUnresolvedName(room.name)) return cleanMatrixIds(room.name);
+  const names = _resolveMemberNames(room, allUsers, myHexId);
+  if (names.length > 0) return names.join(", ");
+  return cleanMatrixIds(room.name);
+}
+
+const resolveRoomName = (room: ChatRoom): string => {
+  return roomNameMap.value[room.id] ?? cleanMatrixIds(room.name);
+};
+
 /** Format last message preview with type-aware icons */
 const formatPreview = (msg: Message | undefined, room: ChatRoom): string => {
   if (!msg) return t("contactList.noMessages");
+  if (msg.deleted || (!msg.content && msg.type === MessageType.text && !msg.fileInfo)) {
+    return `🚫 ${t("message.deleted")}`;
+  }
   let preview: string;
   switch (msg.type) {
     case MessageType.image:
@@ -49,13 +147,25 @@ const formatPreview = (msg: Message | undefined, room: ChatRoom): string => {
     case MessageType.file:
       preview = `📎 ${msg.content || t("message.file")}`;
       break;
-    case MessageType.system:
+    case MessageType.system: {
+      // Dynamically resolve names from systemMeta template (avoids stale truncated addresses)
+      let sysText: string;
+      if (msg.systemMeta?.template) {
+        sysText = resolveSystemText(
+          msg.systemMeta.template,
+          msg.systemMeta.senderAddr,
+          msg.systemMeta.targetAddr,
+          (addr) => chatStore.getDisplayName(addr),
+        );
+      } else {
+        sysText = cleanMatrixIds(msg.content);
+      }
       if (msg.callInfo) {
         const icon = msg.callInfo.callType === "video" ? "📹" : "📞";
-        return `${icon} ${msg.content}`;
+        return `${icon} ${sysText}`;
       }
-      // System messages already contain the actor name, no sender prefix needed
-      return msg.content;
+      return sysText;
+    }
     default:
       preview = msg.content || "";
   }
@@ -63,6 +173,8 @@ const formatPreview = (msg: Message | undefined, room: ChatRoom): string => {
   preview = stripMentionAddresses(preview);
   // Replace bastyon post links with short label
   preview = stripBastyonLinks(preview);
+  // Clean any remaining raw Matrix IDs (@hexid:server → decoded address)
+  preview = cleanMatrixIds(preview);
 
   // Add sender prefix for group chats
   if (room.isGroup && msg.senderId) {
@@ -100,6 +212,9 @@ const displayLimit = ref(PAGE_SIZE);
 
 const allFilteredRooms = computed(() => {
   const rooms = chatStore.sortedRooms;
+  // Touch roomNameMap to keep reactive dependency (names resolve async)
+  // eslint-disable-next-line @typescript-eslint/no-unused-expressions
+  roomNameMap.value;
   if (props.filter === "personal") return rooms.filter(r => !r.isGroup && r.membership !== "invite");
   if (props.filter === "groups") return rooms.filter(r => r.isGroup && r.membership !== "invite");
   if (props.filter === "invites") return rooms.filter(r => r.membership === "invite");
@@ -238,7 +353,7 @@ const getRoomLongPress = (room: ChatRoom) => {
     >
       <template #default="{ item: room }">
         <button
-          class="flex h-[68px] w-full cursor-pointer items-center gap-3 px-3 py-2.5 transition-all hover:bg-neutral-grad-0 active:scale-[0.98] active:bg-neutral-grad-0"
+          class="flex h-[68px] w-full cursor-pointer items-center gap-3 px-3 py-2.5 transition-colors hover:bg-neutral-grad-0 active:bg-neutral-grad-0"
           :class="room.id === chatStore.activeRoomId ? 'bg-color-bg-ac/10' : ''"
           @click="handleSelect(room)"
           @contextmenu.prevent="(e: MouseEvent) => { ctxMenu = { show: true, x: e.clientX, y: e.clientY, roomId: room.id }; }"
@@ -254,7 +369,7 @@ const getRoomLongPress = (room: ChatRoom) => {
               :address="room.avatar.replace('__pocketnet__:', '')"
               size="md"
             />
-            <Avatar v-else :src="room.avatar" :name="room.name" size="md" />
+            <Avatar v-else :src="room.avatar" :name="resolveRoomName(room)" size="md" />
             <!-- Group indicator -->
             <div
               v-if="room.isGroup"
@@ -270,7 +385,7 @@ const getRoomLongPress = (room: ChatRoom) => {
             <!-- Name row: name + timestamp + pin/mute icons -->
             <div class="flex items-center justify-between gap-2">
               <span class="flex items-center gap-1 truncate text-[15px] font-medium text-text-color">
-                {{ room.name }}
+                {{ resolveRoomName(room) }}
                 <svg v-if="chatStore.pinnedRoomIds.has(room.id)" width="12" height="12" viewBox="0 0 24 24" fill="currentColor" class="shrink-0 text-text-on-main-bg-color">
                   <path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z" />
                 </svg>

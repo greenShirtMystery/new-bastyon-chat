@@ -6,9 +6,9 @@ export type Segment =
 
 const URL_RE = /https?:\/\/[^\s<>]+|www\.[^\s<>]+/g;
 const BASTYON_RE = /(?:bastyon:\/\/|https?:\/\/(?:bastyon\.com|pocketnet\.app)\/)(?:index|post)\?[vs]=([a-f0-9]{64})(?:[&\w=]*)/gi;
-// Bastyon mention format: @<68-hex-char-address>:<display_name>
-// Match original bastyon-chat regex: /@\w{68}:\w{1,50}/g
-const MENTION_RE = /@(\w{34,68}):(\w{1,50})/g;
+// Bastyon mention format: @<34-68 hex-char address>:<display_name>
+// Display name may contain unicode (Cyrillic etc.), underscores, digits
+const MENTION_RE = /@(\w{34,68}):([\p{L}\p{N}_]{1,50})/gu;
 
 /**
  * Strip hex addresses from mentions for plain-text preview.
@@ -17,7 +17,7 @@ const MENTION_RE = /@(\w{34,68}):(\w{1,50})/g;
 export function stripMentionAddresses(text: string): string {
   if (!text) return "";
   // Use a fresh regex (since MENTION_RE is global and has state)
-  return text.replace(/@\w{34,68}:(\w{1,50})/g, (_match, name) => `@${name}`);
+  return text.replace(/@\w{34,68}:([\p{L}\p{N}_]{1,50})/gu, (_match, name) => `@${name}`);
 }
 
 /**

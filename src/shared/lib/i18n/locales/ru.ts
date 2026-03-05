@@ -16,6 +16,8 @@ export const ru: Record<TranslationKey, string> = {
   "contacts.noYet": "Контактов пока нет",
 
   // ── Contact list ──
+  "contactList.loadingChats": "Загружаем ваши чаты и контакты",
+  "contactList.loadingChatsHint": "При первом входе это может занять некоторое время",
   "contactList.noConversations": "Диалогов пока нет",
   "contactList.inviteToChat": "Приглашение в чат",
   "contactList.noMessages": "Нет сообщений",
@@ -143,6 +145,7 @@ export const ru: Record<TranslationKey, string> = {
   "message.video": "Видео",
   "message.voiceMessage": "Голосовое сообщение",
   "message.file": "Файл",
+  "message.deleted": "Сообщение удалено",
 
   // ── Message context menu ──
   "contextMenu.reply": "Ответить",
