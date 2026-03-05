@@ -85,6 +85,15 @@ describe("parseMessage", () => {
     expect((mention as any).userId).toBe(hexAddr);
   });
 
+  it("detects mention with Cyrillic display name", () => {
+    const hexAddr = "c".repeat(68);
+    const segments = parseMessage(`Привет @${hexAddr}:Константин как дела`);
+    const mention = segments.find(s => s.type === "mention");
+    expect(mention).toBeDefined();
+    expect((mention as any).content).toBe("@Константин");
+    expect((mention as any).userId).toBe(hexAddr);
+  });
+
   // ─── Mixed content ─────────────────────────────────────────────
 
   it("handles text + link + mention in one message", () => {
@@ -119,6 +128,18 @@ describe("stripMentionAddresses", () => {
 
   it("returns original text if no mentions", () => {
     expect(stripMentionAddresses("Hello world")).toBe("Hello world");
+  });
+
+  it("strips hex address from Cyrillic mentions", () => {
+    const hexAddr = "a".repeat(68);
+    expect(stripMentionAddresses(`@${hexAddr}:Константин`)).toBe("@Константин");
+  });
+
+  it("handles mixed Latin and Cyrillic mentions", () => {
+    const hex1 = "a".repeat(68);
+    const hex2 = "b".repeat(68);
+    const result = stripMentionAddresses(`@${hex1}:Alice and @${hex2}:Борис`);
+    expect(result).toBe("@Alice and @Борис");
   });
 });
 

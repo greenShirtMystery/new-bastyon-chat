@@ -4,6 +4,7 @@ import { useChatStore, MessageType } from "@/entities/chat";
 import { useAuthStore } from "@/entities/auth";
 import { useThemeStore } from "@/entities/theme";
 import { isConsecutiveMessage } from "@/entities/chat/lib/message-utils";
+import { cleanMatrixIds, resolveSystemText } from "@/entities/chat/lib/chat-helpers";
 import { formatDate } from "@/shared/lib/format";
 import { UserAvatar } from "@/entities/user";
 import { useMessages } from "../model/use-messages";
@@ -22,6 +23,14 @@ const authStore = useAuthStore();
 const themeStore = useThemeStore();
 const { loadMessages, toggleReaction, deleteMessage, votePoll, endPoll } = useMessages();
 const { toast } = useToast();
+
+/** Resolve system message text dynamically using current display names */
+const resolveSystemMsg = (msg: { content: string; systemMeta?: { template: string; senderAddr: string; targetAddr?: string } }): string => {
+  if (msg.systemMeta?.template) {
+    return resolveSystemText(msg.systemMeta.template, msg.systemMeta.senderAddr, msg.systemMeta.targetAddr, (addr) => chatStore.getDisplayName(addr));
+  }
+  return cleanMatrixIds(msg.content);
+};
 
 // Provide search query for MessageContent highlighting
 const searchQuery = ref("");
@@ -46,6 +55,7 @@ const contextMenu = ref<{ show: boolean; x: number; y: number; message: import("
 });
 
 const openContextMenu = (payload: { message: import("@/entities/chat").Message; x: number; y: number }) => {
+  if (payload.message.deleted) return;
   contextMenu.value = {
     show: true,
     x: payload.x,
@@ -249,7 +259,7 @@ watch(
     // No need to save here — it's already up to date in savedScrollPositions.
 
     if (roomId) {
-      // Suppress length watcher + hide scroller during the whole switch
+      // Reset state for new room
       switching.value = true;
       settled.value = false;
       newMessageCount.value = 0;
@@ -259,38 +269,64 @@ watch(
       recentMessageIds.value.clear();
       isNearBottom.value = true;
 
-      // Pre-load cached messages so they're ready when skeleton hides
+      // 1. Show cached messages instantly (Telegram-style: no loading screen)
       await chatStore.loadCachedMessages(roomId);
-      loading.value = true;
+      const hasCached = chatStore.activeMessages.length > 0;
 
-      try {
-        await loadMessages(roomId);
-      } finally {
+      if (hasCached) {
+        // Cache hit — show messages immediately, no opacity fade
         loading.value = false;
-      }
-
-      // Restore saved scroll position, or scroll to bottom
-      const saved = savedScrollPositions.get(roomId);
-      if (saved) {
+        settled.value = true;
         await nextTick();
-        const el = getScrollContainer();
-        if (el) {
-          el.scrollTop = el.scrollHeight - el.clientHeight - saved.distFromBottom;
-        }
-        savedScrollPositions.delete(roomId);
-      } else {
-        scrollToBottom();
-      }
 
-      await nextTick();
-      requestAnimationFrame(() => {
-        // Re-scroll after layout settles; reveal only after final scroll pass
-        scrollToBottom(false, () => {
-          settled.value = true;
-          switching.value = false;
-          checkScroll();
+        // Restore scroll position or go to bottom
+        const saved = savedScrollPositions.get(roomId);
+        if (saved) {
+          const el = getScrollContainer();
+          if (el) el.scrollTop = el.scrollHeight - el.clientHeight - saved.distFromBottom;
+          savedScrollPositions.delete(roomId);
+        } else {
+          scrollToBottom();
+        }
+
+        await nextTick();
+        requestAnimationFrame(() => {
+          scrollToBottom(false, () => {
+            switching.value = false;
+            checkScroll();
+          });
         });
-      });
+
+        // 2. Fetch fresh messages from server in background (silent update)
+        loadMessages(roomId).catch(() => {});
+      } else {
+        // No cache — show skeleton, wait for server
+        loading.value = true;
+        try {
+          await loadMessages(roomId);
+        } finally {
+          loading.value = false;
+        }
+
+        const saved = savedScrollPositions.get(roomId);
+        if (saved) {
+          await nextTick();
+          const el = getScrollContainer();
+          if (el) el.scrollTop = el.scrollHeight - el.clientHeight - saved.distFromBottom;
+          savedScrollPositions.delete(roomId);
+        } else {
+          scrollToBottom();
+        }
+
+        await nextTick();
+        requestAnimationFrame(() => {
+          scrollToBottom(false, () => {
+            settled.value = true;
+            switching.value = false;
+            checkScroll();
+          });
+        });
+      }
     }
   },
   { immediate: true },
@@ -372,24 +408,25 @@ const onScroll = () => {
   checkScroll();
   updateFloatingDate();
 
-  // Load more when scrolled near the top
+  // Load more when scrolled near the top (Telegram-style smooth pagination)
   const container = getScrollContainer();
   if (!container) return;
   const { scrollTop } = container;
-  if (scrollTop < 200 && !loadingMore.value && hasMore.value) {
+  if (scrollTop < 400 && !loadingMore.value && hasMore.value) {
     const roomId = chatStore.activeRoomId;
     if (!roomId) return;
     const prevScrollHeight = container.scrollHeight;
     loadingMore.value = true;
     chatStore.loadMoreMessages(roomId).then((more) => {
       hasMore.value = more;
-      loadingMore.value = false;
+      // Preserve scroll position: keep the same content in view after new messages prepend
       nextTick(() => {
         const el = getScrollContainer();
         if (el) {
           const newScrollHeight = el.scrollHeight;
           el.scrollTop += newScrollHeight - prevScrollHeight;
         }
+        loadingMore.value = false;
       });
     });
   }
@@ -518,6 +555,7 @@ defineExpose({ scrollToMessage, setSearchQuery });
     </div>
 
     <!-- Virtualized Messages -->
+    <!-- Loading-more spinner at top (inside scroller's before slot) -->
     <DynamicScroller
       v-else
       ref="scrollerRef"
@@ -525,8 +563,16 @@ defineExpose({ scrollToMessage, setSearchQuery });
       :min-item-size="48"
       key-field="id"
       class="h-full overflow-y-auto px-4 py-3"
-      :style="{ opacity: settled ? 1 : 0 }"
+      :style="{ opacity: settled ? 1 : 0, transition: 'opacity 0.15s ease-out' }"
     >
+      <template #before>
+        <div
+          v-if="loadingMore"
+          class="flex justify-center py-3"
+        >
+          <span class="inline-block h-5 w-5 animate-spin rounded-full border-2 border-color-bg-ac border-t-transparent" />
+        </div>
+      </template>
       <template #default="{ item, index, active }">
         <DynamicScrollerItem
           :item="item"
@@ -536,6 +582,7 @@ defineExpose({ scrollToMessage, setSearchQuery });
             item.type === 'message' ? item.message?.content : item.label,
             item.message?.fileInfo?.w,
             item.message?.reactions ? Object.keys(item.message.reactions).length : 0,
+            item.message?.deleted,
           ]"
         >
           <!-- Pagination happens silently (Telegram-style, no spinner) -->
@@ -582,7 +629,7 @@ defineExpose({ scrollToMessage, setSearchQuery });
             :data-message-id="item.message.id"
           >
             <span class="rounded-full bg-neutral-grad-0/60 px-3 py-1 text-center text-[11px] text-text-on-main-bg-color">
-              {{ item.message.content }}
+              {{ resolveSystemMsg(item.message) }}
             </span>
           </div>
 
@@ -594,6 +641,7 @@ defineExpose({ scrollToMessage, setSearchQuery });
             :data-message-id="item.message.id"
           >
             <MessageBubble
+              :key="item.message.id + (item.message.deleted ? '-del' : '')"
               :message="item.message"
               :is-own="item.message.senderId === authStore.address"
               :is-group="isGroup"

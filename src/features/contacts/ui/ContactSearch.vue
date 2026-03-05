@@ -36,11 +36,22 @@ const handleSelectRoom = (room: ChatRoom) => {
   searchResults.value = [];
 };
 
-/** Rooms matching the search query */
+/** Rooms matching the search query — searches by name, resolved name, and member address */
 const matchingRooms = computed(() => {
   const q = searchQuery.value.toLowerCase().trim();
   if (!q) return [];
-  return chatStore.sortedRooms.filter(r => r.name.toLowerCase().includes(q));
+  return chatStore.sortedRooms.filter(r => {
+    // Match by stored room name
+    if (r.name.toLowerCase().includes(q)) return true;
+    // Match by member address (from avatar for 1:1 chats)
+    if (r.avatar?.startsWith("__pocketnet__:")) {
+      const addr = r.avatar.slice("__pocketnet__:".length);
+      if (addr.toLowerCase().includes(q)) return true;
+    }
+    // Match by any member address
+    if (r.members.some(m => m.toLowerCase().includes(q))) return true;
+    return false;
+  });
 });
 </script>
 

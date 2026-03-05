@@ -14,6 +14,8 @@ export const en = {
   "contacts.noYet": "No contacts yet",
 
   // ── Contact list ──
+  "contactList.loadingChats": "Loading your chats and contacts",
+  "contactList.loadingChatsHint": "This may take a moment on the first launch",
   "contactList.noConversations": "No conversations yet",
   "contactList.inviteToChat": "Invitation to chat",
   "contactList.noMessages": "No messages",
@@ -141,6 +143,7 @@ export const en = {
   "message.video": "Video",
   "message.voiceMessage": "Voice message",
   "message.file": "File",
+  "message.deleted": "This message was deleted",
 
   // ── Message context menu ──
   "contextMenu.reply": "Reply",

@@ -205,6 +205,13 @@ export class AppInitializer {
     await this.psdk.userInfo.load(addresses, true);
   }
 
+  /** Load user info for multiple addresses into full (non-light) cache.
+   *  After this call, getUserData(address) will return the profile data. */
+  async loadUsersBatch(addresses: string[]): Promise<void> {
+    if (!this.psdk || !addresses.length) return;
+    await this.psdk.userInfo.load(addresses);
+  }
+
   /** Get cached user data by raw address */
   getUserData(address: string): UserData | null {
     if (!this.psdk) return null;

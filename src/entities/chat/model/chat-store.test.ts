@@ -98,11 +98,13 @@ describe("chat-store", () => {
   // ─── removeMessage ────────────────────────────────────────────
 
   describe("removeMessage", () => {
-    it("removes message from room", () => {
+    it("marks message as deleted (WhatsApp-style)", () => {
       const msg = makeMsg({ roomId: "!r1:s" });
       store.addMessage("!r1:s", msg);
       store.removeMessage("!r1:s", msg.id);
-      expect(store.messages["!r1:s"]).toHaveLength(0);
+      expect(store.messages["!r1:s"]).toHaveLength(1);
+      expect(store.messages["!r1:s"][0].deleted).toBe(true);
+      expect(store.messages["!r1:s"][0].content).toBe("");
     });
 
     it("does not crash for non-existent room", () => {

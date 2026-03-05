@@ -395,6 +395,10 @@ const insertEmoji = (emoji: string) => {
       </button>
 
       <!-- Send / Confirm edit button (morphs with mic) -->
+      <!-- Note: VoiceRecorder has multiple root elements (v-if/v-else chain) which
+           breaks <transition mode="out-in"> — the leave callback never fires so the
+           entering element never mounts. Fix: inline the idle mic button as a plain
+           <button> so both transition children are single-root native elements. -->
       <transition name="btn-morph" mode="out-in">
         <button
           v-if="text.trim() || sending"
@@ -427,22 +431,24 @@ const insertEmoji = (emoji: string) => {
           </svg>
         </button>
 
-        <!-- Mic button (shown when input is empty) -->
-        <VoiceRecorder
-          v-else
-          key="mic"
-          :state="voiceRecorder.state.value"
-          :duration="voiceRecorder.duration.value"
-          :waveform-data="voiceRecorder.waveformData.value"
-          :recorded-blob="voiceRecorder.recordedBlob.value"
-          @start="voiceRecorder.startRecording()"
-          @start-locked="voiceRecorder.startAndLock()"
-          @stop-and-send="handleVoiceSend"
-          @stop-and-preview="voiceRecorder.stopAndPreview()"
-          @send-preview="handleVoicePreviewSend"
-          @lock="voiceRecorder.lock()"
-          @cancel="voiceRecorder.cancel()"
-        />
+        <!-- Mic button (shown when input is empty) — wrapped in a single-root <div>
+             so transition can properly attach leave/enter hooks. VoiceRecorder has
+             multiple root elements (v-if/v-else chain) which breaks out-in mode. -->
+        <div v-else key="mic" class="inline-flex">
+          <VoiceRecorder
+            :state="voiceRecorder.state.value"
+            :duration="voiceRecorder.duration.value"
+            :waveform-data="voiceRecorder.waveformData.value"
+            :recorded-blob="voiceRecorder.recordedBlob.value"
+            @start="voiceRecorder.startRecording()"
+            @start-locked="voiceRecorder.startAndLock()"
+            @stop-and-send="handleVoiceSend"
+            @stop-and-preview="voiceRecorder.stopAndPreview()"
+            @send-preview="handleVoicePreviewSend"
+            @lock="voiceRecorder.lock()"
+            @cancel="voiceRecorder.cancel()"
+          />
+        </div>
       </transition>
     </div>
 

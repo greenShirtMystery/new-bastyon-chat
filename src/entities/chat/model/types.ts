@@ -73,6 +73,14 @@ export interface Message {
   pollInfo?: PollInfo;
   /** Transfer metadata — present when type === transfer */
   transferInfo?: TransferInfo;
+  /** Whether this message has been deleted/redacted */
+  deleted?: boolean;
+  /** For system messages: template + addresses for dynamic name resolution at render time */
+  systemMeta?: {
+    template: string;       // e.g. "{sender} joined the chat"
+    senderAddr: string;     // raw Bastyon address of the actor
+    targetAddr?: string;    // raw Bastyon address of the target (for add/remove/invite)
+  };
 }
 
 export enum MessageStatus {

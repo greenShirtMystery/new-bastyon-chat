@@ -711,18 +711,21 @@ export class Pcrypto {
         const eventVersion = content.version as number | undefined;
         const bodyKeyCount = Object.keys(body).length;
 
-        // Check if prepared users (with valid keys) cover the body users
+        // Check if prepared users (with valid keys) cover ALL body users + sender
+        const allNeededIds = [...new Set([...Object.keys(body), sender])];
         const preparedBefore = preparedUsers(0, eventVersion || version);
-        if (preparedBefore.length < bodyKeyCount) {
+        const preparedIds = new Set(preparedBefore.map(u => u.id));
+        const hasMissing = allNeededIds.some(id => !preparedIds.has(id));
+        if (hasMissing) {
           getusershistory();
           await getusersinfo();
 
           // If room state is still incomplete, populate users from body keys + sender
           const preparedAfter = preparedUsers(0, eventVersion || version);
-          if (preparedAfter.length < bodyKeyCount && pcrypto.getUsersInfoCb) {
-            const bodyUserIds = Object.keys(body);
-            const allUserIds = [...new Set([...bodyUserIds, sender])];
-            for (const uid of allUserIds) {
+          const preparedAfterIds = new Set(preparedAfter.map(u => u.id));
+          const stillMissing = allNeededIds.some(id => !preparedAfterIds.has(id));
+          if (stillMissing && pcrypto.getUsersInfoCb) {
+            for (const uid of allNeededIds) {
               if (!users[uid]) {
                 users[uid] = { id: uid, life: [{ start: 1 }] };
               }
@@ -749,10 +752,16 @@ export class Pcrypto {
           throw new Error("emptyforme");
         }
 
-        console.error("[decryptEvent] sender=" + sender.slice(0,10) + " me=" + me.slice(0,10) + " keyindex=" + (keyindex?.slice(0,10) ?? "?") + " bodyindex=" + (bodyindex?.slice(0,10) ?? "?") + " block=" + block + " version=" + eventVersion + " bodyKeys=" + Object.keys(body).map(k => k.slice(0,10)).join(","));
+        // Build explicit users list from body keys + sender (same as decryptKey does)
+        // This avoids the time-based filter in preparedUsers which may exclude
+        // users whose membership timestamps don't cover the event time
+        const bodyUserIds = Object.keys(body);
+        const usersList = [...new Set([...bodyUserIds, sender])];
 
-        // self.decrypt — match original lines 529-556
-        const decrypted = await room._decrypt(keyindex!, body[bodyindex], time, block, null, eventVersion);
+        console.error("[decryptEvent] sender=" + sender.slice(0,10) + " me=" + me.slice(0,10) + " keyindex=" + (keyindex?.slice(0,10) ?? "?") + " bodyindex=" + (bodyindex?.slice(0,10) ?? "?") + " block=" + block + " version=" + eventVersion + " bodyKeys=" + bodyUserIds.map(k => k.slice(0,10)).join(",") + " usersList=" + usersList.map(u => u.slice(0,10)).join(","));
+
+        // Pass usersList so _decrypt uses preparedUsersById instead of time-filtered preparedUsers
+        const decrypted = await room._decrypt(keyindex!, body[bodyindex], time, block, usersList, eventVersion);
 
         const data = {
           body: decrypted,
@@ -999,9 +1008,11 @@ export class Pcrypto {
         const bodyUsers = Object.keys(body);
         const usersList = [...new Set([...bodyUsers, sender])];
 
-        // Check if prepared users (with valid 12+ keys) cover the body users
+        // Check if prepared users (with valid 12+ keys) cover ALL body users + sender
         const preparedBefore = preparedUsers(0, v || version);
-        if (preparedBefore.length < bodyUsers.length) {
+        const preparedIds = new Set(preparedBefore.map(u => u.id));
+        const hasMissing = usersList.some(id => !preparedIds.has(id));
+        if (hasMissing) {
           // First try normal re-prepare from room state events
           getusershistory();
           await getusersinfo();
@@ -1009,7 +1020,9 @@ export class Pcrypto {
           // If room state is still incomplete (e.g. member events not fully loaded),
           // directly populate users dict from the body keys + sender
           const preparedAfter = preparedUsers(0, v || version);
-          if (preparedAfter.length < bodyUsers.length && pcrypto.getUsersInfoCb) {
+          const preparedAfterIds = new Set(preparedAfter.map(u => u.id));
+          const stillMissing = usersList.some(id => !preparedAfterIds.has(id));
+          if (stillMissing && pcrypto.getUsersInfoCb) {
             for (const uid of usersList) {
               if (!users[uid]) {
                 users[uid] = { id: uid, life: [{ start: 1 }] };

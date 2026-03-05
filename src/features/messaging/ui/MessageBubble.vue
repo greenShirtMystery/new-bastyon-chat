@@ -14,6 +14,7 @@ import { ref, inject, onMounted } from "vue";
 import { useLongPress, useSwipeGesture } from "@/shared/lib/gestures";
 import { useThemeStore } from "@/entities/theme";
 
+const { t } = useI18n();
 const openUserProfile = inject<((address: string) => void) | null>("openUserProfile", null);
 
 interface Props {
@@ -265,9 +266,23 @@ const replyPreviewText = computed(() => {
         </svg>
       </button>
 
+      <!-- Deleted message -->
+      <div
+        v-if="message.deleted"
+        class="rounded-bubble px-3 py-2"
+        :class="[tailClass, props.isOwn ? 'bg-chat-bubble-own/60' : 'bg-chat-bubble-other/60']"
+      >
+        <div class="flex items-center gap-1.5 text-sm italic" :class="props.isOwn ? 'text-white/50' : 'text-text-on-main-bg-color'">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="shrink-0">
+            <circle cx="12" cy="12" r="10" /><line x1="4.93" y1="4.93" x2="19.07" y2="19.07" />
+          </svg>
+          {{ t('message.deleted') }}
+        </div>
+      </div>
+
       <!-- Image message -->
       <div
-        v-if="message.type === MessageType.image && hasFileInfo"
+        v-else-if="message.type === MessageType.image && hasFileInfo"
         class="overflow-hidden rounded-bubble"
         :class="[tailClass, props.isOwn ? 'bg-chat-bubble-own' : 'bg-chat-bubble-other', (message.replyTo || message.forwardedFrom) ? 'min-w-[180px]' : '']"
       >
