@@ -69,8 +69,30 @@ export function createChatStorage(
         });
       };
 
+      // Populate memory cache in background (non-blocking).
+      // get() falls back to IndexedDB if an item isn't in memory yet.
+      const loadAllBackground = () => {
+        try {
+          const tx = db.transaction("items", "readonly");
+          const store = tx.objectStore("items");
+          const req = store.getAll();
+          req.onsuccess = () => {
+            const items = req.result;
+            if (items) {
+              for (const item of items) {
+                if (memoryStorage[item.id] === undefined) {
+                  memoryStorage[item.id] = item.message;
+                }
+              }
+            }
+          };
+        } catch { /* ignore — cache will fill lazily via get() */ }
+      };
+
       clearOldItems()
         .then(() => {
+          // Start filling memory cache without blocking
+          loadAllBackground();
           resolve({
             get(itemId: string): Promise<unknown> {
               if (memoryStorage[itemId] !== undefined) {

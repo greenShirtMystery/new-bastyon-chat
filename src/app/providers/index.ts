@@ -13,8 +13,7 @@ import { useLocaleStore } from "@/entities/locale";
 export const setupProviders = async (app: App) => {
   setupAssets();
 
-  // Start loading chat scripts early but don't block UI framework setup.
-  // Scripts are only needed when Matrix client initializes (after login).
+  // Start loading chat scripts early — runs in parallel with Pinia/theme/locale.
   const scriptsReady = setupChatScripts();
 
   app.use(createPinia());
@@ -27,10 +26,10 @@ export const setupProviders = async (app: App) => {
     useTorStore().init();
   }
 
-  await setupRouter(app);
-
-  // Ensure scripts finish loading before app becomes interactive
+  // Scripts must finish before router mounts the app — components
+  // need API globals (sdk, actions, etc.) available in onMounted.
   await scriptsReady;
+  await setupRouter(app);
 };
 
 export * from "./app-routes";
