@@ -335,9 +335,11 @@ export const useAuthStore = defineStore(NAMESPACE, () => {
           console.warn("[auth] Failed to init call tab lock:", err);
         });
 
-        // Explicitly load rooms immediately — the onSync callback may have
-        // already fired before handlers were wired.
-        chatStore.refreshRoomsNow();
+        // Note: rooms are loaded by the onSync("PREPARED") callback which
+        // fires once the initial sync completes. Handlers are wired before
+        // startClient(), so the event cannot be missed. Calling refreshRoomsNow()
+        // here would run with 0 rooms (sync hasn't finished) and poison the
+        // IndexedDB cache with an empty array.
       } else {
         console.error("[auth] Matrix client NOT ready, error:", matrixService.error);
         matrixError.value = matrixService.error || "Matrix init failed";
@@ -498,9 +500,11 @@ export const useAuthStore = defineStore(NAMESPACE, () => {
 
   /** Poll blockchain every 10s. Two phases:
    *  Phase 1: Wait for PKOIN (unspents) to arrive, then broadcast UserInfo.
-   *  Phase 2: Wait for UserInfo to be confirmed on-chain. */
+   *  Phase 2: Wait for UserInfo to be confirmed on-chain (getuserstate + Actions status). */
   const startRegistrationPoll = () => {
     if (registrationPollTimer) clearInterval(registrationPollTimer);
+    const startTime = Date.now();
+    const MAX_WAIT_MS = 5 * 60 * 1000; // 5 minutes fallback
     console.log("[auth] Starting registration poll (phase:", pendingRegProfile.value ? "1-broadcast" : "2-confirm", ")");
 
     registrationPollTimer = setInterval(async () => {
@@ -530,37 +534,53 @@ export const useAuthStore = defineStore(NAMESPACE, () => {
         }
 
         // Phase 2: Wait for blockchain confirmation of UserInfo
-        const confirmed = await appInitializer.checkUserState(address.value);
+        // Check 1: Actions system local status (instant)
+        const actionsStatus = appInitializer.getAccountRegistrationStatus();
+        console.log("[auth] Registration poll — actions:", actionsStatus);
+
+        if (actionsStatus === 'registered') {
+          console.log("[auth] Registration confirmed via Actions system!");
+          await onRegistrationConfirmed();
+          return;
+        }
+
+        // Check 2: Direct blockchain RPC (fallback if Actions system can't find account)
+        const confirmed = await appInitializer.checkUserRegistered(address.value);
         if (confirmed) {
           console.log("[auth] Registration confirmed on blockchain!");
-          // Load full user data
-          await appInitializer.initializeAndFetchUserData(
-            address.value,
-            (data: UserData) => setUserInfo(data)
-          );
+          await onRegistrationConfirmed();
+          return;
+        }
+
+        console.log("[auth] Waiting for blockchain confirmation...");
+
+        // Fallback timeout
+        if (Date.now() - startTime > MAX_WAIT_MS) {
+          console.warn("[auth] Registration poll timeout, proceeding anyway");
           setRegistrationPending(false);
           stopRegistrationPoll();
-          // Re-init Matrix if needed (to pick up updated user info)
-          if (!matrixReady.value) {
-            PocketnetInstanceConfigurator.setUserAddress(address.value!);
-            PocketnetInstanceConfigurator.setUserGetKeyPairFc(() =>
-              createKeyPair(privateKey.value!)
-            );
-            await initMatrix();
-          }
-        } else {
-          console.log("[auth] Waiting for blockchain confirmation...");
         }
       } catch (e) {
         console.warn("[auth] Registration poll error:", e);
       }
     }, 10000);
-  };
 
-  /** Resume polling on page reload if registration was pending */
-  const resumeRegistrationPoll = () => {
-    if (registrationPending.value && !registrationPollTimer) {
-      startRegistrationPoll();
+    async function onRegistrationConfirmed() {
+      // Load full user data
+      await appInitializer.initializeAndFetchUserData(
+        address.value!,
+        (data: UserData) => setUserInfo(data)
+      );
+      setRegistrationPending(false);
+      stopRegistrationPoll();
+      // Re-init Matrix if needed (to pick up updated user info)
+      if (!matrixReady.value) {
+        PocketnetInstanceConfigurator.setUserAddress(address.value!);
+        PocketnetInstanceConfigurator.setUserGetKeyPairFc(() =>
+          createKeyPair(privateKey.value!)
+        );
+        await initMatrix();
+      }
     }
   };
 
@@ -568,6 +588,20 @@ export const useAuthStore = defineStore(NAMESPACE, () => {
     if (registrationPollTimer) {
       clearInterval(registrationPollTimer);
       registrationPollTimer = null;
+    }
+  };
+
+  /** Resume polling on page reload if registration was pending */
+  const resumeRegistrationPoll = () => {
+    if (registrationPending.value && !registrationPollTimer) {
+      // Ensure POCKETNETINSTANCE has user address set (might not be if fetchUserInfo failed)
+      if (address.value && privateKey.value) {
+        PocketnetInstanceConfigurator.setUserAddress(address.value);
+        PocketnetInstanceConfigurator.setUserGetKeyPairFc(() =>
+          createKeyPair(privateKey.value!)
+        );
+      }
+      startRegistrationPoll();
     }
   };
 
@@ -582,6 +616,12 @@ export const useAuthStore = defineStore(NAMESPACE, () => {
 
   /** Load a Bastyon post by txid (delegates to AppInitializer RPC + cache) */
   const loadPost = (txid: string) => appInitializer.loadPost(txid);
+
+  const loadPostScores = (txid: string) => appInitializer.loadPostScores(txid);
+  const loadPostComments = (txid: string) => appInitializer.loadPostComments(txid);
+  const loadMyPostScore = (txid: string) => appInitializer.loadMyPostScore(txid, address.value!);
+  const submitUpvote = (txid: string, value: number) => appInitializer.submitUpvote(txid, value, address.value!);
+  const submitComment = (txid: string, message: string, parentId?: string) => appInitializer.submitComment(txid, message, parentId);
 
   /** Get cached user data by raw address */
   const getBastyonUserData = (addr: string) => appInitializer.getUserData(addr);
@@ -599,7 +639,10 @@ export const useAuthStore = defineStore(NAMESPACE, () => {
     isAuthenticated,
     isEditingUserData,
     isLoggingIn,
+    loadMyPostScore,
     loadPost,
+    loadPostComments,
+    loadPostScores,
     loadUsersInfo: (addresses: string[]) => appInitializer.loadUsersInfo(addresses),
     login,
     logout,
@@ -616,6 +659,8 @@ export const useAuthStore = defineStore(NAMESPACE, () => {
     registrationPending,
     resumeRegistrationPoll,
     submitCaptcha,
+    submitComment,
+    submitUpvote,
     userInfo
   };
 });

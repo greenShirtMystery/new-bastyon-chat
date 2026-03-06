@@ -13,6 +13,28 @@ export interface BastyonPostData {
   tags: string[];
   settings: { v?: string };
   time: number;
+  scoreSum?: number;
+  scoreCnt?: number;
+  myVal?: number;
+}
+
+export interface PostScore {
+  address: string;
+  value: number;
+  posttxid: string;
+}
+
+export interface PostComment {
+  id: string;
+  postid: string;
+  parentid: string;
+  answerid: string;
+  address: string;
+  message: string;
+  time: number;
+  scoreUp: number;
+  scoreDown: number;
+  myScore?: number;
 }
 
 type OnLoadUserData = (userData: UserData) => void;
@@ -306,6 +328,91 @@ export class AppInitializer {
     }
   }
 
+  async loadPostScores(txid: string): Promise<PostScore[]> {
+    if (!this.api) return [];
+    try {
+      const data = await this.api.rpc("getpostscores", [txid]);
+      if (!Array.isArray(data)) return [];
+      return data.map((s: any) => ({
+        address: s.address ?? "",
+        value: Number(s.value ?? 0),
+        posttxid: s.posttxid ?? txid,
+      }));
+    } catch (e) {
+      console.error("[appInit] loadPostScores error:", e);
+      return [];
+    }
+  }
+
+  async loadPostComments(txid: string): Promise<PostComment[]> {
+    if (!this.api) return [];
+    try {
+      const data = await this.api.rpc("getcomments", ["", "", "", [txid]]);
+      if (!Array.isArray(data)) return [];
+      return data.map((c: any) => ({
+        id: c.id ?? "",
+        postid: c.postid ?? txid,
+        parentid: c.parentid ?? "",
+        answerid: c.answerid ?? "",
+        address: c.address ?? "",
+        message: typeof c.msg === "string" ? decodeURIComponent(c.msg) : (c.message ?? ""),
+        time: Number(c.time ?? 0),
+        scoreUp: Number(c.scoreUp ?? 0),
+        scoreDown: Number(c.scoreDown ?? 0),
+        myScore: c.myScore != null ? Number(c.myScore) : undefined,
+      }));
+    } catch (e) {
+      console.error("[appInit] loadPostComments error:", e);
+      return [];
+    }
+  }
+
+  async loadMyPostScore(txid: string, address: string): Promise<number | null> {
+    if (!this.api) return null;
+    try {
+      const data = await this.api.rpc("getposcores", [[txid], address]);
+      if (Array.isArray(data) && data.length > 0) {
+        return Number(data[0]?.value ?? 0);
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  async submitUpvote(txid: string, value: number, _address: string): Promise<boolean> {
+    if (!this.actions || !this.psdk) return false;
+    try {
+      const shareData = await new Promise<any>((resolve) => {
+        this.psdk!.node.shares.getbyid([txid], () => {
+          resolve(this.psdk!.share.get(txid));
+        });
+      });
+      if (!shareData) return false;
+      const upvoteShare = shareData.upvote(value);
+      if (!upvoteShare) return false;
+      await this.actions.addActionAndSendIfCan(upvoteShare);
+      return true;
+    } catch (e) {
+      console.error("[appInit] submitUpvote error:", e);
+      return false;
+    }
+  }
+
+  async submitComment(txid: string, message: string, parentId?: string): Promise<boolean> {
+    if (!this.actions) return false;
+    try {
+      const comment = new Comment(txid);
+      comment.message.set(message);
+      if (parentId) comment.parentid = parentId;
+      await this.actions.addActionAndSendIfCan(comment);
+      return true;
+    } catch (e) {
+      console.error("[appInit] submitComment error:", e);
+      return false;
+    }
+  }
+
   /** Check if address has unspent outputs (PKOIN balance) via txunspent RPC.
    *  Used to verify that free registration PKOIN has arrived before broadcasting UserInfo. */
   async checkUnspents(address: string): Promise<boolean> {
@@ -320,17 +427,38 @@ export class AppInitializer {
     }
   }
 
+  /** Check the Actions system's account registration status.
+   *  Uses Account.getStatus() — same as pocketnet's user.userRegistrationStatus().
+   *  Returns: 'registered', 'in_progress_transaction', 'in_progress_hasUnspents',
+   *  'in_progress_wait_unspents', 'not_in_progress', 'not_in_progress_no_processing' */
+  getAccountRegistrationStatus(): string {
+    if (!this.actions) return 'not_available';
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const account = (this.actions as any).getCurrentAccount?.();
+      if (account?.getStatus) return account.getStatus();
+      return 'not_available';
+    } catch {
+      return 'not_available';
+    }
+  }
+
   /** Check if user account exists on the blockchain via getuserstate RPC.
+   *  Fallback check — works regardless of Actions system state.
    *  Returns true if the account is confirmed, false if still pending. */
-  async checkUserState(address: string): Promise<boolean> {
+  async checkUserRegistered(address: string): Promise<boolean> {
     if (!this.api) return false;
     try {
       await this.initApi();
       const result = await this.api.rpc("getuserstate", [address]);
-      // If the RPC returns data, the account exists on-chain
-      return !!(result && (result as Record<string, unknown>).address);
+      if (!result) return false;
+      // getuserstate may return an object {address: ...} or an array [{address: ...}]
+      if (Array.isArray(result)) {
+        return result.length > 0 && !!(result[0] as Record<string, unknown>)?.address;
+      }
+      return !!(result as Record<string, unknown>).address;
     } catch {
-      // "unknown" or error means not found yet
+      // error code -5 means user not found yet
       return false;
     }
   }
