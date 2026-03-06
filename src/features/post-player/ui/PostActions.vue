@@ -2,9 +2,10 @@
 interface Props {
   totalComments: number;
   isOwnPost: boolean;
+  shareCopied?: boolean;
 }
 
-defineProps<Props>();
+const props = withDefaults(defineProps<Props>(), { shareCopied: false });
 
 const emit = defineEmits<{
   boost: [];
@@ -47,7 +48,7 @@ const { t } = useI18n();
         <polyline points="16 6 12 2 8 6" />
         <line x1="12" y1="2" x2="12" y2="15" />
       </svg>
-      {{ t("postPlayer.share") }}
+      {{ props.shareCopied ? '✓' : t("postPlayer.share") }}
     </button>
   </div>
 </template>
