@@ -399,6 +399,8 @@ export const en = {
   "wallet.receiverPaysFees": "Receiver pays fees",
   "wallet.sent": "Sent {amount} PKOIN",
   "wallet.viewTransaction": "View transaction",
+  "wallet.enterAmount": "Enter amount to continue",
+  "wallet.calculateFirst": "Calculate fees first",
 
   // ── Post embeds ──
   "post.loading": "Loading post...",
@@ -407,6 +409,17 @@ export const en = {
   "post.video": "Video",
   "post.article": "Article",
   "post.openInBastyon": "Open in Bastyon",
+
+  // Post player
+  "postPlayer.boost": "Boost",
+  "postPlayer.share": "Share",
+  "postPlayer.comments": "Comments",
+  "postPlayer.noComments": "No comments yet",
+  "postPlayer.writeComment": "Write a comment...",
+  "postPlayer.send": "Send",
+  "postPlayer.rated": "You rated this post",
+  "postPlayer.ratingRestricted": "Rating restricted",
+  "postPlayer.openPost": "Open full post",
 
   // ── Registration ──
   "register.title": "Create Account",
@@ -439,6 +452,28 @@ export const en = {
   "register.haveAccount": "Already have an account?",
   "register.signIn": "Sign In",
   "register.createAccount": "Create Account",
+
+  // ── Invite friend ──
+  "invite.title": "Invite a Friend",
+  "invite.subtitle": "Share this link and start chatting right away",
+  "invite.copyLink": "Copy Link",
+  "invite.copied": "Copied!",
+  "invite.shareOn": "Share on",
+  "invite.fab": "Invite",
+
+  // ── Share group link ──
+  "shareGroup.inviteLink": "Invite Link",
+  "shareGroup.copyLink": "Copy Link",
+  "shareGroup.copied": "Copied!",
+  "shareGroup.share": "Share",
+  "shareGroup.publicGroup": "Public group",
+  "shareGroup.publicGroupHint": "Anyone with the link can join",
+  "shareGroup.enablePublic": "Enable to allow joining via link",
+  "shareGroup.joining": "Joining...",
+  "shareGroup.joinGroup": "Join Group",
+  "shareGroup.joinFailed": "Failed to join group",
+  "shareGroup.joined": "Joined successfully",
+  "shareGroup.alreadyMember": "You are already a member",
 
   // ── Language names ──
   "locale.en": "English",

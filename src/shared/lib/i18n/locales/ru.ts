@@ -401,6 +401,8 @@ export const ru: Record<TranslationKey, string> = {
   "wallet.receiverPaysFees": "Комиссию платит получатель",
   "wallet.sent": "Отправлено {amount} PKOIN",
   "wallet.viewTransaction": "Посмотреть транзакцию",
+  "wallet.enterAmount": "Введите сумму для продолжения",
+  "wallet.calculateFirst": "Сначала рассчитайте комиссию",
 
   // ── Post embeds ──
   "post.loading": "Загрузка поста...",
@@ -409,6 +411,17 @@ export const ru: Record<TranslationKey, string> = {
   "post.video": "Видео",
   "post.article": "Статья",
   "post.openInBastyon": "Открыть в Бастионе",
+
+  // Post player
+  "postPlayer.boost": "Поддержать",
+  "postPlayer.share": "Поделиться",
+  "postPlayer.comments": "Комментарии",
+  "postPlayer.noComments": "Пока нет комментариев",
+  "postPlayer.writeComment": "Написать комментарий...",
+  "postPlayer.send": "Отправить",
+  "postPlayer.rated": "Вы оценили этот пост",
+  "postPlayer.ratingRestricted": "Оценка ограничена",
+  "postPlayer.openPost": "Открыть пост",
 
   // ── Registration ──
   "register.title": "Создать аккаунт",
@@ -441,6 +454,28 @@ export const ru: Record<TranslationKey, string> = {
   "register.haveAccount": "Уже есть аккаунт?",
   "register.signIn": "Войти",
   "register.createAccount": "Создать аккаунт",
+
+  // ── Invite friend ──
+  "invite.title": "Пригласить друга",
+  "invite.subtitle": "Поделитесь ссылкой и начните общение сразу",
+  "invite.copyLink": "Копировать ссылку",
+  "invite.copied": "Скопировано!",
+  "invite.shareOn": "Поделиться в",
+  "invite.fab": "Пригласить",
+
+  // ── Share group link ──
+  "shareGroup.inviteLink": "Ссылка-приглашение",
+  "shareGroup.copyLink": "Копировать ссылку",
+  "shareGroup.copied": "Скопировано!",
+  "shareGroup.share": "Поделиться",
+  "shareGroup.publicGroup": "Публичная группа",
+  "shareGroup.publicGroupHint": "Любой с ссылкой может войти",
+  "shareGroup.enablePublic": "Включите, чтобы разрешить вход по ссылке",
+  "shareGroup.joining": "Присоединение...",
+  "shareGroup.joinGroup": "Присоединиться",
+  "shareGroup.joinFailed": "Не удалось присоединиться",
+  "shareGroup.joined": "Вы присоединились",
+  "shareGroup.alreadyMember": "Вы уже участник",
 
   // ── Language names ──
   "locale.en": "English",
