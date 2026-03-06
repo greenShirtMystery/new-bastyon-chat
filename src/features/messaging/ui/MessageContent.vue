@@ -2,7 +2,7 @@
 import { inject, type Ref } from "vue";
 import { parseMessage } from "@/shared/lib/message-format";
 import type { Segment } from "@/shared/lib/message-format";
-import PostEmbed from "./PostEmbed.vue";
+import { PostCard } from "@/features/post-player";
 
 interface Props {
   text: string;
@@ -73,7 +73,7 @@ const hasBlockSegments = computed(() => segments.value.some(s => s.type === "bas
         class="cursor-pointer font-medium text-color-txt-ac"
         @click.stop="emit('mentionClick', seg.userId)"
       >{{ seg.content }}</span>
-      <PostEmbed
+      <PostCard
         v-else-if="seg.type === 'bastyonLink'"
         :txid="seg.txid"
         :is-own="props.isOwn"
