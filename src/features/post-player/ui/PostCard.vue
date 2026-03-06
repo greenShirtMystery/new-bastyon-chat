@@ -2,6 +2,9 @@
 import { useAuthStore } from "@/entities/auth";
 import type { BastyonPostData } from "@/app/providers/initializers";
 import { parseVideoUrl } from "@/shared/lib/video-embed";
+import VideoPlayer from "./VideoPlayer.vue";
+import StarRating from "./StarRating.vue";
+import PostPlayerModal from "./PostPlayerModal.vue";
 
 interface Props {
   txid: string;
@@ -17,34 +20,37 @@ const loading = ref(true);
 const error = ref(false);
 const authorName = ref("");
 const authorImage = ref("");
+const showModal = ref(false);
 
-const videoInfo = computed(() => (post.value?.url ? parseVideoUrl(post.value.url) : null));
+const videoInfo = computed(() => post.value?.url ? parseVideoUrl(post.value.url) : null);
+const isArticle = computed(() => post.value?.settings?.v === "a");
 
 const firstImage = computed(() => {
   if (!post.value?.images?.length) return null;
   const img = post.value.images[0];
-  if (img.startsWith("http")) return img;
-  return `https://bastyon.com/images/${img}`;
+  return img.startsWith("http") ? img : `https://bastyon.com/images/${img}`;
 });
 
 const truncatedMessage = computed(() => {
   if (!post.value?.message) return "";
-  return post.value.message.length > 160
-    ? post.value.message.slice(0, 160) + "..."
+  return post.value.message.length > 120
+    ? post.value.message.slice(0, 120) + "..."
     : post.value.message;
 });
 
-const isArticle = computed(() => post.value?.settings?.v === "a");
+const authorAvatarUrl = computed(() => {
+  if (!authorImage.value) return "";
+  return authorImage.value.startsWith("http")
+    ? authorImage.value
+    : `https://bastyon.com/images/${authorImage.value}`;
+});
 
-const postUrl = computed(() => `bastyon://post?s=${props.txid}`);
+const scores = ref<{ average: number; total: number }>({ average: 0, total: 0 });
 
 onMounted(async () => {
   try {
     const data = await authStore.loadPost(props.txid);
-    if (!data) {
-      error.value = true;
-      return;
-    }
+    if (!data) { error.value = true; return; }
     post.value = data;
 
     if (data.address) {
@@ -57,33 +63,23 @@ onMounted(async () => {
         authorName.value = data.address.slice(0, 10);
       }
     }
+
+    authStore.loadPostScores(props.txid).then((s) => {
+      if (s.length) {
+        const sum = s.reduce((a, x) => a + x.value, 0);
+        scores.value = { average: sum / s.length, total: s.length };
+      }
+    });
   } catch {
     error.value = true;
   } finally {
     loading.value = false;
   }
 });
-
-const authorAvatarUrl = computed(() => {
-  if (!authorImage.value) return "";
-  if (authorImage.value.startsWith("http")) return authorImage.value;
-  return `https://bastyon.com/images/${authorImage.value}`;
-});
-
-const openPost = () => {
-  window.open(postUrl.value, "_blank");
-};
-
-const openVideo = (e: Event) => {
-  e.stopPropagation();
-  if (post.value?.url) {
-    window.open(post.value.url, "_blank");
-  }
-};
 </script>
 
 <template>
-  <!-- Loading skeleton -->
+  <!-- Loading -->
   <div
     v-if="loading"
     class="my-1 flex max-w-sm items-center gap-2 rounded-xl p-3"
@@ -93,10 +89,10 @@ const openVideo = (e: Event) => {
     <span class="text-xs opacity-50">{{ t("post.loading") }}</span>
   </div>
 
-  <!-- Error fallback -->
+  <!-- Error -->
   <a
     v-else-if="error"
-    :href="postUrl"
+    :href="`bastyon://post?s=${txid}`"
     target="_blank"
     rel="noopener noreferrer"
     class="text-color-txt-ac underline hover:no-underline"
@@ -108,27 +104,12 @@ const openVideo = (e: Event) => {
     v-else-if="post"
     class="my-1 max-w-sm cursor-pointer overflow-hidden rounded-xl"
     :class="isOwn ? 'bg-white/10' : 'bg-color-bg-ac/8'"
-    @click="openPost"
+    @click="showModal = true"
   >
-    <!-- Video thumbnail -->
-    <div v-if="videoInfo?.thumbUrl" class="relative">
-      <img
-        :src="videoInfo.thumbUrl"
-        alt=""
-        class="h-36 w-full object-cover"
-        loading="lazy"
-      />
-      <button
-        class="absolute inset-0 flex items-center justify-center bg-black/30 transition-colors hover:bg-black/40"
-        @click="openVideo"
-      >
-        <svg width="40" height="40" viewBox="0 0 24 24" fill="white">
-          <path d="M8 5v14l11-7z" />
-        </svg>
-      </button>
-    </div>
+    <!-- Inline video -->
+    <VideoPlayer v-if="videoInfo" :url="post.url" inline />
 
-    <!-- First image (if no video) -->
+    <!-- Image -->
     <img
       v-else-if="firstImage"
       :src="firstImage"
@@ -138,7 +119,7 @@ const openVideo = (e: Event) => {
     />
 
     <div class="flex flex-col gap-1.5 p-3">
-      <!-- Author row -->
+      <!-- Author -->
       <div v-if="authorName" class="flex items-center gap-2">
         <img
           v-if="authorAvatarUrl"
@@ -150,13 +131,10 @@ const openVideo = (e: Event) => {
           v-else
           class="flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold"
           :class="isOwn ? 'bg-white/20 text-white' : 'bg-color-bg-ac/20 text-color-bg-ac'"
-        >
-          {{ authorName.charAt(0).toUpperCase() }}
-        </div>
-        <span
-          class="text-xs font-medium"
-          :class="isOwn ? 'text-white/80' : 'text-text-color'"
-        >{{ authorName }}</span>
+        >{{ authorName.charAt(0).toUpperCase() }}</div>
+        <span class="text-xs font-medium" :class="isOwn ? 'text-white/80' : 'text-text-color'">
+          {{ authorName }}
+        </span>
         <span
           v-if="isArticle"
           class="rounded-full px-1.5 py-0.5 text-[10px] font-medium"
@@ -176,44 +154,34 @@ const openVideo = (e: Event) => {
         :class="isOwn ? 'text-white' : 'text-text-color'"
       >{{ post.caption }}</div>
 
-      <!-- Message body -->
+      <!-- Message -->
       <div
         v-if="truncatedMessage"
         class="text-xs leading-relaxed"
         :class="isOwn ? 'text-white/70' : 'text-text-color/70'"
-      >
-        {{ truncatedMessage }}
-        <a
-          v-if="post.message.length > 160"
-          :href="postUrl"
-          class="font-medium"
-          :class="isOwn ? 'text-white/90' : 'text-color-txt-ac'"
-          @click.stop
-        >{{ t("post.readMore") }}</a>
-      </div>
+      >{{ truncatedMessage }}</div>
 
-      <!-- Tags -->
-      <div v-if="post.tags.length" class="flex flex-wrap gap-1">
-        <span
-          v-for="tag in post.tags.slice(0, 5)"
-          :key="tag"
-          class="rounded-full px-1.5 py-0.5 text-[10px]"
-          :class="isOwn ? 'bg-white/10 text-white/60' : 'bg-color-bg-ac/10 text-color-bg-ac/60'"
-        >#{{ tag }}</span>
-      </div>
-
-      <!-- Open link -->
-      <div
-        class="flex items-center gap-1 text-[10px]"
-        :class="isOwn ? 'text-white/40' : 'text-text-on-main-bg-color'"
-      >
-        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-          <polyline points="15 3 21 3 21 9" />
-          <line x1="10" y1="14" x2="21" y2="3" />
-        </svg>
-        {{ t("post.openInBastyon") }}
+      <!-- Compact rating + open hint -->
+      <div class="flex items-center justify-between pt-1">
+        <StarRating
+          :average="scores.average"
+          :total-votes="scores.total"
+          compact
+          readonly
+        />
+        <span class="text-[10px]" :class="isOwn ? 'text-white/40' : 'text-text-on-main-bg-color'">
+          {{ t("postPlayer.openPost") }}
+        </span>
       </div>
     </div>
   </div>
+
+  <!-- Modal -->
+  <PostPlayerModal
+    v-if="showModal && post"
+    :post="post"
+    :author-name="authorName"
+    :author-avatar-url="authorAvatarUrl"
+    @close="showModal = false"
+  />
 </template>

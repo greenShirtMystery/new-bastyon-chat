@@ -383,15 +383,17 @@ export class AppInitializer {
   async submitUpvote(txid: string, value: number, _address: string): Promise<boolean> {
     if (!this.actions || !this.psdk) return false;
     try {
+      // psdk exposes node.shares / share via SDK globals — use any to bypass missing types
+      const sdk = this.psdk as any;
       const shareData = await new Promise<any>((resolve) => {
-        this.psdk!.node.shares.getbyid([txid], () => {
-          resolve(this.psdk!.share.get(txid));
+        sdk.node.shares.getbyid([txid], () => {
+          resolve(sdk.share.get(txid));
         });
       });
       if (!shareData) return false;
       const upvoteShare = shareData.upvote(value);
       if (!upvoteShare) return false;
-      await this.actions.addActionAndSendIfCan(upvoteShare);
+      await (this.actions as any).addActionAndSendIfCan(upvoteShare);
       return true;
     } catch (e) {
       console.error("[appInit] submitUpvote error:", e);
@@ -402,10 +404,13 @@ export class AppInitializer {
   async submitComment(txid: string, message: string, parentId?: string): Promise<boolean> {
     if (!this.actions) return false;
     try {
-      const comment = new Comment(txid);
+      // Comment is a global Pocketnet SDK class (not DOM Comment)
+      const PocketComment = (window as any).Comment;
+      if (!PocketComment) return false;
+      const comment = new PocketComment(txid);
       comment.message.set(message);
       if (parentId) comment.parentid = parentId;
-      await this.actions.addActionAndSendIfCan(comment);
+      await (this.actions as any).addActionAndSendIfCan(comment);
       return true;
     } catch (e) {
       console.error("[appInit] submitComment error:", e);
