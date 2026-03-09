@@ -7,6 +7,7 @@ import Avatar from "@/shared/ui/avatar/Avatar.vue";
 import { splitByQuery } from "@/shared/lib/utils/highlight";
 import { useSearch, type MessageSearchResult } from "@/features/search";
 import { formatRelativeTime } from "@/shared/lib/format";
+import { useFormatPreview } from "@/shared/lib/utils/format-preview";
 
 const props = defineProps<{ query: string }>();
 
@@ -19,6 +20,7 @@ const emit = defineEmits<{
 const { searchResults, isSearching, isCreatingRoom, debouncedSearch, getOrCreateRoom } = useContacts();
 const chatStore = useChatStore();
 const { t } = useI18n();
+const { formatPreview } = useFormatPreview();
 
 // Use the shared search composable for chat and message results
 const search = useSearch();
@@ -113,7 +115,7 @@ const handleSelectMessage = (result: MessageSearchResult) => {
             </template>
           </div>
           <div class="truncate text-xs text-text-on-main-bg-color">
-            {{ room.lastMessage?.content || "" }}
+            {{ formatPreview(room.lastMessage, room) }}
           </div>
         </div>
         <span v-if="room.lastMessage" class="shrink-0 text-xs text-text-on-main-bg-color">

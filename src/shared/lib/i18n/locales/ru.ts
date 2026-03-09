@@ -37,6 +37,7 @@ export const ru: Record<TranslationKey, string> = {
 
   // ── Contact search ──
   "contactSearch.placeholder": "Поиск чатов или пользователей...",
+  "contactSearch.placeholderShort": "Поиск",
   "contactSearch.searching": "Поиск...",
   "contactSearch.openingChat": "Открываем чат...",
   "contactSearch.chats": "Чаты",

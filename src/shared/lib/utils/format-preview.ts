@@ -1,0 +1,70 @@
+import { useChatStore } from "@/entities/chat";
+import type { ChatRoom, Message } from "@/entities/chat";
+import { MessageType } from "@/entities/chat";
+import { useAuthStore } from "@/entities/auth";
+import { stripMentionAddresses, stripBastyonLinks } from "@/shared/lib/message-format";
+import { cleanMatrixIds, resolveSystemText } from "@/entities/chat/lib/chat-helpers";
+
+/**
+ * Format a message for preview display (chat list, search results).
+ * Handles deleted, media, system, call messages + text cleanup.
+ */
+export function useFormatPreview() {
+  const chatStore = useChatStore();
+  const authStore = useAuthStore();
+  const { t } = useI18n();
+
+  const formatPreview = (msg: Message | undefined, room: ChatRoom): string => {
+    if (!msg) return t("contactList.noMessages");
+    if (msg.deleted || (!msg.content && msg.type === MessageType.text && !msg.fileInfo)) {
+      return `🚫 ${t("message.deleted")}`;
+    }
+    let preview: string;
+    switch (msg.type) {
+      case MessageType.image:
+        preview = msg.content && msg.content !== "[photo]" ? `📷 ${msg.content}` : "📷 " + t("message.photo");
+        break;
+      case MessageType.video:
+        preview = msg.content && msg.content !== "[video]" ? `🎬 ${msg.content}` : "🎬 " + t("message.video");
+        break;
+      case MessageType.audio:
+        preview = msg.content && msg.content !== "[voice message]" ? `🎤 ${msg.content}` : "🎤 " + t("message.voiceMessage");
+        break;
+      case MessageType.file:
+        preview = `📎 ${msg.content || t("message.file")}`;
+        break;
+      case MessageType.system: {
+        let sysText: string;
+        if (msg.systemMeta?.template) {
+          sysText = resolveSystemText(
+            msg.systemMeta.template,
+            msg.systemMeta.senderAddr,
+            msg.systemMeta.targetAddr,
+            (addr) => chatStore.getDisplayName(addr),
+          );
+        } else {
+          sysText = cleanMatrixIds(msg.content);
+        }
+        if (msg.callInfo) {
+          const icon = msg.callInfo.callType === "video" ? "📹" : "📞";
+          return `${icon} ${sysText}`;
+        }
+        return sysText;
+      }
+      default:
+        preview = msg.content || "";
+    }
+    preview = stripMentionAddresses(preview);
+    preview = stripBastyonLinks(preview);
+    preview = cleanMatrixIds(preview);
+
+    if (room.isGroup && msg.senderId) {
+      const myAddr = authStore.address ?? "";
+      const senderName = msg.senderId === myAddr ? "You" : chatStore.getDisplayName(msg.senderId);
+      preview = `${senderName}: ${preview}`;
+    }
+    return preview;
+  };
+
+  return { formatPreview };
+}

@@ -9,6 +9,7 @@ import { formatRelativeTime } from "@/shared/lib/format";
 import { stripMentionAddresses, stripBastyonLinks } from "@/shared/lib/message-format";
 import { hexDecode, hexEncode } from "@/shared/lib/matrix/functions";
 import { cleanMatrixIds, resolveSystemText } from "@/entities/chat/lib/chat-helpers";
+import { useFormatPreview } from "@/shared/lib/utils/format-preview";
 import { useLongPress } from "@/shared/lib/gestures";
 import { ContextMenu } from "@/shared/ui/context-menu";
 import type { ContextMenuItem } from "@/shared/ui/context-menu";
@@ -28,6 +29,7 @@ const chatStore = useChatStore();
 const authStore = useAuthStore();
 const userStore = useUserStore();
 const { t } = useI18n();
+const { formatPreview } = useFormatPreview();
 const emit = defineEmits<{ selectRoom: [roomId: string] }>();
 
 const handleSelect = (room: ChatRoom) => {
@@ -122,63 +124,7 @@ const resolveRoomName = (room: ChatRoom): string => {
 };
 
 
-/** Format last message preview with type-aware icons */
-const formatPreview = (msg: Message | undefined, room: ChatRoom): string => {
-  if (!msg) return t("contactList.noMessages");
-  if (msg.deleted || (!msg.content && msg.type === MessageType.text && !msg.fileInfo)) {
-    return `🚫 ${t("message.deleted")}`;
-  }
-  let preview: string;
-  switch (msg.type) {
-    case MessageType.image:
-      preview = msg.content && msg.content !== "[photo]" ? `📷 ${msg.content}` : "📷 " + t("message.photo");
-      break;
-    case MessageType.video:
-      preview = msg.content && msg.content !== "[video]" ? `🎬 ${msg.content}` : "🎬 " + t("message.video");
-      break;
-    case MessageType.audio:
-      preview = msg.content && msg.content !== "[voice message]" ? `🎤 ${msg.content}` : "🎤 " + t("message.voiceMessage");
-      break;
-    case MessageType.file:
-      preview = `📎 ${msg.content || t("message.file")}`;
-      break;
-    case MessageType.system: {
-      // Dynamically resolve names from systemMeta template (avoids stale truncated addresses)
-      let sysText: string;
-      if (msg.systemMeta?.template) {
-        sysText = resolveSystemText(
-          msg.systemMeta.template,
-          msg.systemMeta.senderAddr,
-          msg.systemMeta.targetAddr,
-          (addr) => chatStore.getDisplayName(addr),
-        );
-      } else {
-        sysText = cleanMatrixIds(msg.content);
-      }
-      if (msg.callInfo) {
-        const icon = msg.callInfo.callType === "video" ? "📹" : "📞";
-        return `${icon} ${sysText}`;
-      }
-      return sysText;
-    }
-    default:
-      preview = msg.content || "";
-  }
-  // Strip mention hex addresses for preview (e.g. @hexid:Name → @Name)
-  preview = stripMentionAddresses(preview);
-  // Replace bastyon post links with short label
-  preview = stripBastyonLinks(preview);
-  // Clean any remaining raw Matrix IDs (@hexid:server → decoded address)
-  preview = cleanMatrixIds(preview);
-
-  // Add sender prefix for group chats
-  if (room.isGroup && msg.senderId) {
-    const myAddr = authStore.address ?? "";
-    const senderName = msg.senderId === myAddr ? "You" : chatStore.getDisplayName(msg.senderId);
-    preview = `${senderName}: ${preview}`;
-  }
-  return preview;
-};
+/** Format last message preview — delegated to shared composable */
 
 /** Get typing users for a room (excluding self) */
 const getTypingText = (roomId: string): string => {
