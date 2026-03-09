@@ -8,6 +8,7 @@ import TitleBar from "@/widgets/title-bar/TitleBar.vue";
 import IncomingCallModal from "@/features/video-calls/ui/IncomingCallModal.vue";
 import CallWindow from "@/features/video-calls/ui/CallWindow.vue";
 import CallStatusBar from "@/features/video-calls/ui/CallStatusBar.vue";
+import QuickSearchModal from "@/features/search/ui/QuickSearchModal.vue";
 import { useRouter } from "vue-router";
 
 import { AppPages, AppRoutes, EAppProviders } from "./providers";
@@ -78,8 +79,21 @@ watch(
 const isMobile = ref(window.innerWidth < 768);
 const onResize = () => { isMobile.value = window.innerWidth < 768; };
 
+const showQuickSearch = ref(false);
+
+const handleGlobalKeydown = (e: KeyboardEvent) => {
+  if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+    e.preventDefault();
+    showQuickSearch.value = !showQuickSearch.value;
+  }
+  if (e.key === "Escape" && showQuickSearch.value) {
+    showQuickSearch.value = false;
+  }
+};
+
 onMounted(async () => {
   window.addEventListener("resize", onResize);
+  window.addEventListener("keydown", handleGlobalKeydown);
 
   // Mark Electron mode on <html> for CSS adjustments (drag regions, traffic light padding)
   if ((window as any).electronAPI?.isElectron) {
@@ -121,6 +135,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   window.removeEventListener("resize", onResize);
+  window.removeEventListener("keydown", handleGlobalKeydown);
 });
 </script>
 
@@ -136,6 +151,11 @@ onUnmounted(() => {
     <IncomingCallModal />
     <CallWindow />
     <CallStatusBar />
+    <QuickSearchModal
+      v-if="showQuickSearch"
+      @close="showQuickSearch = false"
+      @select-room="showQuickSearch = false"
+    />
   </div>
 </template>
 

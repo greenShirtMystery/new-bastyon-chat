@@ -477,6 +477,12 @@ export const ru: Record<TranslationKey, string> = {
   "shareGroup.joined": "Вы присоединились",
   "shareGroup.alreadyMember": "Вы уже участник",
 
+  // ── Quick search ──
+  "quickSearch.placeholder": "Перейти к чату...",
+  "quickSearch.recent": "Недавние",
+  "quickSearch.chats": "Чаты",
+  "quickSearch.noResults": "Чаты не найдены",
+
   // ── Language names ──
   "locale.en": "English",
   "locale.ru": "Русский",
