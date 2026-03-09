@@ -42,6 +42,7 @@ export const en = {
   "contactSearch.noResults": "No chats or users found",
   "contactSearch.messages": "Messages",
   "contactSearch.showMore": "Show more",
+  "contactSearch.clearSearch": "Clear search",
 
   // ── Folder tabs ──
   "tabs.all": "All",

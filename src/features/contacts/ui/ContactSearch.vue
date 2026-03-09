@@ -13,6 +13,7 @@ const props = defineProps<{ query: string }>();
 const emit = defineEmits<{
   roomCreated: [roomId: string];
   selectMessage: [payload: { roomId: string; messageId: string }];
+  clear: [];
 }>();
 
 const { searchResults, isSearching, isCreatingRoom, debouncedSearch, getOrCreateRoom } = useContacts();
@@ -202,9 +203,15 @@ const handleSelectMessage = (result: MessageSearchResult) => {
     <!-- No results -->
     <div
       v-if="!visibleChats.length && !visibleUsers.length && !visibleMessages.length && !isSearching"
-      class="p-4 text-center text-sm text-text-on-main-bg-color"
+      class="flex flex-col items-center gap-2 py-8 text-sm text-text-on-main-bg-color"
     >
-      {{ t("contactSearch.noResults") }}
+      <span>{{ t("contactSearch.noResults") }}</span>
+      <button
+        class="text-color-txt-ac hover:underline"
+        @click="emit('clear')"
+      >
+        {{ t("contactSearch.clearSearch") }}
+      </button>
     </div>
   </div>
 </template>

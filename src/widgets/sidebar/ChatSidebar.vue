@@ -207,6 +207,7 @@ watch(walletAvailable, (v) => { if (v) loadBalance(); }, { immediate: true });
             class="flex-1 overflow-y-auto"
             @room-created="handleRoomCreated"
             @select-message="handleSelectMessage"
+            @clear="sidebarSearchQuery = ''"
           />
         </template>
         <template v-else>

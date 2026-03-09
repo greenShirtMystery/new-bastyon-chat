@@ -13,6 +13,7 @@ const { query, chatResults, clearSearch } = useSearch();
 const { t } = useI18n();
 
 const inputRef = ref<HTMLInputElement>();
+const listRef = ref<HTMLElement>();
 const selectedIndex = ref(0);
 
 // Recent chats when query is empty
@@ -26,6 +27,14 @@ const displayRooms = computed(() =>
 // Reset selection when results change
 watch(displayRooms, () => {
   selectedIndex.value = 0;
+});
+
+// Scroll selected item into view
+watch(selectedIndex, (idx) => {
+  if (!listRef.value) return;
+  // +1 offset for the section label div
+  const el = listRef.value.children[idx + 1] as HTMLElement;
+  el?.scrollIntoView({ block: "nearest" });
 });
 
 onMounted(() => {
@@ -92,7 +101,7 @@ const handleBackdropClick = () => {
           </div>
 
           <!-- Results -->
-          <div class="max-h-[340px] overflow-y-auto py-1">
+          <div ref="listRef" class="max-h-[340px] overflow-y-auto py-1">
             <div class="px-4 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-text-on-main-bg-color">
               {{ query.trim() ? t('quickSearch.chats') : t('quickSearch.recent') }}
             </div>

@@ -44,6 +44,7 @@ export const ru: Record<TranslationKey, string> = {
   "contactSearch.noResults": "Чаты и пользователи не найдены",
   "contactSearch.messages": "Сообщения",
   "contactSearch.showMore": "Показать ещё",
+  "contactSearch.clearSearch": "Очистить поиск",
 
   // ── Folder tabs ──
   "tabs.all": "Все",
