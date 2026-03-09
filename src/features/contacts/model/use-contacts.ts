@@ -172,7 +172,6 @@ export function useContacts() {
           console.error("[useContacts] createRoom error:", createErr);
           return null;
         }
-        console.log("[useContacts] M_ROOM_IN_USE — rejoining via alias:", fullAlias);
       }
 
       // M_ROOM_IN_USE: room alias exists on server from a previously deleted chat.
@@ -184,7 +183,6 @@ export function useContacts() {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const joinResult = await matrixService.joinRoom(fullAlias) as any;
         const roomId = joinResult?.roomId ?? joinResult?.room_id ?? null;
-        console.log("[useContacts] joinRoom succeeded, roomId:", roomId);
         if (roomId) {
           activateRoom(roomId, targetAddress, myHexId, targetHexId);
           return roomId;
@@ -206,7 +204,6 @@ export function useContacts() {
           const joinResult = await matrixService.joinRoom(vFullAlias) as any;
           const roomId = joinResult?.roomId ?? joinResult?.room_id ?? null;
           if (roomId) {
-            console.log("[useContacts] joined versioned room v%d, roomId: %s", v, roomId);
             activateRoom(roomId, targetAddress, myHexId, targetHexId);
             return roomId;
           }
@@ -229,7 +226,6 @@ export function useContacts() {
           });
 
           const roomId = result.room_id;
-          console.log("[useContacts] created versioned room v%d, roomId: %s", v, roomId);
 
           // Set equal power levels
           try {
@@ -250,7 +246,6 @@ export function useContacts() {
           const vErrcode = (vErr as any)?.errcode ?? (vErr as any)?.data?.errcode;
           if (vErrcode === "M_ROOM_IN_USE") {
             // This version is also stuck, try next
-            console.log("[useContacts] version %d also in use, trying next", v);
             continue;
           }
           console.error("[useContacts] createRoom v%d failed:", v, vErr);

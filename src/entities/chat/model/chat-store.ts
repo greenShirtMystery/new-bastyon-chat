@@ -802,7 +802,6 @@ export const useChatStore = defineStore(NAMESPACE, () => {
             if (memberId !== myUserId) {
               try {
                 await matrixService.kick(roomId, memberId);
-                console.log("[chat-store] removeRoom: kicked", memberId);
               } catch (kickErr) {
                 console.warn("[chat-store] removeRoom: kick failed for", memberId, kickErr);
               }
@@ -2043,44 +2042,34 @@ export const useChatStore = defineStore(NAMESPACE, () => {
       const receiptEvent = event as any;
       const roomObj = room as Record<string, unknown>;
       const roomId = roomObj?.roomId as string;
-      console.log("[chat-store] handleReceiptEvent roomId=%s", roomId);
-      if (!roomId) { console.log("[chat-store] handleReceiptEvent: no roomId"); return; }
+      if (!roomId) return;
 
       const roomMessages = messages.value[roomId];
-      if (!roomMessages) { console.log("[chat-store] handleReceiptEvent: no messages for room"); return; }
+      if (!roomMessages) return;
 
       const matrixService = getMatrixClientService();
       const myUserId = matrixService.getUserId();
-      console.log("[chat-store] handleReceiptEvent myUserId=%s", myUserId);
 
       // Get receipt content: { eventId: { "m.read": { userId: { ts } } } }
       const content = receiptEvent?.getContent?.() ?? receiptEvent?.event?.content;
-      console.log("[chat-store] handleReceiptEvent content=", JSON.stringify(content));
-      if (!content) { console.log("[chat-store] handleReceiptEvent: no content"); return; }
+      if (!content) return;
 
       for (const [eventId, receiptTypes] of Object.entries(content)) {
         const readReceipts = (receiptTypes as Record<string, unknown>)?.["m.read"] as Record<string, unknown> | undefined;
         if (!readReceipts) continue;
 
-        // Check if someone OTHER than us sent a read receipt for one of OUR messages
         for (const userId of Object.keys(readReceipts)) {
-          console.log("[chat-store] receipt: userId=%s read eventId=%s (me=%s)", userId, eventId, myUserId);
-          if (userId === myUserId) continue; // skip our own receipts
+          if (userId === myUserId) continue;
 
-          // Find this event in our messages and mark it (and all previous) as read
           const msgIdx = roomMessages.findIndex(m => m.id === eventId);
-          console.log("[chat-store] receipt: msgIdx=%d for eventId=%s, total msgs=%d", msgIdx, eventId, roomMessages.length);
           if (msgIdx >= 0) {
             const myAddr = matrixIdToAddress(myUserId ?? "");
-            console.log("[chat-store] receipt: marking read, myAddr=%s, msg.senderId=%s", myAddr, roomMessages[msgIdx].senderId);
-            // Mark this message and all earlier own messages as read
             for (let i = msgIdx; i >= 0; i--) {
               const msg = roomMessages[i];
               if (msg.senderId !== myAddr) continue;
-              if (msg.status === MessageStatus.read) break; // already read, stop
+              if (msg.status === MessageStatus.read) break;
               if (msg.status === MessageStatus.sent || msg.status === MessageStatus.delivered) {
                 msg.status = MessageStatus.read;
-                console.log("[chat-store] receipt: marked msg %s as read", msg.id);
               }
             }
           }

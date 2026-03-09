@@ -3,6 +3,9 @@ import { useCallStore } from "@/entities/call";
 const CHANNEL = "bastyon_call_lock";
 const TAB_ID = crypto.randomUUID();
 
+/** Time to wait for another tab's response before assuming no active call (avoids race with slow tabs). */
+const TAB_CHECK_TIMEOUT_MS = 1000;
+
 let bc: BroadcastChannel | null = null;
 
 export function initCallTabLock() {
@@ -18,7 +21,7 @@ export function initCallTabLock() {
   };
 }
 
-/** Check if another tab already has an active call. Resolves after 300ms timeout. */
+/** Check if another tab already has an active call. Resolves after TAB_CHECK_TIMEOUT_MS if no response. */
 export function checkOtherTabHasCall(): Promise<boolean> {
   return new Promise((resolve) => {
     if (!bc) {
@@ -42,7 +45,7 @@ export function checkOtherTabHasCall(): Promise<boolean> {
         bc?.removeEventListener("message", handler);
         resolve(false);
       }
-    }, 300);
+    }, TAB_CHECK_TIMEOUT_MS);
   });
 }
 

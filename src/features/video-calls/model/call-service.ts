@@ -138,7 +138,6 @@ function wireCallEvents(call: MatrixCall, direction: "outgoing" | "incoming") {
   const callStore = useCallStore();
 
   const onState = ((newState: SDKCallState, _oldState: SDKCallState) => {
-    console.log("[call-service] state:", _oldState, "→", newState);
     const status = mapSDKState(newState, direction);
     callStore.updateStatus(status);
 
@@ -183,18 +182,23 @@ function wireCallEvents(call: MatrixCall, direction: "outgoing" | "incoming") {
   }) as CallEventHandlerMap[CallEvent.State];
 
   const onFeeds = (() => {
-    console.log("[call-service] feeds changed");
     updateFeeds(call);
   }) as CallEventHandlerMap[CallEvent.FeedsChanged];
 
   const onHangup = (() => {
-    console.log("[call-service] hangup event");
     stopAllSounds();
     clearIncomingTimeout();
   }) as CallEventHandlerMap[CallEvent.Hangup];
 
   const onError = ((error: unknown) => {
-    console.error("[call-service] call error:", error);
+    // Detailed log for debugging (e.g. ICE failure when WiFi ↔ 4G)
+    const err = error as { code?: string; message?: string } | undefined;
+    const code = err?.code ?? (error as Error)?.name;
+    const msg = err?.message ?? (error as Error)?.message ?? String(error);
+    console.error("[call-service] call error:", code ?? "unknown", msg, error);
+    if (err && typeof err === "object" && !err.message && Object.keys(err).length > 0) {
+      console.error("[call-service] error object:", JSON.stringify(err, null, 2));
+    }
     stopAllSounds();
     clearIncomingTimeout();
     unwireCallEvents(call);
@@ -221,6 +225,28 @@ function wireCallEvents(call: MatrixCall, direction: "outgoing" | "incoming") {
   call.on(CallEvent.FeedsChanged, onFeeds);
   call.on(CallEvent.Hangup, onHangup);
   call.on(CallEvent.Error, onError);
+
+  // Log ICE failure only (for TURN/NAT debugging)
+  const onPeerConnectionCreated = (pc: RTCPeerConnection) => {
+    pc.oniceconnectionstatechange = () => {
+      if (pc.iceConnectionState === "failed" || pc.iceConnectionState === "disconnected") {
+        console.warn("[call-service] ICE failed/disconnected — TURN may be needed when both sides are behind NAT");
+      }
+    };
+  };
+  if (typeof (call as any).on === "function" && (CallEvent as any).PeerConnectionCreated) {
+    call.on((CallEvent as any).PeerConnectionCreated, onPeerConnectionCreated);
+  }
+  // Fallback: if SDK doesn't emit PeerConnectionCreated, attach once peerConn is set
+  const pcCheck = setInterval(() => {
+    const pc: RTCPeerConnection | undefined = (call as any).peerConn;
+    if (pc && !(pc as any).__callServiceIceLogged) {
+      (pc as any).__callServiceIceLogged = true;
+      clearInterval(pcCheck);
+      onPeerConnectionCreated(pc);
+    }
+  }, 300);
+  setTimeout(() => clearInterval(pcCheck), 15000);
 }
 
 // ---------------------------------------------------------------------------
@@ -253,7 +279,6 @@ function hintStoredDevices(client: any) {
     const savedAudio = localStorage.getItem("bastyon_call_audio_device") ?? "";
     const savedVideo = localStorage.getItem("bastyon_call_video_device") ?? "";
     if (savedAudio || savedVideo) {
-      console.log("[call-service] Hinting stored devices: audio=%s video=%s", savedAudio, savedVideo);
       mediaHandler.restoreMediaSettings(savedAudio, savedVideo);
     }
   } catch (e) {
@@ -279,7 +304,6 @@ async function applySavedDevicesExact(call: MatrixCall) {
       const currentAudioTrack = localStream.getAudioTracks()[0];
       const currentAudioId = currentAudioTrack?.getSettings()?.deviceId ?? "";
       if (currentAudioId !== savedAudio) {
-        console.log("[call-service] Post-connect: switching audio %s → %s", currentAudioId, savedAudio);
         await useCallService().setAudioDevice(savedAudio);
       }
     }
@@ -290,7 +314,6 @@ async function applySavedDevicesExact(call: MatrixCall) {
       if (currentVideoTrack) {
         const currentVideoId = currentVideoTrack.getSettings()?.deviceId ?? "";
         if (currentVideoId !== savedVideo) {
-          console.log("[call-service] Post-connect: switching video %s → %s", currentVideoId, savedVideo);
           await useCallService().setVideoDevice(savedVideo);
         }
       }
@@ -354,21 +377,20 @@ export function useCallService() {
       return;
     }
 
+    // SDK may expose supportsVoip() or canSupportVoip; prefer method call
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const supportsVoip = (client as any).supportsVoip?.();
-    console.log("[call-service] supportsVoip:", supportsVoip);
-    if (!supportsVoip) {
-      console.error("[call-service] VoIP not supported by client");
-      return;
-    }
+    const supportsVoip = typeof (client as any).supportsVoip === "function"
+      ? (client as any).supportsVoip()
+      : (client as any).canSupportVoip === true;
 
     const call = createNewMatrixCall(client, roomId);
     if (!call) {
-      console.error("[call-service] createNewMatrixCall returned null — WebRTC not available");
+      console.error("[call-service] createNewMatrixCall returned null — WebRTC not available (secure context + RTCPeerConnection required)");
       return;
     }
-
-    console.log("[call-service] Starting %s call in room %s, callId=%s", type, roomId, call.callId);
+    if (!supportsVoip) {
+      console.warn("[call-service] VoIP not supported by client but call created — attempting anyway");
+    }
 
     const room = client.getRoom(roomId);
     const myUserId = matrixService.getUserId();
@@ -397,7 +419,6 @@ export function useCallService() {
 
     playDialtone();
 
-    // Hint stored device IDs (lightweight, sync) — real fix is post-connect
     hintStoredDevices(client);
 
     try {
@@ -406,7 +427,6 @@ export function useCallService() {
       } else {
         await call.placeVoiceCall();
       }
-      console.log("[call-service] Call placed successfully");
     } catch (e) {
       console.error("[call-service] Failed to place call:", e);
       stopAllSounds();
@@ -417,10 +437,7 @@ export function useCallService() {
   }
 
   async function handleIncomingCall(matrixCall: MatrixCall) {
-    console.log("[call-service] Incoming call, callId=%s, type=%s", matrixCall.callId, matrixCall.type);
-
     if (callStore.isInCall) {
-      console.log("[call-service] Already in a call, rejecting incoming");
       matrixCall.reject();
       return;
     }
@@ -463,7 +480,6 @@ export function useCallService() {
     incomingTimeoutId = setTimeout(() => {
       incomingTimeoutId = null;
       if (callStore.activeCall?.status === CallStatus.incoming) {
-        console.log("[call-service] Incoming call timeout — auto-rejecting");
         rejectCall();
       }
     }, 30_000);
@@ -482,8 +498,6 @@ export function useCallService() {
     hintStoredDevices(client);
 
     const isVideo = callStore.activeCall?.type === "video";
-    console.log("[call-service] Answering call, video=%s", isVideo);
-
     try {
       await call.answer(true, isVideo);
     } catch (e) {
@@ -498,7 +512,6 @@ export function useCallService() {
     const call = callStore.matrixCall as MatrixCall | null;
     if (!call) return;
 
-    console.log("[call-service] Rejecting call");
     clearIncomingTimeout();
     stopAllSounds();
 
@@ -530,7 +543,6 @@ export function useCallService() {
     const call = callStore.matrixCall as MatrixCall | null;
     if (!call) return;
 
-    console.log("[call-service] Hanging up");
     clearIncomingTimeout();
     stopAllSounds();
 
@@ -550,7 +562,6 @@ export function useCallService() {
 
     try {
       const muted = call.isMicrophoneMuted();
-      console.log("[call-service] toggleMute: %s → %s", muted ? "muted" : "unmuted", !muted ? "muted" : "unmuted");
       await call.setMicrophoneMuted(!muted);
       callStore.audioMuted = !muted;
     } catch (e) {
@@ -571,7 +582,6 @@ export function useCallService() {
 
     try {
       const wantMuted = !callStore.videoMuted;
-      console.log("[call-service] toggleCamera → %s", wantMuted ? "off" : "on");
 
       await call.setLocalVideoMuted(wantMuted);
       callStore.videoMuted = wantMuted;
@@ -589,7 +599,6 @@ export function useCallService() {
           const newTrack = call.localUsermediaStream?.getVideoTracks()[0];
           const currentId = newTrack?.getSettings()?.deviceId ?? "";
           if (currentId && currentId !== savedVideo) {
-            console.log("[call-service] toggleCamera: re-applying saved video device %s → %s", currentId, savedVideo);
             await setVideoDevice(savedVideo);
           }
         }
@@ -607,12 +616,10 @@ export function useCallService() {
 
     try {
       const wasEnabled = callStore.screenSharing;
-      console.log("[call-service] toggleScreenShare: %s → %s", wasEnabled, !wasEnabled);
       const newState = await call.setScreensharingEnabled(!wasEnabled);
       // setScreensharingEnabled returns the actual new state (true=sharing, false=not)
       callStore.screenSharing = newState;
       updateFeeds(call);
-      console.log("[call-service] screenSharing state now:", newState);
     } catch (e) {
       console.error("[call-service] toggleScreenShare error:", e);
       // On error, ensure state reflects reality
@@ -635,8 +642,6 @@ export function useCallService() {
       const call = callStore.matrixCall as MatrixCall | null;
       if (!call) return;
 
-      console.log("[call-service] Setting audio device (exact):", deviceId);
-
       // 1. Acquire new track with {exact} constraint
       const newStream = await navigator.mediaDevices.getUserMedia({
         audio: { deviceId: { exact: deviceId } },
@@ -654,7 +659,6 @@ export function useCallService() {
         const audioSender = pc.getSenders().find((s) => s.track?.kind === "audio");
         if (audioSender) {
           await audioSender.replaceTrack(newTrack);
-          console.log("[call-service] Audio sender track replaced");
         } else {
           console.warn("[call-service] No audio sender found on peer connection");
         }
@@ -695,8 +699,6 @@ export function useCallService() {
       const call = callStore.matrixCall as MatrixCall | null;
       if (!call) return;
 
-      console.log("[call-service] Setting video device (exact):", deviceId);
-
       // 1. Acquire new track with {exact} constraint
       const newStream = await navigator.mediaDevices.getUserMedia({
         video: { deviceId: { exact: deviceId } },
@@ -714,7 +716,6 @@ export function useCallService() {
         const videoSender = pc.getSenders().find((s) => s.track?.kind === "video");
         if (videoSender) {
           await videoSender.replaceTrack(newTrack);
-          console.log("[call-service] Video sender track replaced");
         } else {
           console.warn("[call-service] No video sender found on peer connection");
         }

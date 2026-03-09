@@ -49,9 +49,6 @@ async function downloadAndDecrypt(
       origin_server_ts: timestamp,
     };
 
-    console.log("[use-file-download] decryptKey: sender=%s, ts=%d, block=%d",
-      senderId, timestamp, fileInfo.secrets.block);
-
     // Decrypt the symmetric file key
     const decryptKey = await roomCrypto.decryptKey(event);
 

@@ -92,8 +92,7 @@ export async function initTransport(): Promise<void> {
   }
 
   try {
-    const reg = await navigator.serviceWorker.register('./service-worker.js?platform=electron');
-    console.log('Service Worker registered:', reg.scope);
+    await navigator.serviceWorker.register('./service-worker.js?platform=electron');
   } catch (err) {
     console.error('Service Worker registration failed:', err);
     return;

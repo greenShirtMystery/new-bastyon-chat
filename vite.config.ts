@@ -78,4 +78,18 @@ export default defineConfig({
     },
     chunkSizeWarningLimit: 800,
   },
+  server: {
+    host: '0.0.0.0',
+    allowedHosts: true, // Разрешить любые домены
+    // hmr: {
+    //   protocol: 'wss',
+    //   allowedHosts: ['eravisionservice.ru'],
+    //   // port: 443,
+    //   clientPort: 443,
+    //   timeout: 60000,
+    // }
+  },
+  watch: {
+    ignored: ['**/node_modules/**', '**/.git/**'],
+  },
 });

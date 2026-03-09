@@ -10,6 +10,7 @@ import {
   Pcrypto,
 } from "@/entities/matrix";
 import type { UserWithPrivateKeys } from "@/entities/matrix/model/matrix-crypto";
+import { useCallService } from "@/features/video-calls/model/call-service";
 import { getmatrixid } from "@/shared/lib/matrix/functions";
 import { useLocalStorage } from "@/shared/lib/browser";
 import { convertToHexString } from "@/shared/lib/convert-to-hex-string";
@@ -127,35 +128,26 @@ export const useAuthStore = defineStore(NAMESPACE, () => {
       return;
     }
 
-    console.log("[auth] initMatrix starting for", address.value);
     matrixReady.value = false;
     matrixError.value = "Initializing...";
 
     try {
-      // Step 1: Check bitcoin global
       if (typeof bitcoin === "undefined") {
         throw new Error("bitcoin global not found — SDK scripts may not have loaded");
       }
-      console.log("[auth] Step 1: bitcoin global OK");
 
-      // Step 2: Get matrix service
       const matrixService = getMatrixClientService();
       matrixError.value = "Deriving credentials...";
 
       // Step 3: Derive credentials
       const credentials = deriveMatrixCredentials(address.value, privateKey.value);
-      console.log("[auth] Step 3: credentials derived, user=%s", credentials.username);
       matrixService.setCredentials(credentials);
 
-      // Step 4: Initialize MatrixKit
       matrixError.value = "Creating MatrixKit...";
       matrixKit.value = new MatrixKit(matrixService);
-      console.log("[auth] Step 4: MatrixKit created");
 
-      // Step 5: Generate encryption keys
       matrixError.value = "Generating encryption keys...";
       const encKeys = generateEncryptionKeys(privateKey.value);
-      console.log("[auth] Step 5: %d encryption keys generated", encKeys.length);
 
       // Step 6: Init Pcrypto
       matrixError.value = "Initializing Pcrypto...";
@@ -226,7 +218,6 @@ export const useAuthStore = defineStore(NAMESPACE, () => {
       });
       await cryptoInstance.prepare();
       pcrypto.value = cryptoInstance;
-      console.log("[auth] Step 6: Pcrypto initialized (hexAddr=%s)", hexAddr);
 
       // Step 7: Wire Matrix events → chat store
       matrixError.value = "Wiring events...";
@@ -249,7 +240,6 @@ export const useAuthStore = defineStore(NAMESPACE, () => {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const roomId = (_room as any)?.roomId as string;
             if (roomId) {
-              console.log("[auth] myMembership: kicked from room", roomId);
               chatStore.handleKicked(roomId);
             }
           }
@@ -275,32 +265,25 @@ export const useAuthStore = defineStore(NAMESPACE, () => {
           }
         },
         onIncomingCall: (call: unknown) => {
-          import("@/features/video-calls/model/call-service").then(({ useCallService }) => {
+          try {
             const callService = useCallService();
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             callService.handleIncomingCall(call as any);
-          }).catch((err) => {
-            console.error("[auth] Failed to load call-service:", err);
+          } catch (err) {
+            console.error("[auth] Failed to handle incoming call:", err);
             try { (call as any).reject?.(); } catch { /* ignore */ }
-          });
+          }
         },
       });
-      console.log("[auth] Step 7: events wired");
-
-      // Step 8: Start the Matrix client (login + sync)
       matrixError.value = "Connecting to Matrix server...";
-      console.log("[auth] Step 8: Starting Matrix client...");
       await matrixService.init();
 
       if (matrixService.isReady()) {
-        console.log("[auth] Matrix client ready!");
         matrixReady.value = true;
         matrixError.value = null;
 
-        // Init cross-tab call lock
         import("@/features/video-calls/model/call-tab-lock").then(({ initCallTabLock }) => {
           initCallTabLock();
-          console.log("[auth] Call tab lock initialized");
         }).catch((err) => {
           console.warn("[auth] Failed to init call tab lock:", err);
         });
@@ -320,15 +303,12 @@ export const useAuthStore = defineStore(NAMESPACE, () => {
 
   const fetchUserInfo = async () => {
     if (!address.value || !privateKey.value) {
-      console.log("[auth] fetchUserInfo skipped: no credentials");
       return;
     }
-    console.log("[auth] fetchUserInfo starting for", address.value);
 
     await appInitializer.initializeAndFetchUserData(
       address.value,
       (userData: UserData) => {
-        console.log("[auth] fetchUserInfo: user data received", userData?.name);
         setUserInfo(userData);
         PocketnetInstanceConfigurator.setUserAddress(address.value!);
         PocketnetInstanceConfigurator.setUserGetKeyPairFc(() =>

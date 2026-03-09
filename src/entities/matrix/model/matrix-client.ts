@@ -183,6 +183,7 @@ export class MatrixClientService {
       request: this.request.bind(this),
       iceCandidatePoolSize: 20,
       fallbackICEServerAllowed: true,
+      disableVoip: false, // ensure WebRTC call handler and Call.incoming are enabled
     };
 
     const userClient = this.createMtrxClient(userClientData);
@@ -307,16 +308,15 @@ export class MatrixClientService {
       this.onMyMembership?.(room, membership, prevMembership);
     });
 
+    // SDK emits "Call.incoming" when it receives m.call.invite (room or to-device)
     this.client.on("Call.incoming" as string, (call: unknown) => {
       this.onIncomingCall?.(call);
     });
 
     this.client.on("sync", (state: string) => {
-      console.log("[matrix-client] sync state:", state);
       if (state === "PREPARED" || state === "SYNCING") {
         if (!this.chatsReady) {
           this.chatsReady = true;
-          console.log("[matrix-client] chatsReady = true");
         }
         this.onSync?.();
       }
