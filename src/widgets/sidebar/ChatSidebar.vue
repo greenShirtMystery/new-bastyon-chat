@@ -21,6 +21,14 @@ const { t } = useI18n();
 const { activeTab, setTab } = useSidebarTab();
 
 const sidebarSearchQuery = ref("");
+
+const searchPlaceholder = computed(() => {
+  const isMobile = /Android|iPhone|iPad/i.test(navigator.userAgent);
+  if (isMobile) return t("contactSearch.placeholderShort");
+  const isMac = navigator.platform?.startsWith("Mac") || navigator.userAgent.includes("Mac");
+  const shortcut = isMac ? "⌘K" : "Ctrl+K";
+  return `${t("contactSearch.placeholderShort")} (${shortcut})`;
+});
 const activeFilter = ref<"all" | "personal" | "groups" | "invites">("all");
 const tabOrder = ["all", "personal", "groups", "invites"] as const;
 const slideDirection = ref<"left" | "right">("left");
@@ -185,7 +193,7 @@ watch(walletAvailable, (v) => { if (v) loadBalance(); }, { immediate: true });
             </svg>
             <input
               v-model="sidebarSearchQuery"
-              :placeholder="t('contactSearch.placeholder')"
+              :placeholder="searchPlaceholder"
               class="w-full rounded-lg bg-chat-input-bg py-2 pl-8 pr-8 text-sm text-text-color outline-none placeholder:text-neutral-grad-2"
             />
             <button

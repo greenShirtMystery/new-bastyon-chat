@@ -35,6 +35,7 @@ export const en = {
 
   // ── Contact search ──
   "contactSearch.placeholder": "Search chats or users...",
+  "contactSearch.placeholderShort": "Search",
   "contactSearch.searching": "Searching...",
   "contactSearch.openingChat": "Opening chat...",
   "contactSearch.chats": "Chats",

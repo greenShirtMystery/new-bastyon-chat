@@ -5,12 +5,14 @@ import { UserAvatar } from "@/entities/user";
 import Avatar from "@/shared/ui/avatar/Avatar.vue";
 import { splitByQuery } from "@/shared/lib/utils/highlight";
 import { useSearch } from "../model/use-search";
+import { useFormatPreview } from "@/shared/lib/utils/format-preview";
 
 const emit = defineEmits<{ close: []; selectRoom: [roomId: string] }>();
 
 const chatStore = useChatStore();
 const { query, chatResults, clearSearch } = useSearch();
 const { t } = useI18n();
+const { formatPreview } = useFormatPreview();
 
 const inputRef = ref<HTMLInputElement>();
 const listRef = ref<HTMLElement>();
@@ -131,7 +133,7 @@ const handleBackdropClick = () => {
                   <span v-else>{{ room.name }}</span>
                 </div>
                 <div class="truncate text-xs text-text-on-main-bg-color">
-                  {{ room.lastMessage?.content || "" }}
+                  {{ formatPreview(room.lastMessage, room) }}
                 </div>
               </div>
             </button>
