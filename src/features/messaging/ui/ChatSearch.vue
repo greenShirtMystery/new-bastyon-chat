@@ -4,7 +4,7 @@ import { useChatStore } from "@/entities/chat";
 import type { Message } from "@/entities/chat";
 import { UserAvatar } from "@/entities/user";
 import { splitByQuery } from "@/shared/lib/utils/highlight";
-import { useFormatPreview } from "@/shared/lib/utils/format-preview";
+
 import { formatRelativeTime } from "@/shared/lib/format";
 import { hexDecode } from "@/shared/lib/matrix/functions";
 
@@ -16,7 +16,7 @@ const emit = defineEmits<{
 
 const chatStore = useChatStore();
 const { t } = useI18n();
-const { formatPreview } = useFormatPreview();
+
 
 // --- State ---
 const query = ref("");
