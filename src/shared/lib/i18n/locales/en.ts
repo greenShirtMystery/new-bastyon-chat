@@ -475,6 +475,12 @@ export const en = {
   "shareGroup.joined": "Joined successfully",
   "shareGroup.alreadyMember": "You are already a member",
 
+  // ── Quick search ──
+  "quickSearch.placeholder": "Go to chat...",
+  "quickSearch.recent": "Recent",
+  "quickSearch.chats": "Chats",
+  "quickSearch.noResults": "No chats found",
+
   // ── Language names ──
   "locale.en": "English",
   "locale.ru": "Русский",
