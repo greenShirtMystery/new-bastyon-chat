@@ -20,7 +20,7 @@ onMounted(() => {
 const { t } = useI18n();
 const { activeTab, setTab } = useSidebarTab();
 
-const searchOpen = ref(false);
+const sidebarSearchQuery = ref("");
 const activeFilter = ref<"all" | "personal" | "groups" | "invites">("all");
 const tabOrder = ["all", "personal", "groups", "invites"] as const;
 const slideDirection = ref<"left" | "right">("left");
@@ -72,13 +72,20 @@ watch(
 );
 
 const handleSelectRoom = () => {
-  searchOpen.value = false;
+  sidebarSearchQuery.value = "";
   emit("selectRoom");
 };
 
 const handleRoomCreated = () => {
-  searchOpen.value = false;
+  sidebarSearchQuery.value = "";
   emit("selectRoom");
+};
+
+const handleSelectMessage = (payload: { roomId: string; messageId: string }) => {
+  chatStore.setActiveRoom(payload.roomId);
+  sidebarSearchQuery.value = "";
+  emit("selectRoom");
+  // Note: scrolling to message will be handled by the chat window
 };
 
 const showInviteModal = ref(false);
@@ -148,40 +155,6 @@ watch(walletAvailable, (v) => { if (v) loadBalance(); }, { immediate: true });
             >{{ pkoinBalance.toFixed(2) }}</span>
           </button>
 
-          <!-- Search toggle -->
-          <button
-            class="btn-press flex h-11 w-11 items-center justify-center rounded-full text-text-on-main-bg-color transition-colors hover:bg-neutral-grad-0"
-            :title="t('nav.searchUsers')"
-            :aria-label="searchOpen ? t('nav.closeSearch') : t('nav.searchUsers')"
-            :aria-pressed="searchOpen"
-            @click="searchOpen = !searchOpen"
-          >
-            <svg
-              v-if="!searchOpen"
-              width="18"
-              height="18"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-            >
-              <circle cx="11" cy="11" r="8" />
-              <line x1="21" y1="21" x2="16.65" y2="16.65" />
-            </svg>
-            <svg
-              v-else
-              width="18"
-              height="18"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-            >
-              <line x1="18" y1="6" x2="6" y2="18" />
-              <line x1="6" y1="6" x2="18" y2="18" />
-            </svg>
-          </button>
-
           <!-- New Group -->
           <button
             class="btn-press flex h-11 w-11 items-center justify-center rounded-full text-text-on-main-bg-color transition-colors hover:bg-neutral-grad-0"
@@ -204,24 +177,52 @@ watch(walletAvailable, (v) => { if (v) loadBalance(); }, { immediate: true });
           </button>
         </div>
 
-        <!-- Search bar (collapsible) -->
-        <div v-if="searchOpen" class="shrink-0 border-b border-neutral-grad-0 p-3">
-          <ContactSearch @room-created="handleRoomCreated" />
-        </div>
-
-        <FolderTabs v-model="activeFilter" />
-
-        <div class="relative flex-1 overflow-hidden">
-          <RoomListSkeleton v-if="roomsLoading" :first-load="true" />
-          <transition v-else :name="'tab-slide-' + slideDirection">
-            <ContactList
-              :key="activeFilter"
-              :filter="activeFilter"
-              class="absolute inset-0 overflow-y-auto"
-              @select-room="handleSelectRoom"
+        <!-- Always-visible search input -->
+        <div class="shrink-0 px-3 pb-2 pt-2">
+          <div class="relative">
+            <svg class="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-on-main-bg-color" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+            </svg>
+            <input
+              v-model="sidebarSearchQuery"
+              :placeholder="t('contactSearch.placeholder')"
+              class="w-full rounded-lg bg-chat-input-bg py-2 pl-8 pr-8 text-sm text-text-color outline-none placeholder:text-neutral-grad-2"
             />
-          </transition>
+            <button
+              v-if="sidebarSearchQuery"
+              class="absolute right-2 top-1/2 -translate-y-1/2 text-text-on-main-bg-color hover:text-text-color"
+              @click="sidebarSearchQuery = ''"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            </button>
+          </div>
         </div>
+
+        <!-- Conditional: search results OR normal list -->
+        <template v-if="sidebarSearchQuery.trim()">
+          <ContactSearch
+            :query="sidebarSearchQuery"
+            class="flex-1 overflow-y-auto"
+            @room-created="handleRoomCreated"
+            @select-message="handleSelectMessage"
+          />
+        </template>
+        <template v-else>
+          <FolderTabs v-model="activeFilter" />
+          <div class="relative flex-1 overflow-hidden">
+            <RoomListSkeleton v-if="roomsLoading" :first-load="true" />
+            <transition v-else :name="'tab-slide-' + slideDirection">
+              <ContactList
+                :key="activeFilter"
+                :filter="activeFilter"
+                class="absolute inset-0 overflow-y-auto"
+                @select-room="handleSelectRoom"
+              />
+            </transition>
+          </div>
+        </template>
       </div>
 
         <!-- CONTACTS tab -->
