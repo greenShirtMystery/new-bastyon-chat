@@ -184,6 +184,9 @@ export const en = {
 
   // ── Chat search ──
   "chatSearch.placeholder": "Search in chat...",
+  "chatSearch.filterPlaceholder": "Filter messages...",
+  "chatSearch.filterByUser": "Filter by user",
+  "chatSearch.members": "Members",
   "chatSearch.noResults": "No results",
   "chatSearch.counter": "{current} of {total}",
 

@@ -186,6 +186,9 @@ export const ru: Record<TranslationKey, string> = {
 
   // ── Chat search ──
   "chatSearch.placeholder": "Поиск в чате...",
+  "chatSearch.filterPlaceholder": "Фильтр сообщений...",
+  "chatSearch.filterByUser": "Фильтр по пользователю",
+  "chatSearch.members": "Участники",
   "chatSearch.noResults": "Ничего не найдено",
   "chatSearch.counter": "{current} из {total}",
 
