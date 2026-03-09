@@ -30,16 +30,22 @@ watch(() => props.query, (q) => {
 
 // Section expansion
 const showAllChats = ref(false);
+const showAllUsers = ref(false);
 const showAllMessages = ref(false);
 
 // Reset expansion when query changes
 watch(() => props.query, () => {
   showAllChats.value = false;
+  showAllUsers.value = false;
   showAllMessages.value = false;
 });
 
 const visibleChats = computed(() =>
   showAllChats.value ? search.chatResults.value : search.chatResults.value.slice(0, 5)
+);
+
+const visibleUsers = computed(() =>
+  showAllUsers.value ? searchResults.value : searchResults.value.slice(0, 5)
 );
 
 const visibleMessages = computed(() =>
@@ -123,12 +129,12 @@ const handleSelectMessage = (result: MessageSearchResult) => {
     </div>
 
     <!-- USERS section -->
-    <div v-if="searchResults.length">
+    <div v-if="visibleUsers.length">
       <div class="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-text-on-main-bg-color">
         {{ t("contactSearch.users") }}
       </div>
       <button
-        v-for="user in searchResults"
+        v-for="user in visibleUsers"
         :key="user.address"
         class="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-all hover:bg-neutral-grad-0 active:scale-[0.98]"
         :disabled="isCreatingRoom"
@@ -144,6 +150,13 @@ const handleSelectMessage = (result: MessageSearchResult) => {
           </div>
           <div class="truncate text-xs text-text-on-main-bg-color">{{ user.address }}</div>
         </div>
+      </button>
+      <button
+        v-if="searchResults.length > 5 && !showAllUsers"
+        class="w-full px-3 py-1.5 text-left text-xs font-medium text-color-txt-ac hover:underline"
+        @click="showAllUsers = true"
+      >
+        {{ t("contactSearch.showMore") }}
       </button>
     </div>
 
@@ -188,7 +201,7 @@ const handleSelectMessage = (result: MessageSearchResult) => {
 
     <!-- No results -->
     <div
-      v-if="!visibleChats.length && !searchResults.length && !visibleMessages.length && !isSearching"
+      v-if="!visibleChats.length && !visibleUsers.length && !visibleMessages.length && !isSearching"
       class="p-4 text-center text-sm text-text-on-main-bg-color"
     >
       {{ t("contactSearch.noResults") }}
