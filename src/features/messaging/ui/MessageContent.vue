@@ -3,6 +3,7 @@ import { inject, type Ref } from "vue";
 import { parseMessage } from "@/shared/lib/message-format";
 import type { Segment } from "@/shared/lib/message-format";
 import { PostCard } from "@/features/post-player";
+import { splitByQuery, type TextPart } from "@/shared/lib/utils/highlight";
 
 interface Props {
   text: string;
@@ -13,32 +14,6 @@ const props = withDefaults(defineProps<Props>(), { isOwn: false });
 const emit = defineEmits<{ mentionClick: [userId: string] }>();
 
 const searchQuery = inject<Ref<string>>("searchQuery", ref(""));
-
-/** Split a text string into parts, wrapping search matches */
-type TextPart = { text: string; highlight: boolean };
-
-const splitByQuery = (text: string, query: string): TextPart[] => {
-  if (!query) return [{ text, highlight: false }];
-  const lowerText = text.toLowerCase();
-  const lowerQuery = query.toLowerCase();
-  const parts: TextPart[] = [];
-  let cursor = 0;
-
-  while (cursor < text.length) {
-    const idx = lowerText.indexOf(lowerQuery, cursor);
-    if (idx === -1) {
-      parts.push({ text: text.slice(cursor), highlight: false });
-      break;
-    }
-    if (idx > cursor) {
-      parts.push({ text: text.slice(cursor, idx), highlight: false });
-    }
-    parts.push({ text: text.slice(idx, idx + query.length), highlight: true });
-    cursor = idx + query.length;
-  }
-
-  return parts;
-};
 
 const segments = computed<Segment[]>(() => parseMessage(props.text));
 const activeQuery = computed(() => searchQuery.value?.trim() ?? "");
