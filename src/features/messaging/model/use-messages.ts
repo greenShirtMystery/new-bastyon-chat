@@ -1,5 +1,5 @@
 import { useChatStore, MessageStatus, MessageType } from "@/entities/chat";
-import type { FileInfo, Message } from "@/entities/chat";
+import type { FileInfo, Message, LinkPreview } from "@/entities/chat";
 import { useAuthStore } from "@/entities/auth";
 import { getMatrixClientService } from "@/entities/matrix";
 import type { PcryptoRoomInstance } from "@/entities/matrix/model/matrix-crypto";
@@ -26,7 +26,7 @@ export function useMessages() {
     });
   };
 
-  const sendMessage = async (content: string) => {
+  const sendMessage = async (content: string, linkPreview?: LinkPreview) => {
     const roomId = chatStore.activeRoomId;
     if (!roomId || !content.trim()) return;
 
@@ -45,6 +45,7 @@ export function useMessages() {
       timestamp: Date.now(),
       status: MessageStatus.sending,
       type: MessageType.text,
+      ...(linkPreview ? { linkPreview } : {}),
     };
     chatStore.addMessage(roomId, message);
 
@@ -63,10 +64,38 @@ export function useMessages() {
       if (roomCrypto?.canBeEncrypt()) {
         // Send encrypted
         const encrypted = await roomCrypto.encryptEvent(trimmed);
+        if (linkPreview) {
+          (encrypted as Record<string, unknown>).url_preview = {
+            url: linkPreview.url,
+            site_name: linkPreview.siteName,
+            title: linkPreview.title,
+            description: linkPreview.description,
+            image_url: linkPreview.imageUrl,
+            image_width: linkPreview.imageWidth,
+            image_height: linkPreview.imageHeight,
+          };
+        }
         serverEventId = await matrixService.sendEncryptedText(roomId, encrypted);
       } else {
         // Send plaintext
-        serverEventId = await matrixService.sendText(roomId, trimmed);
+        if (linkPreview) {
+          const content: Record<string, unknown> = {
+            body: trimmed,
+            msgtype: "m.text",
+            url_preview: {
+              url: linkPreview.url,
+              site_name: linkPreview.siteName,
+              title: linkPreview.title,
+              description: linkPreview.description,
+              image_url: linkPreview.imageUrl,
+              image_width: linkPreview.imageWidth,
+              image_height: linkPreview.imageHeight,
+            },
+          };
+          serverEventId = await matrixService.sendEncryptedText(roomId, content);
+        } else {
+          serverEventId = await matrixService.sendText(roomId, trimmed);
+        }
       }
 
       // Replace temp ID with server event_id so read receipts can match
@@ -396,7 +425,7 @@ export function useMessages() {
   };
 
   /** Send message with reply context */
-  const sendReply = async (content: string) => {
+  const sendReply = async (content: string, linkPreview?: LinkPreview) => {
     const roomId = chatStore.activeRoomId;
     const replyTo = chatStore.replyingTo;
     if (!roomId || !content.trim() || !replyTo) return;
@@ -422,6 +451,7 @@ export function useMessages() {
         content: replyTo.content,
         type: replyTo.type,
       },
+      ...(linkPreview ? { linkPreview } : {}),
     };
     chatStore.addMessage(roomId, message);
     chatStore.replyingTo = null;
@@ -438,6 +468,18 @@ export function useMessages() {
           },
         },
       };
+
+      if (linkPreview) {
+        msgContent.url_preview = {
+          url: linkPreview.url,
+          site_name: linkPreview.siteName,
+          title: linkPreview.title,
+          description: linkPreview.description,
+          image_url: linkPreview.imageUrl,
+          image_width: linkPreview.imageWidth,
+          image_height: linkPreview.imageHeight,
+        };
+      }
 
       let serverEventId: string;
       if (roomCrypto?.canBeEncrypt()) {
