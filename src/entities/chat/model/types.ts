@@ -44,6 +44,17 @@ export interface ReplyTo {
   type?: MessageType;
 }
 
+/** Open Graph metadata for URL link previews */
+export interface LinkPreview {
+  url: string;
+  siteName?: string;
+  title?: string;
+  description?: string;
+  imageUrl?: string;
+  imageWidth?: number;
+  imageHeight?: number;
+}
+
 export interface Message {
   id: string;
   roomId: string;
@@ -73,6 +84,8 @@ export interface Message {
   pollInfo?: PollInfo;
   /** Transfer metadata — present when type === transfer */
   transferInfo?: TransferInfo;
+  /** URL link preview metadata (Open Graph) */
+  linkPreview?: LinkPreview;
   /** Whether this message has been deleted/redacted */
   deleted?: boolean;
   /** For system messages: template + addresses for dynamic name resolution at render time */
