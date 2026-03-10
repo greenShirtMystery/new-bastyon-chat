@@ -395,6 +395,33 @@ export class MatrixClientService {
     return this.client.mxcUrlToHttp(mxcUrl) ?? null;
   }
 
+  /** Fetch URL preview (Open Graph metadata) from Matrix server */
+  async getUrlPreview(url: string): Promise<{
+    siteName?: string;
+    title?: string;
+    description?: string;
+    imageUrl?: string;
+    imageWidth?: number;
+    imageHeight?: number;
+  } | null> {
+    if (!this.client) return null;
+    try {
+      const data = await this.client.getUrlPreview(url, Date.now());
+      const mxcImage = data["og:image"] as string | undefined;
+      return {
+        siteName: data["og:site_name"] as string | undefined,
+        title: data["og:title"] as string | undefined,
+        description: data["og:description"] as string | undefined,
+        imageUrl: mxcImage ? (this.client.mxcUrlToHttp(mxcImage) ?? undefined) : undefined,
+        imageWidth: data["og:image:width"] as number | undefined,
+        imageHeight: data["og:image:height"] as number | undefined,
+      };
+    } catch (e) {
+      console.warn("[matrix-client] getUrlPreview error:", e);
+      return null;
+    }
+  }
+
   /** Get all rooms */
   getRooms(): unknown[] {
     return this.client?.getRooms() ?? [];
