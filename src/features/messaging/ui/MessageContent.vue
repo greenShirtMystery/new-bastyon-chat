@@ -1,12 +1,11 @@
 <script setup lang="ts">
-import { ref, computed, inject, onMounted, type Ref } from "vue";
+import { computed, inject, type Ref, ref } from "vue";
 import { parseMessage } from "@/shared/lib/message-format";
 import type { Segment } from "@/shared/lib/message-format";
 import { PostCard } from "@/features/post-player";
 import { splitByQuery, type TextPart } from "@/shared/lib/utils/highlight";
 import type { LinkPreview } from "@/entities/chat";
 import LinkPreviewCard from "./LinkPreviewCard.vue";
-import { fetchPreview, detectUrl } from "../model/use-link-preview";
 
 interface Props {
   text: string;
@@ -24,17 +23,6 @@ const activeQuery = computed(() => searchQuery.value?.trim() ?? "");
 
 /** Inline segments (text, link, mention) vs block segments (bastyonLink) */
 const hasBlockSegments = computed(() => segments.value.some(s => s.type === "bastyonLink"));
-
-// Fetch preview on-demand for messages without embedded preview
-const fetchedPreview = ref<LinkPreview | null>(null);
-const effectivePreview = computed(() => props.linkPreview ?? fetchedPreview.value);
-
-onMounted(async () => {
-  if (props.linkPreview) return;
-  const url = detectUrl(props.text);
-  if (!url) return;
-  fetchedPreview.value = await fetchPreview(url);
-});
 </script>
 
 <template>
@@ -69,7 +57,7 @@ onMounted(async () => {
         :is-own="props.isOwn"
       />
     </template>
-    <LinkPreviewCard v-if="effectivePreview" :preview="effectivePreview" :is-own="props.isOwn" />
+    <LinkPreviewCard v-if="props.linkPreview" :preview="props.linkPreview" :is-own="props.isOwn" />
   </div>
 
   <!-- Default: pure inline content (no block embeds) -->
@@ -100,6 +88,6 @@ onMounted(async () => {
         >{{ seg.content }}</span>
       </template>
     </span>
-    <LinkPreviewCard v-if="effectivePreview" :preview="effectivePreview" :is-own="props.isOwn" />
+    <LinkPreviewCard v-if="props.linkPreview" :preview="props.linkPreview" :is-own="props.isOwn" />
   </div>
 </template>

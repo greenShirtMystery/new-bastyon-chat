@@ -345,7 +345,7 @@ const insertEmoji = (emoji: string) => {
               {{ linkPreview.activePreview.value.siteName || linkPreview.activePreview.value.title || 'Link' }}
             </div>
             <div class="truncate text-xs text-text-on-main-bg-color/40">
-              {{ linkPreview.activePreview.value.description || linkPreview.activePreview.value.url }}
+              {{ linkPreview.activePreview.value.description || linkPreview.activePreview.value.title || linkPreview.activePreview.value.url }}
             </div>
           </template>
         </div>
