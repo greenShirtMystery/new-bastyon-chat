@@ -78,10 +78,8 @@ export const useChannelStore = defineStore("channel", () => {
 
   async function fetchChannels(reset = false) {
     const authStore = useAuthStore();
-
-    // TODO: remove hardcoded test values
-    const addr = "TG69Jioc81PiwMAJtRanfZqUmRY4TUG7nt";
-    const testBlockHeight = 4675546;
+    const addr = authStore.address;
+    if (!addr) return;
 
     if (reset) {
       channelsPage.value = 0;
@@ -97,7 +95,7 @@ export const useChannelStore = defineStore("channel", () => {
     try {
       const result = await authStore.getSubscribesChannels(
         addr,
-        testBlockHeight,
+        blockHeight.value,
         channelsPage.value,
         20
       );
