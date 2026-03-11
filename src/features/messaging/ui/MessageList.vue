@@ -175,10 +175,13 @@ const virtualItems = computed<VirtualItem[]>(() => {
     const dateLabel = getDateLabel(msg.timestamp, prevMsg?.timestamp);
 
     if (dateLabel) {
-      items.push({ id: `date-${msg.id}`, type: "date-separator", label: dateLabel });
+      const stableId = (msg as any)._key || msg.id;
+      items.push({ id: `date-${stableId}`, type: "date-separator", label: dateLabel });
     }
 
-    items.push({ id: msg.id, type: "message", message: msg, index: i });
+    // Use _key (stable across tempId→serverId rename) to prevent DynamicScroller
+    // from unmounting/remounting the item when updateMessageId runs.
+    items.push({ id: (msg as any)._key || msg.id, type: "message", message: msg, index: i });
   }
 
   // Typing indicator
@@ -218,28 +221,35 @@ const checkScroll = () => {
 };
 
 let scrollBottomTimer: ReturnType<typeof setTimeout> | undefined;
+let scrollRafId1: number | undefined;
+let scrollRafId2: number | undefined;
 const scrollToBottom = (smooth = false, onSettled?: () => void) => {
   newMessageCount.value = 0;
+  // Cancel ALL pending scroll operations from previous call to avoid competing scrolls
   clearTimeout(scrollBottomTimer);
+  if (scrollRafId1 != null) cancelAnimationFrame(scrollRafId1);
+  if (scrollRafId2 != null) cancelAnimationFrame(scrollRafId2);
   const doScroll = () => {
-    if (scrollerRef.value) {
-      scrollerRef.value.scrollToBottom();
-    } else if (listRef.value) {
-      listRef.value.scrollTo({
-        top: listRef.value.scrollHeight,
-        behavior: smooth ? "smooth" : "instant",
-      });
+    // Bypass DynamicScroller.scrollToBottom() — it has a $_scrollingToBottom
+    // flag that blocks repeated calls, causing incomplete scrolls when item
+    // height is not yet measured by ResizeObserver. Direct scrollTop avoids this.
+    const el = getScrollContainer();
+    if (el) {
+      el.scrollTop = el.scrollHeight + 9999;
     }
   };
   nextTick(() => {
     doScroll();
-    requestAnimationFrame(() => {
+    scrollRafId1 = requestAnimationFrame(() => {
       doScroll();
-      // Final pass after images/avatars settle, then signal done
-      scrollBottomTimer = setTimeout(() => {
+      scrollRafId2 = requestAnimationFrame(() => {
         doScroll();
-        onSettled?.();
-      }, 150);
+        // Final pass after images/avatars settle, then signal done
+        scrollBottomTimer = setTimeout(() => {
+          doScroll();
+          onSettled?.();
+        }, 250);
+      });
     });
   });
 };
@@ -252,83 +262,86 @@ const currentDateLabel = ref("");
 const showDateHeader = ref(false);
 let dateHideTimer: ReturnType<typeof setTimeout> | undefined;
 
+// Version counter: increments on every watch invocation. After each await,
+// the callback checks if its version is still current — if not, a newer
+// invocation has started and this one should bail. Handles both different-room
+// switches AND same-room re-invocations (e.g. during store init).
+let watchVersion = 0;
+
 // Load messages when active room changes
 watch(
   () => chatStore.activeRoomId,
-  async (roomId, oldRoomId) => {
-    // Scroll position is tracked live in checkScroll().
-    // No need to save here — it's already up to date in savedScrollPositions.
+  async (roomId) => {
+    const myVersion = ++watchVersion;
+    const isStale = () => watchVersion !== myVersion;
 
-    if (roomId) {
-      // Reset state for new room
-      switching.value = true;
-      newMessageCount.value = 0;
-      hasMore.value = true;
-      showScrollFab.value = false;
-      showDateHeader.value = false;
-      recentMessageIds.value.clear();
-      isNearBottom.value = true;
+    if (!roomId) return;
 
-      // 1. Show cached messages instantly (Telegram-style: no loading screen)
-      await chatStore.loadCachedMessages(roomId);
-      const hasCached = chatStore.activeMessages.length > 0;
+    // Reset state for new room
+    switching.value = true;
+    settled.value = false; // hide scroller immediately to prevent stale content flash
+    loading.value = false;
+    newMessageCount.value = 0;
+    prevScrollHeight = 0;
+    hasMore.value = true;
+    showScrollFab.value = false;
+    showDateHeader.value = false;
+    recentMessageIds.value.clear();
+    isNearBottom.value = true;
 
-      if (hasCached) {
-        // Cache hit — show immediately, no hiding (avoids blank-screen flicker)
-        loading.value = false;
-        settled.value = true;
-        await nextTick();
+    // 1. Show cached messages instantly (Telegram-style: no loading screen)
+    await chatStore.loadCachedMessages(roomId);
+    if (isStale()) return;
 
-        // Restore scroll position or go to bottom
-        const saved = savedScrollPositions.get(roomId);
-        if (saved) {
-          const el = getScrollContainer();
-          if (el) el.scrollTop = el.scrollHeight - el.clientHeight - saved.distFromBottom;
-          savedScrollPositions.delete(roomId);
-          switching.value = false;
-          checkScroll();
-        } else {
-          scrollToBottom(false, () => {
-            switching.value = false;
-            checkScroll();
-          });
-        }
+    const hasCached = chatStore.activeMessages.length > 0;
 
-        // 2. Fetch fresh messages from server in background (silent update)
-        loadMessages(roomId).catch(() => {});
-      } else {
-        // No cache — hide scroller, show skeleton, wait for server
-        settled.value = false;
-        loading.value = true;
-        try {
-          await loadMessages(roomId);
-        } finally {
-          loading.value = false;
-        }
+    if (hasCached) {
+      // Cache hit — render invisibly (settled=false keeps opacity:0),
+      // set scroll position, THEN reveal. User never sees the jump.
+      await nextTick();
+      if (isStale()) return;
 
-        const saved = savedScrollPositions.get(roomId);
-        if (saved) {
-          await nextTick();
-          const el = getScrollContainer();
-          if (el) el.scrollTop = el.scrollHeight - el.clientHeight - saved.distFromBottom;
-          savedScrollPositions.delete(roomId);
-          await nextTick();
-          requestAnimationFrame(() => {
-            settled.value = true;
-            switching.value = false;
-            checkScroll();
-          });
-        } else {
-          await nextTick();
-          requestAnimationFrame(() => {
-            scrollToBottom(false, () => {
-              settled.value = true;
-              switching.value = false;
-              checkScroll();
-            });
-          });
-        }
+      const saved = savedScrollPositions.get(roomId);
+      const el = getScrollContainer();
+      if (saved && el) {
+        el.scrollTop = el.scrollHeight - el.clientHeight - saved.distFromBottom;
+        savedScrollPositions.delete(roomId);
+      } else if (el) {
+        el.scrollTop = el.scrollHeight + 9999;
       }
+      settled.value = true;
+      switching.value = false;
+      prevScrollHeight = el?.scrollHeight ?? 0;
+      checkScroll();
+
+      // 2. Fetch fresh messages from server in background (silent update).
+      // watch(activeMessages.length) + ResizeObserver handle scrolling.
+      loadMessages(roomId).catch(() => {});
+    } else {
+      // No cache — show skeleton, wait for server
+      loading.value = true;
+      try {
+        await loadMessages(roomId);
+      } finally {
+        loading.value = false;
+      }
+      if (isStale()) return;
+
+      await nextTick();
+      if (isStale()) return;
+
+      const saved = savedScrollPositions.get(roomId);
+      const el = getScrollContainer();
+      if (saved && el) {
+        el.scrollTop = el.scrollHeight - el.clientHeight - saved.distFromBottom;
+        savedScrollPositions.delete(roomId);
+      } else if (el) {
+        el.scrollTop = el.scrollHeight + 9999;
+      }
+      settled.value = true;
+      switching.value = false;
+      prevScrollHeight = el?.scrollHeight ?? 0;
+      checkScroll();
     }
   },
   { immediate: true },
@@ -339,7 +352,7 @@ watch(
 watch(
   () => chatStore.activeMessages.length,
   (newLen, oldLen) => {
-    // Skip during room switch, pagination, or bulk loads (search)
+    // Skip during room switch, pagination, or bulk loads
     if (switching.value || loadingMore.value) return;
 
     const delta = oldLen !== undefined ? newLen - oldLen : 0;
@@ -353,19 +366,36 @@ watch(
     // Track newly arrived messages for entrance animation (only appended, not paginated)
     if (!loading.value && oldLen !== undefined && delta > 0) {
       const msgs = chatStore.activeMessages;
+      // Capture ids NOW — updateMessageId may change msg.id before the timeout fires,
+      // causing the cleanup to miss the original tempId and leak the animation class.
+      const capturedIds: string[] = [];
       for (let i = oldLen; i < newLen; i++) {
-        if (msgs[i]) recentMessageIds.value.add(msgs[i].id);
+        if (msgs[i]) {
+          recentMessageIds.value.add(msgs[i].id);
+          capturedIds.push(msgs[i].id);
+        }
       }
       setTimeout(() => {
-        const ids = chatStore.activeMessages.slice(oldLen, newLen).map(m => m.id);
-        ids.forEach(id => recentMessageIds.value.delete(id));
+        capturedIds.forEach(id => recentMessageIds.value.delete(id));
       }, 350);
     }
   },
 );
 
+/** Remove animation class immediately after the CSS animation finishes.
+ *  This prevents DynamicScroller from accidentally replaying the entrance
+ *  animation when it recycles / repositions DOM elements on subsequent updates. */
+const onMsgAnimationEnd = (message: import("@/entities/chat").Message) => {
+  const key = (message as any)._key || message.id;
+  recentMessageIds.value.delete(key);
+  recentMessageIds.value.delete(message.id);
+};
+
 const getMsgEnterClass = (message: import("@/entities/chat").Message): string => {
-  if (!recentMessageIds.value.has(message.id)) return "";
+  // Check both _key (original tempId) and current id — updateMessageId may
+  // have changed the id while recentMessageIds still tracks the tempId.
+  const key = (message as any)._key || message.id;
+  if (!recentMessageIds.value.has(key) && !recentMessageIds.value.has(message.id)) return "";
   return message.senderId === authStore.address ? "msg-enter-own" : "msg-enter-other";
 };
 
@@ -435,6 +465,10 @@ const onScroll = () => {
 };
 
 let scrollListenEl: HTMLElement | null = null;
+let contentResizeObserver: ResizeObserver | null = null;
+let containerResizeObserver: ResizeObserver | null = null;
+let prevContainerHeight = 0;
+let prevScrollHeight = 0;
 
 const attachScrollListener = () => {
   // Detach from old element if any
@@ -442,26 +476,111 @@ const attachScrollListener = () => {
     scrollListenEl.removeEventListener("scroll", onScroll);
     scrollListenEl = null;
   }
+  if (contentResizeObserver) {
+    contentResizeObserver.disconnect();
+    contentResizeObserver = null;
+  }
+  if (containerResizeObserver) {
+    containerResizeObserver.disconnect();
+    containerResizeObserver = null;
+  }
   nextTick(() => {
     scrollListenEl = getScrollContainer();
     scrollListenEl?.addEventListener("scroll", onScroll, { passive: true });
+
+    // Watch for content height changes (images loading, posts expanding, etc.)
+    // When near bottom, auto-scroll to compensate for layout shifts.
+    if (scrollListenEl) {
+      prevScrollHeight = scrollListenEl.scrollHeight;
+      contentResizeObserver = new ResizeObserver(() => {
+        const el = scrollListenEl;
+        if (!el || switching.value) return;
+        const newHeight = el.scrollHeight;
+        if (newHeight !== prevScrollHeight) {
+          const heightDelta = newHeight - prevScrollHeight;
+          prevScrollHeight = newHeight;
+          // If we were near bottom, keep us at bottom (compensate for image loads etc.)
+          if (isNearBottom.value && heightDelta > 0) {
+            el.scrollTop = el.scrollHeight + 9999;
+          }
+        }
+      });
+      // Observe the item wrapper inside DynamicScroller — it has minHeight set
+      // to the total calculated content size and resizes as items are measured.
+      // Class: vue-recycle-scroller__item-wrapper
+      const itemWrapper = scrollListenEl.querySelector(".vue-recycle-scroller__item-wrapper") as HTMLElement | null;
+      if (itemWrapper) {
+        contentResizeObserver.observe(itemWrapper);
+      } else {
+        contentResizeObserver.observe(scrollListenEl);
+      }
+    }
+
+    // Watch for container height changes (reply bar, edit bar, link preview, etc.)
+    // When the input area grows, the message list shrinks — adjust scrollTop so
+    // the same messages stay visible (Telegram-style stable viewport).
+    if (listRef.value) {
+      prevContainerHeight = listRef.value.clientHeight;
+      containerResizeObserver = new ResizeObserver(() => {
+        const container = listRef.value;
+        const scrollEl = getScrollContainer();
+        if (!container || !scrollEl || switching.value) return;
+        const newHeight = container.clientHeight;
+        if (newHeight === prevContainerHeight) return;
+        const delta = prevContainerHeight - newHeight; // positive when container shrinks
+        prevContainerHeight = newHeight;
+        if (delta > 0) {
+          // Container shrank (e.g. reply bar appeared) — scroll down to keep content stable
+          scrollEl.scrollTop += delta;
+        } else if (isNearBottom.value) {
+          // Container grew (e.g. reply bar removed) and we were near bottom — stay at bottom
+          scrollEl.scrollTop = scrollEl.scrollHeight + 9999;
+        }
+      });
+      containerResizeObserver.observe(listRef.value);
+    }
   });
 };
 
 onMounted(() => {
-  scrollToBottom();
+  // Don't call scrollToBottom() here — watch(activeRoomId, { immediate: true })
+  // already handles it. A competing call from onMounted would cancel the watch's
+  // onSettled callback (which sets switching=false), causing switching to stay
+  // true indefinitely and breaking subsequent scroll behavior.
   attachScrollListener();
 });
 
 // Re-attach scroll listener when scroller appears/changes (e.g. room switch from empty → messages)
+// Also acts as a safety net: if the main watch couldn't set settled=true (e.g. because
+// the scroller wasn't mounted yet during the first immediate invocation), finalize here.
 watch(
   () => scrollerRef.value,
-  () => attachScrollListener(),
+  (scroller) => {
+    attachScrollListener();
+    if (scroller && !settled.value && !loading.value) {
+      nextTick(() => {
+        // Double-check: settled may have been set by the main watch in the meantime
+        if (settled.value) return;
+        const el = getScrollContainer();
+        if (el) el.scrollTop = el.scrollHeight + 9999;
+        settled.value = true;
+        switching.value = false;
+        prevScrollHeight = el?.scrollHeight ?? 0;
+        checkScroll();
+      });
+    }
+  },
 );
 
 onUnmounted(() => {
   if (scrollListenEl) {
     scrollListenEl.removeEventListener("scroll", onScroll);
+  }
+  if (contentResizeObserver) {
+    contentResizeObserver.disconnect();
+  }
+  if (containerResizeObserver) {
+    containerResizeObserver.disconnect();
   }
   clearTimeout(dateHideTimer);
 });
@@ -552,10 +671,10 @@ defineExpose({ scrollToMessage, setSearchQuery });
     <!-- Loading state -->
     <MessageSkeleton v-if="loading" />
 
-    <!-- Empty state -->
+    <!-- Empty state (overlay, not v-if/v-else — avoids DynamicScroller unmount/mount blink) -->
     <div
-      v-else-if="chatStore.activeMessages.length === 0"
-      class="flex h-full flex-col items-center justify-center gap-2 text-text-on-main-bg-color"
+      v-if="!loading && chatStore.activeMessages.length === 0 && settled"
+      class="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 text-text-on-main-bg-color"
     >
       <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" class="opacity-20">
         <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
@@ -563,16 +682,15 @@ defineExpose({ scrollToMessage, setSearchQuery });
       <span class="text-sm">No messages yet. Start a conversation!</span>
     </div>
 
-    <!-- Virtualized Messages -->
-    <!-- Loading-more spinner at top (inside scroller's before slot) -->
+    <!-- Virtualized Messages (always mounted to avoid remount blink on first message) -->
     <DynamicScroller
-      v-else
+      v-if="!loading"
       ref="scrollerRef"
       :items="virtualItems"
       :min-item-size="48"
       key-field="id"
       class="h-full overflow-y-auto px-4 py-3"
-      :style="{ opacity: settled ? 1 : 0 }"
+      :style="{ opacity: settled ? 1 : 0, transition: settled ? 'opacity 0.1s ease-out' : 'none' }"
     >
       <template #before>
         <div
@@ -649,10 +767,11 @@ defineExpose({ scrollToMessage, setSearchQuery });
             :class="[getMsgEnterClass(item.message), { 'context-highlight': contextMenu.show && contextMenu.message?.id === item.message.id }]"
             :style="(item.index ?? 0) > 0 ? { paddingTop: 'var(--message-spacing)' } : {}"
             :data-message-id="item.message.id"
+            @animationend="onMsgAnimationEnd(item.message)"
           >
             <div class="mx-auto max-w-6xl">
             <MessageBubble
-              :key="item.message.id + (item.message.deleted ? '-del' : '')"
+              :key="((item.message as any)._key || item.message.id) + (item.message.deleted ? '-del' : '')"
               :message="item.message"
               :is-own="item.message.senderId === authStore.address"
               :is-group="isGroup"

@@ -99,8 +99,11 @@ export function useMessages() {
       }
 
       // Replace temp ID with server event_id so read receipts can match
-      if (serverEventId) chatStore.updateMessageId(roomId, tempId, serverEventId);
-      chatStore.updateMessageStatus(roomId, serverEventId || tempId, MessageStatus.sent);
+      if (serverEventId) {
+        chatStore.updateMessageIdAndStatus(roomId, tempId, serverEventId, MessageStatus.sent);
+      } else {
+        chatStore.updateMessageStatus(roomId, tempId, MessageStatus.sent);
+      }
     } catch (e) {
       console.error("Failed to send message:", e);
       chatStore.updateMessageStatus(roomId, tempId, MessageStatus.failed);
@@ -125,8 +128,11 @@ export function useMessages() {
         } else {
           serverEventId = await matrixService.sendText(msg.roomId, msg.content);
         }
-        if (serverEventId) chatStore.updateMessageId(msg.roomId, msg.id, serverEventId);
-        chatStore.updateMessageStatus(msg.roomId, serverEventId || msg.id, MessageStatus.sent);
+        if (serverEventId) {
+          chatStore.updateMessageIdAndStatus(msg.roomId, msg.id, serverEventId, MessageStatus.sent);
+        } else {
+          chatStore.updateMessageStatus(msg.roomId, msg.id, MessageStatus.sent);
+        }
       } catch (e) {
         console.error("[offline-queue] Failed to send queued message:", e);
         chatStore.updateMessageStatus(msg.roomId, msg.id, MessageStatus.failed);
@@ -204,8 +210,11 @@ export function useMessages() {
         msgtype: "m.file",
       });
 
-      if (serverEventId) chatStore.updateMessageId(roomId, tempId, serverEventId);
-      chatStore.updateMessageStatus(roomId, serverEventId || tempId, MessageStatus.sent);
+      if (serverEventId) {
+        chatStore.updateMessageIdAndStatus(roomId, tempId, serverEventId, MessageStatus.sent);
+      } else {
+        chatStore.updateMessageStatus(roomId, tempId, MessageStatus.sent);
+      }
     } catch (e) {
       console.error("Failed to send file:", e);
       chatStore.updateMessageStatus(roomId, tempId, MessageStatus.failed);
@@ -275,8 +284,11 @@ export function useMessages() {
       };
 
       const serverEventId = await matrixService.sendEncryptedText(roomId, content);
-      if (serverEventId) chatStore.updateMessageId(roomId, tempId, serverEventId);
-      chatStore.updateMessageStatus(roomId, serverEventId || tempId, MessageStatus.sent);
+      if (serverEventId) {
+        chatStore.updateMessageIdAndStatus(roomId, tempId, serverEventId, MessageStatus.sent);
+      } else {
+        chatStore.updateMessageStatus(roomId, tempId, MessageStatus.sent);
+      }
     } catch (e) {
       console.error("Failed to send image:", e);
       chatStore.updateMessageStatus(roomId, tempId, MessageStatus.failed);
@@ -345,8 +357,11 @@ export function useMessages() {
       };
 
       const serverEventId = await matrixService.sendEncryptedText(roomId, content);
-      if (serverEventId) chatStore.updateMessageId(roomId, tempId, serverEventId);
-      chatStore.updateMessageStatus(roomId, serverEventId || tempId, MessageStatus.sent);
+      if (serverEventId) {
+        chatStore.updateMessageIdAndStatus(roomId, tempId, serverEventId, MessageStatus.sent);
+      } else {
+        chatStore.updateMessageStatus(roomId, tempId, MessageStatus.sent);
+      }
     } catch (e) {
       console.error("Failed to send audio:", e);
       chatStore.updateMessageStatus(roomId, tempId, MessageStatus.failed);
@@ -492,8 +507,11 @@ export function useMessages() {
         serverEventId = await matrixService.sendEncryptedText(roomId, msgContent);
       }
 
-      if (serverEventId) chatStore.updateMessageId(roomId, tempId, serverEventId);
-      chatStore.updateMessageStatus(roomId, serverEventId || tempId, MessageStatus.sent);
+      if (serverEventId) {
+        chatStore.updateMessageIdAndStatus(roomId, tempId, serverEventId, MessageStatus.sent);
+      } else {
+        chatStore.updateMessageStatus(roomId, tempId, MessageStatus.sent);
+      }
     } catch (e) {
       console.error("Failed to send reply:", e);
       chatStore.updateMessageStatus(roomId, tempId, MessageStatus.failed);
@@ -750,8 +768,11 @@ export function useMessages() {
       } else {
         serverEventId = await matrixService.sendText(roomId, transferBody);
       }
-      if (serverEventId) chatStore.updateMessageId(roomId, tempId, serverEventId);
-      chatStore.updateMessageStatus(roomId, serverEventId || tempId, MessageStatus.sent);
+      if (serverEventId) {
+        chatStore.updateMessageIdAndStatus(roomId, tempId, serverEventId, MessageStatus.sent);
+      } else {
+        chatStore.updateMessageStatus(roomId, tempId, MessageStatus.sent);
+      }
     } catch (e) {
       console.error("Failed to send transfer message:", e);
       chatStore.updateMessageStatus(roomId, tempId, MessageStatus.failed);
