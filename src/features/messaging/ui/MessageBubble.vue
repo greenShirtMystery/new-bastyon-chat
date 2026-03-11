@@ -123,6 +123,20 @@ const imageStyle = computed(() => {
   return {};
 });
 
+/** Constrain image bubble width to match the image so caption/reply don't stretch it wider */
+const imageBubbleStyle = computed(() => {
+  const fi = props.message.fileInfo;
+  const w = fi?.w;
+  const h = fi?.h;
+  if (w && h) {
+    const maxW = 420;
+    const maxH = 460;
+    const scale = Math.min(maxW / w, maxH / h, 1);
+    return { width: `${Math.round(w * scale)}px` };
+  }
+  return { width: '256px' };
+});
+
 const handleBubbleClick = () => {
   if (chatStore.selectionMode) {
     chatStore.toggleSelection(props.message.id);
@@ -291,6 +305,7 @@ const replyPreviewText = computed(() => {
         v-else-if="message.type === MessageType.image && hasFileInfo"
         class="overflow-hidden rounded-bubble"
         :class="[tailClass, props.isOwn ? 'bg-chat-bubble-own' : 'bg-chat-bubble-other', (message.replyTo || message.forwardedFrom) ? 'min-w-[180px]' : '']"
+        :style="imageBubbleStyle"
       >
         <!-- Forwarded indicator -->
         <div v-if="message.forwardedFrom" class="truncate px-3 pt-1.5 text-[11px] italic"
@@ -369,6 +384,7 @@ const replyPreviewText = computed(() => {
         v-else-if="message.type === MessageType.video && hasFileInfo"
         class="overflow-hidden rounded-bubble"
         :class="[tailClass, props.isOwn ? 'bg-chat-bubble-own' : 'bg-chat-bubble-other', (message.replyTo || message.forwardedFrom) ? 'min-w-[180px]' : '']"
+        :style="imageBubbleStyle"
       >
         <!-- Forwarded indicator -->
         <div v-if="message.forwardedFrom" class="truncate px-3 pt-1.5 text-[11px] italic"
