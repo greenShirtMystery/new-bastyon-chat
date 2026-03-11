@@ -13,6 +13,7 @@ import VoiceMessage from "./VoiceMessage.vue";
 import { ref, inject, onMounted } from "vue";
 import { useLongPress, useSwipeGesture } from "@/shared/lib/gestures";
 import { useThemeStore } from "@/entities/theme";
+import { hexDecode } from "@/shared/lib/matrix/functions";
 
 const { t } = useI18n();
 const openUserProfile = inject<((address: string) => void) | null>("openUserProfile", null);
@@ -361,7 +362,7 @@ const replyPreviewText = computed(() => {
           class="px-3 py-1.5 text-chat-base"
           :class="props.isOwn ? 'text-text-on-bg-ac-color' : 'text-text-color'"
         >
-          <MessageContent :text="message.fileInfo.caption" @mention-click="(userId) => openUserProfile?.(userId)" />
+          <MessageContent :text="message.fileInfo.caption" @mention-click="(userId) => openUserProfile?.(hexDecode(userId))" />
           <span
             v-if="themeStore.showTimestamps"
             class="relative -bottom-[3px] ml-2 inline-flex items-center gap-0.5 whitespace-nowrap align-bottom text-[10px]"
@@ -430,7 +431,7 @@ const replyPreviewText = computed(() => {
           class="px-3 py-1.5 text-chat-base"
           :class="props.isOwn ? 'text-text-on-bg-ac-color' : 'text-text-color'"
         >
-          <MessageContent :text="message.fileInfo.caption" @mention-click="(userId) => openUserProfile?.(userId)" />
+          <MessageContent :text="message.fileInfo.caption" @mention-click="(userId) => openUserProfile?.(hexDecode(userId))" />
           <span
             v-if="themeStore.showTimestamps"
             class="relative -bottom-[3px] ml-2 inline-flex items-center gap-0.5 whitespace-nowrap align-bottom text-[10px]"
@@ -531,7 +532,7 @@ const replyPreviewText = computed(() => {
         </button>
         <p v-if="fileState.error" class="mt-1 text-xs text-color-bad">{{ fileState.error }}</p>
         <div v-if="message.fileInfo?.caption" class="mt-1 text-chat-base opacity-90">
-          <MessageContent :text="message.fileInfo.caption" @mention-click="(userId) => openUserProfile?.(userId)" />
+          <MessageContent :text="message.fileInfo.caption" @mention-click="(userId) => openUserProfile?.(hexDecode(userId))" />
         </div>
         <div v-if="themeStore.showTimestamps" class="mt-1 flex items-center justify-end gap-1" :class="props.isOwn ? 'text-white/60' : 'text-text-on-main-bg-color'">
           <span class="text-[10px]">{{ time }}</span>
@@ -633,7 +634,7 @@ const replyPreviewText = computed(() => {
 
         <!-- Message content with parsed links/mentions -->
         <div class="text-chat-base">
-          <MessageContent :text="props.message.content" :is-own="props.isOwn" :link-preview="props.message.linkPreview" @mention-click="(userId) => openUserProfile?.(userId)" />
+          <MessageContent :text="props.message.content" :is-own="props.isOwn" :link-preview="props.message.linkPreview" @mention-click="(userId) => openUserProfile?.(hexDecode(userId))" />
           <!-- Inline timestamp (Telegram-style float) -->
           <span
             v-if="themeStore.showTimestamps"

@@ -3,6 +3,7 @@ import type { MatrixKit } from "@/entities/matrix";
 import type { Pcrypto, PcryptoRoomInstance } from "@/entities/matrix/model/matrix-crypto";
 import { getmatrixid, hexEncode, hexDecode } from "@/shared/lib/matrix/functions";
 import { matrixIdToAddress, messageTypeFromMime, parseFileInfo, cleanMatrixIds, looksLikeProperName } from "../lib/chat-helpers";
+import { stripMentionAddresses, stripBastyonLinks } from "@/shared/lib/message-format";
 import { cacheRooms, getCachedRooms, cacheMessages, getCachedMessages } from "@/shared/lib/cache/chat-cache";
 import { useAuthStore } from "@/entities/auth/model/stores";
 import { useUserStore } from "@/entities/user/model";
@@ -476,10 +477,13 @@ export const useChatStore = defineStore(NAMESPACE, () => {
     return activeRoomId.value ? getRoomById(activeRoomId.value) : undefined;
   });
 
-  // Spread ensures a new array reference on every recompute, so dependents
-  // (virtualItems, RecycleScroller) always see the change even with shallowRef.
+  // Return the array directly (no spread) to preserve object identity between
+  // triggerRef calls. DynamicScroller uses key-field="id" for diffing, so it
+  // handles in-place mutations correctly. Spreading created a new array reference
+  // on every triggerRef(messages) — even for unrelated rooms — causing unnecessary
+  // full re-renders and flickering during cache→server sync.
   const activeMessages = computed(() =>
-    activeRoomId.value ? [...(messages.value[activeRoomId.value] ?? [])] : []
+    activeRoomId.value ? (messages.value[activeRoomId.value] ?? []) : []
   );
 
   const activeMediaMessages = computed(() =>
@@ -869,6 +873,16 @@ export const useChatStore = defineStore(NAMESPACE, () => {
       }
     }
     if (best) {
+      // Preserve the most advanced status from all candidates with the same ID.
+      // matrixRoomToChatRoom always returns status=sent, but loaded messages
+      // may have status=read from receipts — keep the most advanced one.
+      const statusPriority = { [MessageStatus.sending]: 0, [MessageStatus.failed]: 0, [MessageStatus.sent]: 1, [MessageStatus.delivered]: 2, [MessageStatus.read]: 3 };
+      for (const c of candidates) {
+        if (!c || c.id !== best.id) continue;
+        if ((statusPriority[c.status] ?? 0) > (statusPriority[best.status] ?? 0)) {
+          best = { ...best, status: c.status };
+        }
+      }
       chatRoom.lastMessage = best;
       chatRoom.updatedAt = Math.max(chatRoom.updatedAt, best.timestamp);
     }
@@ -1028,7 +1042,7 @@ export const useChatStore = defineStore(NAMESPACE, () => {
       }
       const room = getRoomById(roomId);
       const lmc = room?.lastMessage?.content;
-      if (!lmc || (lmc !== "[encrypted]" && lmc !== "[no room crypto]")) continue;
+      if (!lmc || lmc !== "[encrypted]") continue;
       toDecrypt.push({ roomId, matrixRoom });
     }
     if (toDecrypt.length === 0) return;
@@ -1525,7 +1539,16 @@ export const useChatStore = defineStore(NAMESPACE, () => {
     // Avoid duplicate messages
     if (messages.value[roomId].some((m) => m.id === message.id)) return;
 
-    messages.value[roomId].push(message);
+    // Stamp a stable render key that never changes — used by DynamicScroller's
+    // key-field so that updateMessageId (tempId→serverId) doesn't cause
+    // an unmount/remount blink.
+    if (!(message as any)._key) (message as any)._key = message.id;
+
+    // Replace the array reference (not push) so activeMessages computed returns
+    // a new reference and Vue triggers watchers (scrollToBottom, etc.).
+    // With shallowRef + no-spread in activeMessages, in-place push wouldn't
+    // change the reference and watchers wouldn't fire.
+    messages.value[roomId] = [...messages.value[roomId], message];
     triggerRef(messages);
 
     // Update room's last message and timestamp
@@ -1546,26 +1569,100 @@ export const useChatStore = defineStore(NAMESPACE, () => {
   };
 
   const setMessages = (roomId: string, msgs: Message[]) => {
-    messages.value[roomId] = msgs;
+    const existing = messages.value[roomId];
+    if (existing?.length && msgs.length) {
+      // Smart merge: reuse existing message objects to minimize Vue re-renders.
+      // DynamicScroller keeps height cache per item — reusing objects avoids full remount.
+      const existingMap = new Map(existing.map(m => [m.id, m]));
+      const merged: Message[] = [];
+      const mergedIds = new Set<string>();
+      for (const msg of msgs) {
+        const prev = existingMap.get(msg.id);
+        if (prev) {
+          // Update in-place so Vue only patches changed properties
+          Object.assign(prev, msg);
+          merged.push(prev);
+        } else {
+          merged.push(msg);
+        }
+        mergedIds.add(msg.id);
+      }
+      // Preserve optimistic messages (tempId, status=sending/failed) that haven't
+      // been confirmed by the server yet — they'd be dropped by the merge otherwise.
+      for (const msg of existing) {
+        if (!mergedIds.has(msg.id) && (msg.status === MessageStatus.sending || msg.status === MessageStatus.failed)) {
+          merged.push(msg);
+        }
+      }
+      messages.value[roomId] = merged;
+    } else {
+      messages.value[roomId] = msgs;
+    }
     triggerRef(messages);
+
+    // Sync sidebar: update room.lastMessage status from loaded messages
+    if (msgs.length > 0) {
+      const room = getRoomById(roomId);
+      if (room) {
+        const lastMsg = msgs[msgs.length - 1];
+        // Always sync lastMessage so sidebar reflects correct read/sent status
+        if (!room.lastMessage || room.lastMessage.id === lastMsg.id || lastMsg.timestamp >= (room.lastMessage.timestamp || 0)) {
+          room.lastMessage = { ...lastMsg };
+          triggerRef(rooms);
+        }
+      }
+    }
   };
 
   /** Replace a temporary message ID with the server-assigned event_id */
   const updateMessageId = (roomId: string, tempId: string, serverId: string) => {
     const roomMessages = messages.value[roomId];
     if (roomMessages) {
-      const msg = roomMessages.find((m) => m.id === tempId);
-      if (msg) {
-        msg.id = serverId;
+      const idx = roomMessages.findIndex((m) => m.id === tempId);
+      if (idx >= 0) {
+        const msg = roomMessages[idx];
+        // Create a new object so Vue detects the prop change.
+        // _key stays as tempId so DynamicScroller doesn't unmount/remount.
+        const updated = { ...msg, id: serverId };
+        const newArray = [...roomMessages];
+        newArray[idx] = updated;
+        messages.value[roomId] = newArray;
         triggerRef(messages);
 
         // Sync sidebar: update room.lastMessage if this was the last message
         const room = getRoomById(roomId);
         if (room?.lastMessage && room.lastMessage.id === tempId) {
-          room.lastMessage = { ...msg };
+          room.lastMessage = { ...updated };
           triggerRef(rooms);
         }
       }
+    }
+  };
+
+  /** Atomically update both message id AND status in a single array replacement.
+   *  Avoids two consecutive array copies + two triggerRef calls that would cause
+   *  DynamicScroller to process two separate item updates (potential blink). */
+  const updateMessageIdAndStatus = (
+    roomId: string,
+    tempId: string,
+    serverId: string,
+    status: Message["status"]
+  ) => {
+    const roomMessages = messages.value[roomId];
+    if (!roomMessages) return;
+    const idx = roomMessages.findIndex((m) => m.id === tempId);
+    if (idx < 0) return;
+    const msg = roomMessages[idx];
+    const updated = { ...msg, id: serverId, status };
+    const newArray = [...roomMessages];
+    newArray[idx] = updated;
+    messages.value[roomId] = newArray;
+    triggerRef(messages);
+
+    const room = getRoomById(roomId);
+    if (room?.lastMessage && (room.lastMessage.id === tempId || room.lastMessage.id === serverId)) {
+      room.lastMessage = { ...updated };
+      triggerRef(rooms);
     }
   };
 
@@ -1576,15 +1673,22 @@ export const useChatStore = defineStore(NAMESPACE, () => {
   ) => {
     const roomMessages = messages.value[roomId];
     if (roomMessages) {
-      const msg = roomMessages.find((m) => m.id === messageId);
-      if (msg) {
-        msg.status = status;
+      const idx = roomMessages.findIndex((m) => m.id === messageId);
+      if (idx >= 0) {
+        const msg = roomMessages[idx];
+        if (msg.status === status) return; // no change
+        // Create a new object so Vue detects the prop change and re-renders
+        // MessageBubble (in-place mutation of the same reference is invisible to Vue).
+        const updated = { ...msg, status };
+        const newArray = [...roomMessages];
+        newArray[idx] = updated;
+        messages.value[roomId] = newArray;
         triggerRef(messages);
 
         // Sync sidebar: update room.lastMessage if this message is the last one
         const room = getRoomById(roomId);
         if (room?.lastMessage && room.lastMessage.id === messageId) {
-          room.lastMessage = { ...msg };
+          room.lastMessage = { ...updated };
           triggerRef(rooms);
         }
       }
@@ -1878,7 +1982,7 @@ export const useChatStore = defineStore(NAMESPACE, () => {
           body = "[encrypted]";
         }
       } else {
-        body = "[no room crypto]";
+        body = "[encrypted]";
       }
     }
 
@@ -1925,13 +2029,22 @@ export const useChatStore = defineStore(NAMESPACE, () => {
       }
     }
 
-    // Parse reply reference
+    // Parse reply reference — supports both:
+    // 1. Standard Matrix: m.relates_to.m.in_reply_to.event_id
+    // 2. Old bastyon-chat: m.relates_to.rel_type === "m.reference" + m.relates_to.event_id
     let replyTo: ReplyTo | undefined;
     const relatesTo = content["m.relates_to"] as Record<string, unknown> | undefined;
     const inReplyTo = relatesTo?.["m.in_reply_to"] as Record<string, unknown> | undefined;
     if (inReplyTo?.event_id) {
       replyTo = {
         id: inReplyTo.event_id as string,
+        senderId: "",
+        content: "",
+      };
+    } else if (relatesTo?.rel_type === "m.reference" && relatesTo?.event_id) {
+      // Old bastyon-chat reply format (backwards compatibility)
+      replyTo = {
+        id: relatesTo.event_id as string,
         senderId: "",
         content: "",
       };
@@ -2055,7 +2168,7 @@ export const useChatStore = defineStore(NAMESPACE, () => {
               editBody = (newContent?.body as string) ?? (content.body as string) ?? "[decrypt error]";
             }
           } else {
-            editBody = "[no room crypto]";
+            editBody = "[encrypted]";
           }
         } else {
           editBody = (newContent?.body as string) ?? (content.body as string) ?? "";
@@ -2139,7 +2252,7 @@ export const useChatStore = defineStore(NAMESPACE, () => {
         const referenced = msgMap.get(msg.replyTo.id);
         if (referenced) {
           msg.replyTo.senderId = referenced.senderId;
-          msg.replyTo.content = referenced.content.slice(0, 100);
+          msg.replyTo.content = stripBastyonLinks(stripMentionAddresses(referenced.content)).slice(0, 100);
           msg.replyTo.type = referenced.type;
         }
       }
@@ -2608,7 +2721,7 @@ export const useChatStore = defineStore(NAMESPACE, () => {
               newBody = (newContent?.body as string) ?? (content.body as string) ?? "[decrypt error]";
             }
           } else {
-            newBody = "[no room crypto]";
+            newBody = "[encrypted]";
           }
         } else {
           newBody = (newContent?.body as string) ?? (content.body as string) ?? "";
@@ -2671,10 +2784,10 @@ export const useChatStore = defineStore(NAMESPACE, () => {
             body = decrypted.body;
           } catch (e) {
             console.warn("[chat-store] handleTimelineEvent decrypt failed:", e);
-            body = "[decrypt error: " + String(e) + "]";
+            body = "[encrypted]";
           }
         } else {
-          body = "[no room crypto]";
+          body = "[encrypted]";
         }
       }
 
@@ -2725,18 +2838,26 @@ export const useChatStore = defineStore(NAMESPACE, () => {
         }
       }
 
-      // Parse reply reference
+      // Parse reply reference — supports both:
+      // 1. Standard Matrix: m.relates_to.m.in_reply_to.event_id
+      // 2. Old bastyon-chat: m.relates_to.rel_type === "m.reference" + m.relates_to.event_id
       let replyTo: ReplyTo | undefined;
       const relatesTo = content["m.relates_to"] as Record<string, unknown> | undefined;
       const inReplyTo = relatesTo?.["m.in_reply_to"] as Record<string, unknown> | undefined;
+      let replyEventId: string | undefined;
       if (inReplyTo?.event_id) {
-        const replyId = inReplyTo.event_id as string;
+        replyEventId = inReplyTo.event_id as string;
+      } else if (relatesTo?.rel_type === "m.reference" && relatesTo?.event_id) {
+        // Old bastyon-chat reply format (backwards compatibility)
+        replyEventId = relatesTo.event_id as string;
+      }
+      if (replyEventId) {
         // Try to find the referenced message in already loaded messages
-        const referenced = messages.value[roomId]?.find(m => m.id === replyId);
+        const referenced = messages.value[roomId]?.find(m => m.id === replyEventId);
         replyTo = {
-          id: replyId,
+          id: replyEventId,
           senderId: referenced?.senderId ?? "",
-          content: referenced?.content.slice(0, 100) ?? "",
+          content: referenced ? stripBastyonLinks(stripMentionAddresses(referenced.content)).slice(0, 100) : "",
           type: referenced?.type,
         };
       }
@@ -2824,13 +2945,15 @@ export const useChatStore = defineStore(NAMESPACE, () => {
       }
       triggerRef(messages);
 
-      // Sync sidebar: if any status changed, update room.lastMessage
+      // Sync sidebar: if any status changed, update room.lastMessage.
+      // Find the sidebar's lastMessage by ID in the messages array (not just the last element)
+      // to handle cases where lastMessage isn't the most recent message.
       if (statusChanged) {
         const room = getRoomById(roomId);
-        if (room?.lastMessage && roomMessages.length) {
-          const lastMsg = roomMessages[roomMessages.length - 1];
-          if (room.lastMessage.id === lastMsg.id && room.lastMessage.status !== lastMsg.status) {
-            room.lastMessage = { ...lastMsg };
+        if (room?.lastMessage) {
+          const updatedMsg = roomMessages.find(m => m.id === room.lastMessage!.id);
+          if (updatedMsg && room.lastMessage.status !== updatedMsg.status) {
+            room.lastMessage = { ...updatedMsg };
           }
           triggerRef(rooms);
         }
@@ -3132,6 +3255,7 @@ export const useChatStore = defineStore(NAMESPACE, () => {
     unpinMessage,
     updateMessageContent,
     updateMessageId,
+    updateMessageIdAndStatus,
     updateMessageStatus,
   };
 });
