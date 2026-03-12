@@ -72,7 +72,7 @@ const onClick = (star: number) => {
       </svg>
     </div>
     <span v-if="!compact && totalVotes > 0" class="text-xs text-text-on-main-bg-color">
-      {{ average.toFixed(1) }} · {{ totalVotes }}
+      {{ average.toFixed(1) }}
     </span>
     <span v-if="compact && totalVotes > 0" class="text-[10px] text-text-on-main-bg-color">
       {{ average.toFixed(1) }}
