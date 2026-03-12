@@ -347,7 +347,9 @@ watch(
   { immediate: true },
 );
 
-// Auto-scroll only if user is near bottom; otherwise increment new message count
+// Auto-scroll only if user is near bottom; otherwise increment new message count.
+// Exception: when the newly added message is our own (we sent it), always scroll to bottom
+// so we see the sent message even if we were scrolled up.
 // Also track new real-time messages for entrance animation
 watch(
   () => chatStore.activeMessages.length,
@@ -358,16 +360,19 @@ watch(
     const delta = oldLen !== undefined ? newLen - oldLen : 0;
     if (delta > 10) return;
 
-    if (isNearBottom.value) {
+    const msgs = chatStore.activeMessages;
+    const lastAddedIsOwn = oldLen !== undefined && delta > 0 && msgs[newLen - 1]?.senderId === authStore.address;
+
+    if (lastAddedIsOwn) {
+      // Мы только что отправили сообщение — прокручиваем вниз, чтобы его видеть
+      scrollToBottom();
+    } else if (isNearBottom.value) {
       scrollToBottom();
     } else if (delta > 0) {
       newMessageCount.value += delta;
     }
     // Track newly arrived messages for entrance animation (only appended, not paginated)
     if (!loading.value && oldLen !== undefined && delta > 0) {
-      const msgs = chatStore.activeMessages;
-      // Capture ids NOW — updateMessageId may change msg.id before the timeout fires,
-      // causing the cleanup to miss the original tempId and leak the animation class.
       const capturedIds: string[] = [];
       for (let i = oldLen; i < newLen; i++) {
         if (msgs[i]) {

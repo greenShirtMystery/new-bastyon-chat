@@ -107,10 +107,14 @@ export function useMentionAutocomplete(
           active.value = false;
           return;
         }
+        const wasActive = active.value;
+        const prevQuery = query.value;
         active.value = true;
         query.value = q;
         triggerIndex.value = i;
-        selectedIndex.value = 0;
+        // Сбрасываем выбор только при открытии списка или при изменении запроса (набор символов).
+        // Иначе при keyup после ArrowUp/ArrowDown выбор сбрасывался обратно на первый пункт.
+        if (!wasActive || prevQuery !== q) selectedIndex.value = 0;
         return;
       }
       // Stop scanning at whitespace (no `@` found before a word boundary)
@@ -169,6 +173,12 @@ export function useMentionAutocomplete(
       })
       .slice(0, 50);
   });
+
+  // Держим selectedIndex в границах списка (напр. после загрузки профилей список пересчитывается)
+  watch(filteredMembers, (list) => {
+    const len = list.length;
+    if (len > 0 && selectedIndex.value >= len) selectedIndex.value = len - 1;
+  }, { immediate: true });
 
   /** Insert a mention at the trigger position (display-only in textarea). */
   const insertMention = (hexId: string) => {

@@ -209,8 +209,14 @@ const handleKeydown = (e: KeyboardEvent) => {
     e.preventDefault();
     showSearch.value = true;
   }
-  if (e.key === "Escape" && showSearch.value) {
-    closeSearch();
+  if (e.key === "Escape") {
+    if (showSearch.value) {
+      closeSearch();
+    } else if (chatStore.activeRoom && !isChannelView.value) {
+      chatStore.setActiveRoom(null);
+      // Снять фокус, чтобы не оставалась обводка на vue-recycle-scroller__item-view
+      (document.activeElement as HTMLElement)?.blur();
+    }
   }
 };
 
