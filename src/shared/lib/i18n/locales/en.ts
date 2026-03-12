@@ -444,6 +444,8 @@ export const en = {
   "post.video": "Video",
   "post.article": "Article",
   "post.openInBastyon": "Open in Forta",
+  "post.subscribe": "Subscribe",
+  "post.views": "Views",
 
   // Post player
   "postPlayer.boost": "Boost",
@@ -454,7 +456,7 @@ export const en = {
   "postPlayer.send": "Send",
   "postPlayer.rated": "You rated this post",
   "postPlayer.ratingRestricted": "Rating restricted",
-  "postPlayer.openPost": "Open full post",
+  "postPlayer.openPost": "Open",
   "postPlayer.searchChats": "Search chats...",
 
   // ── Registration ──

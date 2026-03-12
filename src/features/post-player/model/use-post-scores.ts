@@ -31,19 +31,17 @@ export function usePostScores(txid: string) {
     }
   };
 
-  const submitVote = async (value: number) => {
-    if (hasVoted.value || submitting.value) return false;
-    submitting.value = true;
-    try {
-      const ok = await authStore.submitUpvote(txid, value);
-      if (ok) {
-        myScore.value = value;
-        scores.value = [...scores.value, { address: authStore.address!, value, posttxid: txid }];
-      }
-      return ok;
-    } finally {
-      submitting.value = false;
-    }
+  const submitVote = (value: number) => {
+    if (hasVoted.value) return false;
+
+    // Optimistic update — show rating immediately, blockchain confirms later
+    myScore.value = value;
+    scores.value = [...scores.value, { address: authStore.address!, value, posttxid: txid }];
+
+    // Fire-and-forget — don't revert on error (blockchain will catch up)
+    authStore.submitUpvote(txid, value).catch(() => {});
+
+    return true;
   };
 
   return { scores, myScore, averageScore, totalVotes, hasVoted, loading, submitting, load, submitVote };

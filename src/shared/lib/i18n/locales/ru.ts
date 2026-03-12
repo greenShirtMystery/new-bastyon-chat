@@ -446,6 +446,8 @@ export const ru: Record<TranslationKey, string> = {
   "post.video": "Видео",
   "post.article": "Статья",
   "post.openInBastyon": "Открыть в Forta",
+  "post.subscribe": "Подписаться",
+  "post.views": "Просмотры",
 
   // Post player
   "postPlayer.boost": "Поддержать",
@@ -456,7 +458,7 @@ export const ru: Record<TranslationKey, string> = {
   "postPlayer.send": "Отправить",
   "postPlayer.rated": "Вы оценили этот пост",
   "postPlayer.ratingRestricted": "Оценка ограничена",
-  "postPlayer.openPost": "Открыть пост",
+  "postPlayer.openPost": "Открыть",
   "postPlayer.searchChats": "Поиск чатов...",
 
   // ── Registration ──
