@@ -2,9 +2,12 @@
 import { useAuthStore } from "@/entities/auth";
 import type { BastyonPostData } from "@/app/providers/initializers";
 import { parseVideoUrl } from "@/shared/lib/video-embed";
+import { usePostScores } from "../model/use-post-scores";
+import { usePostBoost } from "../model/use-post-boost";
 import VideoPlayer from "./VideoPlayer.vue";
 import StarRating from "./StarRating.vue";
 import PostPlayerModal from "./PostPlayerModal.vue";
+import SharePostPicker from "./SharePostPicker.vue";
 
 interface Props {
   txid: string;
@@ -15,6 +18,12 @@ const props = defineProps<Props>();
 const { t } = useI18n();
 const authStore = useAuthStore();
 
+// Post scores — interactive voting from card
+const { myScore, averageScore, totalVotes, hasVoted, submitting, load: loadScores, submitVote } = usePostScores(props.txid);
+
+// Boost
+const { showDonateModal, boostAddress, openBoost, closeBoost } = usePostBoost();
+
 // Try sync cache first — avoids skeleton flash for prefetched posts
 const cached = authStore.getCachedPost(props.txid);
 const post = ref<BastyonPostData | null>(cached);
@@ -23,7 +32,9 @@ const error = ref(false);
 const authorName = ref("");
 const authorImage = ref("");
 const authorReputation = ref<number | null>(null);
+const authorSubscribers = ref<number | null>(null);
 const showModal = ref(false);
+const showSharePicker = ref(false);
 
 const videoInfo = computed(() => post.value?.url ? parseVideoUrl(post.value.url) : null);
 const isArticle = computed(() => post.value?.settings?.v === "a");
@@ -66,7 +77,9 @@ const visibleTags = computed(() => {
   return post.value.tags.slice(0, 5);
 });
 
-const scores = ref<{ average: number; total: number }>({ average: 0, total: 0 });
+const postUrl = computed(() => `bastyon://post?s=${props.txid}`);
+const postLink = computed(() => `https://bastyon.com/post?s=${props.txid}`);
+const isOwnPost = computed(() => post.value?.address === authStore.address);
 
 async function loadAuthor(data: BastyonPostData) {
   if (!data.address) return;
@@ -76,21 +89,25 @@ async function loadAuthor(data: BastyonPostData) {
     authorName.value = user.name || data.address.slice(0, 10);
     authorImage.value = user.image || "";
     authorReputation.value = user.reputation ?? null;
+    authorSubscribers.value = user.subscribers_count ?? null;
   } else {
     authorName.value = data.address.slice(0, 10);
   }
 }
 
-function loadScores() {
-  authStore.loadPostScores(props.txid).then((s) => {
-    if (s.length) {
-      const sum = s.reduce((a, x) => a + x.value, 0);
-      scores.value = { average: sum / s.length, total: s.length };
-    }
-  }).catch(() => { /* scores unavailable, non-fatal */ });
+function onVote(value: number) {
+  submitVote(value);
 }
 
-const postUrl = computed(() => `bastyon://post?s=${props.txid}`);
+function onShare() {
+  showSharePicker.value = true;
+}
+
+function onBoost() {
+  if (post.value?.address) {
+    openBoost(post.value.address);
+  }
+}
 
 onMounted(async () => {
   try {
@@ -101,7 +118,7 @@ onMounted(async () => {
       post.value = data;
     }
     await loadAuthor(data);
-    loadScores();
+    loadScores().catch(() => {});
   } catch {
     error.value = true;
   } finally {
@@ -118,7 +135,7 @@ onMounted(async () => {
     :class="isOwn ? 'border-white/10 bg-white/10' : 'border-neutral-grad-1/50 bg-background-total-theme'"
   >
     <div class="flex items-center gap-3 p-4 pb-2">
-      <div class="h-10 w-10 animate-pulse rounded-full bg-neutral-grad-2" />
+      <div class="h-12 w-12 animate-pulse rounded-full bg-neutral-grad-2" />
       <div class="flex flex-col gap-1.5">
         <div class="h-3.5 w-24 animate-pulse rounded bg-neutral-grad-2" />
         <div class="h-2.5 w-16 animate-pulse rounded bg-neutral-grad-2" />
@@ -127,9 +144,8 @@ onMounted(async () => {
     <div class="flex flex-col gap-2 px-4 pb-3">
       <div class="h-4 w-full animate-pulse rounded bg-neutral-grad-2" />
       <div class="h-4 w-3/4 animate-pulse rounded bg-neutral-grad-2" />
-      <div class="h-3 w-1/2 animate-pulse rounded bg-neutral-grad-2" />
     </div>
-    <div class="h-40 w-full animate-pulse bg-neutral-grad-2" />
+    <div class="aspect-video w-full animate-pulse bg-neutral-grad-2" />
   </div>
 
   <!-- Error -->
@@ -150,63 +166,42 @@ onMounted(async () => {
   >
     <!-- Author header -->
     <div class="flex items-center gap-3 p-4 pb-3">
+      <!-- Avatar -->
       <img
         v-if="authorAvatarUrl"
         :src="authorAvatarUrl"
         alt=""
-        class="h-10 w-10 shrink-0 rounded-full object-cover"
+        class="h-12 w-12 shrink-0 rounded-full object-cover"
       />
       <div
         v-else
-        class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-bold"
+        class="flex h-12 w-12 shrink-0 items-center justify-center rounded-full text-lg font-bold"
         :class="isOwn ? 'bg-white/20 text-white' : 'bg-color-bg-ac/20 text-color-bg-ac'"
       >
         <template v-if="authorName">{{ authorName.charAt(0).toUpperCase() }}</template>
-        <svg v-else width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></svg>
+        <svg v-else width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></svg>
       </div>
 
       <div class="flex min-w-0 flex-col">
         <div class="flex items-baseline gap-1">
-          <span class="truncate text-sm font-semibold" :class="isOwn ? 'text-white' : 'text-text-color'">
+          <span class="truncate font-bold" :class="isOwn ? 'text-white' : 'text-text-color'">
             {{ authorName }}
           </span>
-          <span
+          <sup
             v-if="formattedReputation"
-            class="shrink-0 text-[10px] font-medium"
+            class="text-[10px] font-medium"
             :class="isOwn ? 'text-white/50' : 'text-text-on-main-bg-color'"
-          >{{ formattedReputation }}</span>
-        </div>
-        <div class="flex items-center gap-1.5">
-          <span v-if="postDate" class="text-xs" :class="isOwn ? 'text-white/50' : 'text-text-on-main-bg-color'">
-            {{ postDate }}
-          </span>
+          >{{ formattedReputation }}</sup>
           <span
-            v-if="isArticle"
-            class="rounded-full px-1.5 py-0.5 text-[10px] font-medium"
-            :class="isOwn ? 'bg-white/15 text-white/70' : 'bg-color-bg-ac/15 text-color-bg-ac'"
-          >{{ t("post.article") }}</span>
-          <span
-            v-else-if="videoInfo"
-            class="rounded-full px-1.5 py-0.5 text-[10px] font-medium"
-            :class="isOwn ? 'bg-white/15 text-white/70' : 'bg-color-bg-ac/15 text-color-bg-ac'"
-          >{{ t("post.video") }}</span>
+            class="shrink-0 text-xs"
+            :class="isOwn ? 'text-white/40' : 'text-text-on-main-bg-color'"
+          >&middot; {{ t("post.subscribe") }}</span>
         </div>
+        <span v-if="postDate" class="text-xs" :class="isOwn ? 'text-white/50' : 'text-text-on-main-bg-color'">
+          {{ postDate }}
+        </span>
       </div>
     </div>
-
-    <!-- Caption -->
-    <div
-      v-if="post.caption"
-      class="px-4 pb-1 text-sm font-semibold leading-snug"
-      :class="isOwn ? 'text-white' : 'text-text-color'"
-    >{{ post.caption }}</div>
-
-    <!-- Message -->
-    <div
-      v-if="truncatedMessage"
-      class="px-4 pb-3 text-[13px] leading-relaxed"
-      :class="isOwn ? 'text-white/80' : 'text-text-color/80'"
-    >{{ truncatedMessage }}</div>
 
     <!-- Inline video -->
     <VideoPlayer v-if="videoInfo" :url="post.url" inline />
@@ -220,29 +215,90 @@ onMounted(async () => {
       loading="lazy"
     />
 
-    <!-- Tags -->
-    <div v-if="visibleTags.length" class="flex flex-wrap gap-1.5 px-4 pt-3">
-      <span
-        v-for="tag in visibleTags"
-        :key="tag"
-        class="text-xs"
-        :class="isOwn ? 'text-white/50' : 'text-color-txt-ac'"
-      >#{{ tag }}</span>
+    <!-- Content section -->
+    <div class="flex flex-col gap-2 px-4 pt-3">
+      <!-- Caption -->
+      <div
+        v-if="post.caption"
+        class="text-base font-semibold leading-snug"
+        :class="isOwn ? 'text-white' : 'text-text-color'"
+      >{{ post.caption }}</div>
+
+      <!-- Message -->
+      <div
+        v-if="truncatedMessage"
+        class="text-[13px] leading-relaxed"
+        :class="isOwn ? 'text-white/80' : 'text-text-color/80'"
+      >{{ truncatedMessage }}</div>
+
+      <!-- Tags -->
+      <div v-if="visibleTags.length" class="flex flex-wrap gap-1.5">
+        <span
+          v-for="tag in visibleTags"
+          :key="tag"
+          class="rounded-full px-2.5 py-1 text-xs font-medium"
+          :class="isOwn ? 'bg-white/10 text-white/70' : 'bg-neutral-grad-0 text-text-color/80'"
+        >#{{ tag }}</span>
+      </div>
     </div>
 
-    <!-- Rating footer -->
-    <div class="px-4 py-3">
+    <!-- Rating + actions row -->
+    <div class="flex items-center gap-3 px-4 py-4">
+      <!-- Interactive star rating -->
       <StarRating
-        :average="scores.average"
-        :total-votes="scores.total"
-        readonly
+        :model-value="myScore"
+        :average="averageScore"
+        :total-votes="totalVotes"
+        :readonly="hasVoted"
+        :submitting="submitting"
+        @update:model-value="onVote"
       />
+
+      <!-- Separator + subscribers count -->
+      <div
+        v-if="authorSubscribers != null"
+        class="flex items-center gap-1 rounded-full border px-2.5 py-1"
+        :class="isOwn ? 'border-white/20 text-white/60' : 'border-neutral-grad-1 text-text-on-main-bg-color'"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" />
+        </svg>
+        <span class="text-xs font-medium">{{ authorSubscribers }}</span>
+      </div>
+
+      <div class="flex-1" />
+
+      <!-- Share -->
+      <button
+        :aria-label="t('postPlayer.share')"
+        class="flex h-8 w-8 items-center justify-center rounded-full transition-colors"
+        :class="isOwn ? 'text-white/50 hover:bg-white/10 hover:text-white/80' : 'text-text-on-main-bg-color hover:bg-neutral-grad-0 hover:text-text-color'"
+        @click.stop="onShare"
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="18" cy="5" r="3" /><circle cx="6" cy="12" r="3" /><circle cx="18" cy="19" r="3" />
+          <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" /><line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
+        </svg>
+      </button>
+
+      <!-- Boost -->
+      <button
+        v-if="!isOwnPost"
+        :aria-label="t('postPlayer.boost')"
+        class="flex h-8 w-8 items-center justify-center rounded-full transition-colors"
+        :class="isOwn ? 'text-white/50 hover:bg-white/10 hover:text-white/80' : 'text-color-star-yellow hover:bg-color-star-yellow/10'"
+        @click.stop="onBoost"
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+          <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+        </svg>
+      </button>
     </div>
 
     <!-- Open button -->
-    <div class="border-t px-4 py-2.5" :class="isOwn ? 'border-white/10' : 'border-neutral-grad-1/50'">
+    <div class="px-4 pb-4">
       <button
-        class="w-full rounded-lg py-2 text-sm font-medium text-white transition-colors"
+        class="w-full rounded-xl py-2.5 text-sm font-semibold text-white transition-colors"
         :class="isOwn ? 'bg-white/20 hover:bg-white/30' : 'bg-color-bg-ac hover:bg-color-bg-ac-1'"
         @click.stop="showModal = true"
       >
@@ -258,5 +314,14 @@ onMounted(async () => {
     :author-name="authorName"
     :author-avatar-url="authorAvatarUrl"
     @close="showModal = false"
+  />
+
+  <!-- Share picker -->
+  <SharePostPicker
+    v-if="showSharePicker"
+    :show="showSharePicker"
+    :post-link="postLink"
+    :post-title="post?.caption || ''"
+    @close="showSharePicker = false"
   />
 </template>

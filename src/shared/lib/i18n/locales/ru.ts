@@ -446,6 +446,8 @@ export const ru: Record<TranslationKey, string> = {
   "post.video": "Видео",
   "post.article": "Статья",
   "post.openInBastyon": "Открыть в Forta",
+  "post.subscribe": "Подписаться",
+  "post.views": "Просмотры",
 
   // Post player
   "postPlayer.boost": "Поддержать",
