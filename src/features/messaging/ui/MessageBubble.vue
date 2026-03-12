@@ -226,7 +226,7 @@ const replyPreviewText = computed(() => {
 
 <template>
   <div
-    class="group relative flex gap-2 select-none transition-opacity active:opacity-80"
+    class="group relative flex gap-2 transition-opacity"
     :class="props.isOwn ? 'flex-row-reverse' : 'flex-row'"
     :style="swipeStyle"
     @pointerdown="onPointerdown"

@@ -50,7 +50,7 @@
   --color-bg-ac: 0, 164, 255;
   --color-bg-ac-1: 0, 142, 191;
   --color-bg-ac-2: 250, 110, 132;
-  --color-bg-selection: 179, 212, 252;
+  --color-bg-selection: 0, 110, 230;
 
   --color-txt-ac: 0, 164, 255;
   --color-txt-ac-1: 0, 142, 191;
@@ -109,7 +109,7 @@
   --color-bg-ac: 0, 90, 210;
   --color-bg-ac-1: 0, 152, 200;
   --color-bg-ac-2: 255, 120, 145;
-  --color-bg-selection: 190, 225, 255;
+  --color-bg-selection: 30, 100, 200;
 
   --color-txt-ac: 0, 174, 255;
   --color-txt-ac-1: 0, 152, 200;
@@ -169,12 +169,14 @@ a {
 }
 
 ::-moz-selection {
-  background: #b3d4fc;
+  background: rgb(var(--color-bg-selection));
+  color: #fff;
   text-shadow: none;
 }
 
 ::selection {
-  background: #b3d4fc;
+  background: rgb(var(--color-bg-selection));
+  color: #fff;
   text-shadow: none;
 }
 
