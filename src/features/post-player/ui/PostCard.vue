@@ -149,18 +149,33 @@ onMounted(async () => {
     class="post-card my-1.5 w-full max-w-md overflow-hidden rounded-2xl border"
     :class="isOwn ? 'border-white/10 bg-white/10' : 'border-neutral-grad-1/50 bg-background-total-theme'"
   >
-    <div class="flex items-center gap-3 p-4 pb-2">
-      <div class="h-12 w-12 animate-pulse rounded-full bg-neutral-grad-2" />
+    <!-- Author skeleton -->
+    <div class="flex items-center gap-3 p-4 pb-3">
+      <div class="h-12 w-12 shrink-0 animate-pulse rounded-full bg-neutral-grad-2" />
       <div class="flex flex-col gap-1.5">
-        <div class="h-3.5 w-24 animate-pulse rounded bg-neutral-grad-2" />
-        <div class="h-2.5 w-16 animate-pulse rounded bg-neutral-grad-2" />
+        <div class="h-4 w-28 animate-pulse rounded bg-neutral-grad-2" />
+        <div class="h-3 w-20 animate-pulse rounded bg-neutral-grad-2" />
       </div>
     </div>
-    <div class="flex flex-col gap-2 px-4 pb-3">
-      <div class="h-4 w-full animate-pulse rounded bg-neutral-grad-2" />
-      <div class="h-4 w-3/4 animate-pulse rounded bg-neutral-grad-2" />
-    </div>
+    <!-- Media skeleton -->
     <div class="aspect-video w-full animate-pulse bg-neutral-grad-2" />
+    <!-- Content skeleton -->
+    <div class="flex flex-col gap-2 px-4 pt-3">
+      <div class="h-5 w-3/4 animate-pulse rounded bg-neutral-grad-2" />
+      <div class="h-4 w-full animate-pulse rounded bg-neutral-grad-2" />
+      <div class="h-4 w-2/3 animate-pulse rounded bg-neutral-grad-2" />
+    </div>
+    <!-- Rating skeleton -->
+    <div class="flex items-center gap-3 px-4 py-4">
+      <div class="flex gap-0.5">
+        <div v-for="i in 5" :key="i" class="h-5 w-5 animate-pulse rounded bg-neutral-grad-2" />
+      </div>
+      <div class="h-3 w-8 animate-pulse rounded bg-neutral-grad-2" />
+    </div>
+    <!-- Button skeleton -->
+    <div class="px-4 pb-4">
+      <div class="h-10 w-full animate-pulse rounded-xl bg-neutral-grad-2" />
+    </div>
   </div>
 
   <!-- Error -->
