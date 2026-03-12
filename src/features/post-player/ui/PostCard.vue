@@ -22,6 +22,7 @@ const loading = ref(!cached);
 const error = ref(false);
 const authorName = ref("");
 const authorImage = ref("");
+const authorReputation = ref<number | null>(null);
 const showModal = ref(false);
 
 const videoInfo = computed(() => post.value?.url ? parseVideoUrl(post.value.url) : null);
@@ -35,8 +36,8 @@ const firstImage = computed(() => {
 
 const truncatedMessage = computed(() => {
   if (!post.value?.message) return "";
-  return post.value.message.length > 120
-    ? post.value.message.slice(0, 120) + "..."
+  return post.value.message.length > 500
+    ? post.value.message.slice(0, 500) + "..."
     : post.value.message;
 });
 
@@ -45,6 +46,24 @@ const authorAvatarUrl = computed(() => {
   return authorImage.value.startsWith("http")
     ? authorImage.value
     : `https://bastyon.com/images/${authorImage.value}`;
+});
+
+const formattedReputation = computed(() => {
+  if (authorReputation.value == null) return "";
+  const rep = authorReputation.value;
+  if (rep >= 1000) return (rep / 1000).toFixed(1) + "K";
+  return rep.toFixed(0);
+});
+
+const postDate = computed(() => {
+  if (!post.value?.time) return "";
+  const date = new Date(post.value.time * 1000);
+  return date.toLocaleDateString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+});
+
+const visibleTags = computed(() => {
+  if (!post.value?.tags?.length) return [];
+  return post.value.tags.slice(0, 5);
 });
 
 const scores = ref<{ average: number; total: number }>({ average: 0, total: 0 });
@@ -56,6 +75,7 @@ async function loadAuthor(data: BastyonPostData) {
   if (user) {
     authorName.value = user.name || data.address.slice(0, 10);
     authorImage.value = user.image || "";
+    authorReputation.value = user.reputation ?? null;
   } else {
     authorName.value = data.address.slice(0, 10);
   }
@@ -68,6 +88,12 @@ function loadScores() {
       scores.value = { average: sum / s.length, total: s.length };
     }
   });
+}
+
+const postUrl = computed(() => `bastyon://post?s=${props.txid}`);
+
+function openInApp() {
+  window.open(postUrl.value, "_blank");
 }
 
 onMounted(async () => {
@@ -92,24 +118,28 @@ onMounted(async () => {
   <!-- Loading skeleton -->
   <div
     v-if="loading"
-    class="post-card my-1 w-full max-w-md overflow-hidden rounded-xl"
-    :class="isOwn ? 'bg-white/10' : 'bg-neutral-grad-0/60'"
+    class="post-card my-1.5 w-full max-w-md overflow-hidden rounded-2xl border"
+    :class="isOwn ? 'border-white/10 bg-white/10' : 'border-neutral-grad-1/50 bg-background-total-theme'"
   >
-    <div class="h-36 w-full animate-pulse bg-neutral-grad-2" />
-    <div class="flex flex-col gap-2 p-3">
-      <div class="flex items-center gap-2">
-        <div class="h-5 w-5 animate-pulse rounded-full bg-neutral-grad-2" />
-        <div class="h-3 w-20 animate-pulse rounded bg-neutral-grad-2" />
+    <div class="flex items-center gap-3 p-4 pb-2">
+      <div class="h-10 w-10 animate-pulse rounded-full bg-neutral-grad-2" />
+      <div class="flex flex-col gap-1.5">
+        <div class="h-3.5 w-24 animate-pulse rounded bg-neutral-grad-2" />
+        <div class="h-2.5 w-16 animate-pulse rounded bg-neutral-grad-2" />
       </div>
+    </div>
+    <div class="flex flex-col gap-2 px-4 pb-3">
+      <div class="h-4 w-full animate-pulse rounded bg-neutral-grad-2" />
       <div class="h-4 w-3/4 animate-pulse rounded bg-neutral-grad-2" />
       <div class="h-3 w-1/2 animate-pulse rounded bg-neutral-grad-2" />
     </div>
+    <div class="h-40 w-full animate-pulse bg-neutral-grad-2" />
   </div>
 
   <!-- Error -->
   <a
     v-else-if="error"
-    :href="`bastyon://post?s=${txid}`"
+    :href="postUrl"
     target="_blank"
     rel="noopener noreferrer"
     class="text-color-txt-ac underline hover:no-underline"
@@ -119,10 +149,66 @@ onMounted(async () => {
   <!-- Post card -->
   <div
     v-else-if="post"
-    class="post-card group my-1 w-full max-w-md cursor-pointer overflow-hidden rounded-xl transition-shadow hover:shadow-lg"
-    :class="isOwn ? 'bg-white/10 hover:bg-white/[0.14]' : 'bg-neutral-grad-0/60 hover:bg-neutral-grad-0/80'"
-    @click="showModal = true"
+    class="post-card my-1.5 w-full max-w-md overflow-hidden rounded-2xl border"
+    :class="isOwn ? 'border-white/10 bg-white/[0.08]' : 'border-neutral-grad-1/50 bg-background-total-theme'"
   >
+    <!-- Author header -->
+    <div class="flex items-center gap-3 p-4 pb-3">
+      <img
+        v-if="authorAvatarUrl"
+        :src="authorAvatarUrl"
+        alt=""
+        class="h-10 w-10 shrink-0 rounded-full object-cover"
+      />
+      <div
+        v-else
+        class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-bold"
+        :class="isOwn ? 'bg-white/20 text-white' : 'bg-color-bg-ac/20 text-color-bg-ac'"
+      >{{ authorName.charAt(0).toUpperCase() }}</div>
+
+      <div class="flex min-w-0 flex-col">
+        <div class="flex items-baseline gap-1">
+          <span class="truncate text-sm font-semibold" :class="isOwn ? 'text-white' : 'text-text-color'">
+            {{ authorName }}
+          </span>
+          <span
+            v-if="formattedReputation"
+            class="shrink-0 text-[10px] font-medium"
+            :class="isOwn ? 'text-white/50' : 'text-text-on-main-bg-color'"
+          >{{ formattedReputation }}</span>
+        </div>
+        <div class="flex items-center gap-1.5">
+          <span v-if="postDate" class="text-xs" :class="isOwn ? 'text-white/50' : 'text-text-on-main-bg-color'">
+            {{ postDate }}
+          </span>
+          <span
+            v-if="isArticle"
+            class="rounded-full px-1.5 py-0.5 text-[10px] font-medium"
+            :class="isOwn ? 'bg-white/15 text-white/70' : 'bg-color-bg-ac/15 text-color-bg-ac'"
+          >{{ t("post.article") }}</span>
+          <span
+            v-else-if="videoInfo"
+            class="rounded-full px-1.5 py-0.5 text-[10px] font-medium"
+            :class="isOwn ? 'bg-white/15 text-white/70' : 'bg-color-bg-ac/15 text-color-bg-ac'"
+          >{{ t("post.video") }}</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Caption -->
+    <div
+      v-if="post.caption"
+      class="px-4 pb-1 text-sm font-semibold leading-snug"
+      :class="isOwn ? 'text-white' : 'text-text-color'"
+    >{{ post.caption }}</div>
+
+    <!-- Message -->
+    <div
+      v-if="truncatedMessage"
+      class="px-4 pb-3 text-[13px] leading-relaxed"
+      :class="isOwn ? 'text-white/80' : 'text-text-color/80'"
+    >{{ truncatedMessage }}</div>
+
     <!-- Inline video -->
     <VideoPlayer v-if="videoInfo" :url="post.url" inline />
 
@@ -131,68 +217,52 @@ onMounted(async () => {
       v-else-if="firstImage"
       :src="firstImage"
       alt=""
-      class="max-h-52 w-full object-cover"
+      class="w-full object-cover"
       loading="lazy"
     />
 
-    <div class="flex flex-col gap-1.5 p-3">
-      <!-- Author -->
-      <div v-if="authorName" class="flex items-center gap-2">
-        <img
-          v-if="authorAvatarUrl"
-          :src="authorAvatarUrl"
-          alt=""
-          class="h-5 w-5 rounded-full object-cover"
-        />
-        <div
-          v-else
-          class="flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold"
-          :class="isOwn ? 'bg-white/20 text-white' : 'bg-color-bg-ac/20 text-color-bg-ac'"
-        >{{ authorName.charAt(0).toUpperCase() }}</div>
-        <span class="text-xs font-medium" :class="isOwn ? 'text-white/80' : 'text-text-color'">
-          {{ authorName }}
-        </span>
-        <span
-          v-if="isArticle"
-          class="rounded-full px-1.5 py-0.5 text-[10px] font-medium"
-          :class="isOwn ? 'bg-white/15 text-white/70' : 'bg-color-bg-ac/15 text-color-bg-ac'"
-        >{{ t("post.article") }}</span>
-        <span
-          v-else-if="videoInfo"
-          class="rounded-full px-1.5 py-0.5 text-[10px] font-medium"
-          :class="isOwn ? 'bg-white/15 text-white/70' : 'bg-color-bg-ac/15 text-color-bg-ac'"
-        >{{ t("post.video") }}</span>
-      </div>
+    <!-- Tags -->
+    <div v-if="visibleTags.length" class="flex flex-wrap gap-1.5 px-4 pt-3">
+      <span
+        v-for="tag in visibleTags"
+        :key="tag"
+        class="text-xs"
+        :class="isOwn ? 'text-white/50' : 'text-color-txt-ac'"
+      >#{{ tag }}</span>
+    </div>
 
-      <!-- Caption -->
-      <div
-        v-if="post.caption"
-        class="text-sm font-semibold leading-snug"
-        :class="isOwn ? 'text-white' : 'text-text-color'"
-      >{{ post.caption }}</div>
-
-      <!-- Message -->
-      <div
-        v-if="truncatedMessage"
-        class="text-xs leading-relaxed"
-        :class="isOwn ? 'text-white/70' : 'text-text-color/70'"
-      >{{ truncatedMessage }}</div>
-
-      <!-- Compact rating + open hint -->
-      <div class="flex items-center justify-between pt-1">
-        <StarRating
-          :average="scores.average"
-          :total-votes="scores.total"
-          compact
-          readonly
-        />
-        <span
-          class="text-[10px] transition-opacity group-hover:opacity-100"
-          :class="isOwn ? 'text-white/60 group-hover:text-white/80' : 'text-text-on-main-bg-color opacity-70'"
+    <!-- Rating + actions footer -->
+    <div class="flex items-center justify-between px-4 py-3">
+      <StarRating
+        :average="scores.average"
+        :total-votes="scores.total"
+        readonly
+      />
+      <div class="flex items-center gap-2">
+        <!-- Share -->
+        <button
+          class="flex h-7 w-7 items-center justify-center rounded-full transition-colors"
+          :class="isOwn ? 'text-white/50 hover:bg-white/10 hover:text-white/80' : 'text-text-on-main-bg-color hover:bg-neutral-grad-0 hover:text-text-color'"
+          @click.stop="showModal = true"
         >
-          {{ t("postPlayer.openPost") }}
-        </span>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8" />
+            <polyline points="16 6 12 2 8 6" />
+            <line x1="12" y1="2" x2="12" y2="15" />
+          </svg>
+        </button>
       </div>
+    </div>
+
+    <!-- Open button -->
+    <div class="border-t px-4 py-2.5" :class="isOwn ? 'border-white/10' : 'border-neutral-grad-1/50'">
+      <button
+        class="w-full rounded-lg py-2 text-sm font-medium text-white transition-colors"
+        :class="isOwn ? 'bg-white/20 hover:bg-white/30' : 'bg-color-bg-ac hover:bg-color-bg-ac-1'"
+        @click.stop="showModal = true"
+      >
+        {{ t("postPlayer.openPost") }}
+      </button>
     </div>
   </div>
 
