@@ -456,7 +456,7 @@ export const en = {
   "postPlayer.send": "Send",
   "postPlayer.rated": "You rated this post",
   "postPlayer.ratingRestricted": "Rating restricted",
-  "postPlayer.openPost": "Open full post",
+  "postPlayer.openPost": "Open",
   "postPlayer.searchChats": "Search chats...",
 
   // ── Registration ──

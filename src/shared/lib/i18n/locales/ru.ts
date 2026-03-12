@@ -458,7 +458,7 @@ export const ru: Record<TranslationKey, string> = {
   "postPlayer.send": "Отправить",
   "postPlayer.rated": "Вы оценили этот пост",
   "postPlayer.ratingRestricted": "Оценка ограничена",
-  "postPlayer.openPost": "Открыть пост",
+  "postPlayer.openPost": "Открыть",
   "postPlayer.searchChats": "Поиск чатов...",
 
   // ── Registration ──

@@ -243,7 +243,7 @@ onMounted(async () => {
     </div>
 
     <!-- Rating + actions row -->
-    <div class="flex items-center gap-3 px-4 py-4">
+    <div class="flex items-center gap-3 px-4 py-4" @click.stop @pointerdown.stop @touchstart.stop>
       <!-- Interactive star rating -->
       <StarRating
         :model-value="myScore"

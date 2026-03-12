@@ -111,7 +111,7 @@ onUnmounted(() => {
             <img :src="images[0]" alt="" class="w-full object-cover" loading="lazy" />
           </div>
 
-          <div class="flex flex-col gap-4 p-5">
+          <div class="flex flex-col gap-4 p-5 text-text-color">
             <PostAuthor
               :name="authorName"
               :avatar-url="authorAvatarUrl"
@@ -151,7 +151,7 @@ onUnmounted(() => {
                 :submitting="scoresSubmitting"
                 @update:model-value="handleRate"
               />
-              <span v-if="hasVoted" class="text-[10px] opacity-60">
+              <span v-if="hasVoted" class="text-[10px] text-text-on-main-bg-color">
                 {{ t("postPlayer.rated") }}
               </span>
             </div>
