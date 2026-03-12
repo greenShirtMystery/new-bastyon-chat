@@ -7,4 +7,6 @@ export interface UserData {
   name: string;
   ref: unknown;
   site: string;
+  reputation?: number;
+  subscribers_count?: number;
 }
