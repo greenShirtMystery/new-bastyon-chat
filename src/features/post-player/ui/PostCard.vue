@@ -100,8 +100,9 @@ async function loadAuthor(data: BastyonPostData) {
 }
 
 function onVote(value: number) {
-  submitVote(value);
-  toast(t("postPlayer.rated"), "success");
+  if (submitVote(value)) {
+    toast(t("postPlayer.rated"), "success");
+  }
 }
 
 function onShare() {
