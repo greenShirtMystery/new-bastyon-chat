@@ -37,6 +37,8 @@ export interface FileInfo {
   captionAbove?: boolean;
   /** True for video circle (video note) messages */
   videoNote?: boolean;
+  /** Thumbnail URL for video circles */
+  thumbnailUrl?: string;
 }
 
 export interface ReplyTo {

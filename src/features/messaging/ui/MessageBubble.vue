@@ -389,20 +389,24 @@ const replyPreviewText = computed(() => {
 
       </div>
 
-      <!-- Video circle (video note) message -->
+      <!-- Video Circle (video note) message -->
       <div
         v-else-if="message.type === MessageType.videoCircle && hasFileInfo"
-        class="flex flex-col"
+        class="inline-block"
       >
+        <!-- Forwarded indicator -->
+        <div v-if="message.forwardedFrom" class="mb-1 truncate text-[11px] italic"
+          :class="props.isOwn ? 'text-text-on-bg-ac-color/70' : 'text-color-bg-ac'">
+          {{ t("message.forwardedFrom", { name: forwardedFromName }) }}
+        </div>
         <VideoCirclePlayer :message="message" :is-own="props.isOwn" />
-        <div v-if="themeStore.showTimestamps" class="mt-0.5 flex items-center gap-1 self-end text-text-on-main-bg-color">
+        <!-- Timestamp below the circle -->
+        <div v-if="themeStore.showTimestamps" class="mt-1 flex items-center gap-1" :class="props.isOwn ? 'justify-end text-text-on-main-bg-color' : 'text-text-on-main-bg-color'">
           <span class="text-[10px]">{{ time }}</span>
           <MessageStatusIcon v-if="props.isOwn" :status="msgStatus" />
         </div>
         <!-- Reactions row -->
-        <div v-if="message.reactions && Object.keys(message.reactions).length" class="mt-0.5">
-          <ReactionRow :reactions="message.reactions" :is-own="props.isOwn" @toggle="handleToggleReaction" @add-reaction="handleAddReaction" />
-        </div>
+        <ReactionRow v-if="message.reactions && Object.keys(message.reactions).length" :reactions="message.reactions" :is-own="props.isOwn" @toggle="handleToggleReaction" @add-reaction="handleAddReaction" />
       </div>
 
       <!-- Video message -->

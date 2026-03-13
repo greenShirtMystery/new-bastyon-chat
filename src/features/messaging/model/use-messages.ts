@@ -368,7 +368,7 @@ export function useMessages() {
     }
   };
 
-  /** Send a video circle (video note) message (m.video event with videoNote marker) */
+  /** Send a video circle (video note) message — circular video like Telegram */
   const sendVideoCircle = async (file: File, options: { duration?: number } = {}) => {
     const roomId = chatStore.activeRoomId;
     if (!roomId || !file) return;
@@ -732,6 +732,19 @@ export function useMessages() {
               mimetype: fi.type, size: fi.size,
               duration: fi.duration ? fi.duration * 1000 : undefined,
               waveform: fi.waveform,
+              ...secretsSpread,
+            },
+          };
+        } else if (message.type === MessageType.videoCircle) {
+          content = {
+            body: "Video message",
+            msgtype: "m.video",
+            url,
+            info: {
+              w: 480, h: 480,
+              mimetype: fi.type, size: fi.size,
+              duration: fi.duration ? fi.duration * 1000 : undefined,
+              videoNote: true,
               ...secretsSpread,
             },
           };
