@@ -105,6 +105,7 @@ export const en = {
   "appearance.showTimestamps": "Show timestamps",
   "appearance.groupMessages": "Group consecutive messages",
   "appearance.enableAnimations": "Enable animations",
+  "appearance.animatedReactions": "Animated Reactions",
   "appearance.quickReactions": "Quick Reactions",
   "appearance.quickReactionsDesc": "Customize the emoji shortcuts shown in the context menu",
   "appearance.edit": "Edit",
@@ -205,6 +206,9 @@ export const en = {
   "voice.send": "Send",
   "voice.discard": "Discard",
   "voice.voiceMessage": "Voice message",
+  "voice.slideCancel": "Slide to cancel",
+  "voice.hintVideo": "Tap for video, hold to record",
+  "voice.hintAudio": "Tap for audio, hold to record",
 
   // ── Chat search ──
   "chatSearch.placeholder": "Search in chat...",

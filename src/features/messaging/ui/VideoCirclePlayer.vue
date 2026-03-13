@@ -23,9 +23,7 @@ const showPlayIcon = ref(true);
 
 const totalDuration = computed(() => props.message.fileInfo?.duration ?? 0);
 
-// --- Progress ring ---
-const RING_SIZE = 280; // matches desktop size; SVG viewBox is fixed
-const RING_RADIUS = (RING_SIZE - 6) / 2; // 3px stroke → 6px total
+const RING_RADIUS = 73;
 const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
 
 const progressOffset = computed(() => {
@@ -34,7 +32,6 @@ const progressOffset = computed(() => {
   return RING_CIRCUMFERENCE * (1 - ratio);
 });
 
-// --- Time formatting ---
 const formatTime = (seconds: number) => {
   const m = Math.floor(seconds / 60);
   const s = Math.floor(seconds % 60);
@@ -48,10 +45,8 @@ const displayTime = computed(() => {
   return formatTime(totalDuration.value);
 });
 
-// --- Video source ---
 const videoSrc = computed(() => fileState.value.objectUrl);
 
-// --- IntersectionObserver ---
 let observer: IntersectionObserver | null = null;
 
 const setupObserver = () => {
@@ -61,10 +56,7 @@ const setupObserver = () => {
       const entry = entries[0];
       if (!entry || !videoEl.value || !isLoaded.value) return;
       if (entry.isIntersecting) {
-        videoEl.value.play().then(() => {
-          isPlaying.value = true;
-          showPlayIcon.value = false;
-        }).catch(() => {});
+        videoEl.value.play().then(() => { isPlaying.value = true; showPlayIcon.value = false; }).catch(() => {});
       } else {
         videoEl.value.pause();
         isPlaying.value = false;
@@ -76,89 +68,56 @@ const setupObserver = () => {
   observer.observe(containerEl.value);
 };
 
-// --- Click handler ---
 const handleClick = () => {
   if (!videoEl.value || !isLoaded.value) return;
-
   if (isMuted.value) {
-    // First tap: unmute and ensure playing
     isMuted.value = false;
     videoEl.value.muted = false;
     if (!isPlaying.value) {
-      videoEl.value.play().then(() => {
-        isPlaying.value = true;
-        showPlayIcon.value = false;
-      }).catch(() => {});
+      videoEl.value.play().then(() => { isPlaying.value = true; showPlayIcon.value = false; }).catch(() => {});
     }
     return;
   }
-
   if (isPlaying.value) {
     videoEl.value.pause();
     isPlaying.value = false;
     showPlayIcon.value = true;
   } else {
-    videoEl.value.play().then(() => {
-      isPlaying.value = true;
-      showPlayIcon.value = false;
-    }).catch(() => {});
+    videoEl.value.play().then(() => { isPlaying.value = true; showPlayIcon.value = false; }).catch(() => {});
   }
 };
 
-// --- Video event handlers ---
-const onTimeUpdate = () => {
-  if (videoEl.value) {
-    currentTime.value = videoEl.value.currentTime;
-  }
-};
+const onTimeUpdate = () => { if (videoEl.value) currentTime.value = videoEl.value.currentTime; };
 
 const onEnded = () => {
-  // Loop: restart playback
   if (videoEl.value) {
     videoEl.value.currentTime = 0;
-    videoEl.value.play().then(() => {
-      isPlaying.value = true;
-    }).catch(() => {});
+    videoEl.value.play().then(() => { isPlaying.value = true; }).catch(() => {});
   }
 };
 
-const onCanPlay = () => {
-  isLoaded.value = true;
-};
+const onCanPlay = () => { isLoaded.value = true; };
 
-// --- Watch for objectUrl becoming available → attach to video ---
 watch(videoSrc, (url) => {
-  if (url && videoEl.value) {
-    videoEl.value.src = url;
-    videoEl.value.load();
-  }
+  if (url && videoEl.value) { videoEl.value.src = url; videoEl.value.load(); }
 });
 
-// --- Lifecycle ---
 onMounted(() => {
-  if (props.message.fileInfo?.url) {
-    download(props.message);
-  }
+  if (props.message.fileInfo?.url) download(props.message);
   setupObserver();
 });
 
 onUnmounted(() => {
-  if (observer) {
-    observer.disconnect();
-    observer = null;
-  }
-  if (videoEl.value) {
-    videoEl.value.pause();
-  }
+  if (observer) { observer.disconnect(); observer = null; }
+  if (videoEl.value) videoEl.value.pause();
 });
 </script>
 
 <template>
-  <div ref="containerEl" class="video-circle-container relative inline-block" @click="handleClick">
-    <!-- Video element -->
+  <div ref="containerEl" class="video-circle-container relative inline-block cursor-pointer" @click="handleClick">
     <video
       ref="videoEl"
-      class="video-circle h-[240px] w-[240px] object-cover sm:h-[280px] sm:w-[280px]"
+      class="video-circle block h-[150px] w-[150px] object-cover sm:h-[200px] sm:w-[200px]"
       :src="videoSrc ?? undefined"
       muted
       playsinline
@@ -169,62 +128,30 @@ onUnmounted(() => {
     />
 
     <!-- SVG progress ring -->
-    <svg
-      class="progress-ring pointer-events-none absolute left-0 top-0 h-[240px] w-[240px] -rotate-90 sm:h-[280px] sm:w-[280px]"
-      :viewBox="`0 0 ${RING_SIZE} ${RING_SIZE}`"
-    >
-      <!-- Background ring (subtle) -->
-      <circle
-        :cx="RING_SIZE / 2"
-        :cy="RING_SIZE / 2"
-        :r="RING_RADIUS"
-        fill="none"
-        stroke="rgba(255,255,255,0.2)"
-        stroke-width="3"
-      />
-      <!-- Progress ring -->
-      <circle
-        class="progress-ring__circle"
-        :cx="RING_SIZE / 2"
-        :cy="RING_SIZE / 2"
-        :r="RING_RADIUS"
-        fill="none"
-        stroke-width="3"
-        stroke-linecap="round"
-        :stroke-dasharray="RING_CIRCUMFERENCE"
-        :stroke-dashoffset="progressOffset"
-      />
+    <svg class="pointer-events-none absolute left-0 top-0 h-[150px] w-[150px] -rotate-90 sm:h-[200px] sm:w-[200px]" viewBox="0 0 150 150">
+      <circle cx="75" cy="75" :r="RING_RADIUS" fill="none" stroke="rgba(255,255,255,0.15)" stroke-width="3" />
+      <circle class="progress-ring__circle" cx="75" cy="75" :r="RING_RADIUS" fill="none" stroke-width="3" stroke-linecap="round"
+        :stroke-dasharray="RING_CIRCUMFERENCE" :stroke-dashoffset="progressOffset" />
     </svg>
 
     <!-- Loading spinner -->
-    <div
-      v-if="fileState.loading || (!isLoaded && videoSrc)"
-      class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2"
-    >
-      <div class="h-10 w-10 animate-spin rounded-full border-[3px] border-white/50 border-t-white" />
+    <div v-if="fileState.loading || (!isLoaded && videoSrc)" class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
+      <div class="h-8 w-8 animate-spin rounded-full border-[3px] border-white/50 border-t-white" />
     </div>
 
-    <!-- Play icon (visible when paused and loaded) -->
-    <div
-      v-else-if="showPlayIcon && isLoaded"
-      class="absolute left-1/2 top-1/2 flex h-12 w-12 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-black/40"
-    >
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="white">
-        <polygon points="6 3 20 12 6 21 6 3" />
-      </svg>
+    <!-- Play icon -->
+    <div v-else-if="showPlayIcon && isLoaded" class="absolute left-1/2 top-1/2 flex h-10 w-10 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-black/40">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="white"><polygon points="6 3 20 12 6 21 6 3" /></svg>
     </div>
 
     <!-- Duration badge -->
-    <div class="absolute bottom-2 right-2 rounded-full bg-black/50 px-2 py-0.5 text-xs text-white tabular-nums">
+    <div class="absolute bottom-1.5 right-1.5 rounded-full bg-black/50 px-1.5 py-0.5 text-[10px] text-white tabular-nums">
       {{ displayTime }}
     </div>
 
     <!-- Muted indicator -->
-    <div
-      v-if="isPlaying && isMuted"
-      class="absolute bottom-2 left-2 flex h-6 w-6 items-center justify-center rounded-full bg-black/50"
-    >
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="white">
+    <div v-if="isPlaying && isMuted" class="absolute bottom-1.5 left-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-black/50">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="white">
         <path d="M11 5L6 9H2v6h4l5 4V5z" />
         <line x1="23" y1="9" x2="17" y2="15" stroke="white" stroke-width="2" stroke-linecap="round" />
         <line x1="17" y1="9" x2="23" y2="15" stroke="white" stroke-width="2" stroke-linecap="round" />
@@ -236,13 +163,7 @@ onUnmounted(() => {
 <style scoped>
 .video-circle {
   clip-path: circle(50%);
-  display: block;
 }
-
-.progress-ring {
-  clip-path: circle(50%);
-}
-
 .progress-ring__circle {
   stroke: rgb(var(--color-bg-ac));
   transition: stroke-dashoffset 0.1s linear;

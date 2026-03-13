@@ -107,6 +107,7 @@ export const ru: Record<TranslationKey, string> = {
   "appearance.showTimestamps": "Время сообщений",
   "appearance.groupMessages": "Группировать сообщения",
   "appearance.enableAnimations": "Анимации",
+  "appearance.animatedReactions": "Анимированные реакции",
   "appearance.quickReactions": "Быстрые реакции",
   "appearance.quickReactionsDesc": "Настройте эмодзи в контекстном меню",
   "appearance.edit": "Изменить",
@@ -207,6 +208,9 @@ export const ru: Record<TranslationKey, string> = {
   "voice.send": "Отправить",
   "voice.discard": "Удалить",
   "voice.voiceMessage": "Голосовое сообщение",
+  "voice.slideCancel": "Сдвиньте для отмены",
+  "voice.hintVideo": "Нажмите для видео, удерживайте чтобы записать",
+  "voice.hintAudio": "Нажмите для аудио, удерживайте чтобы записать",
 
   // ── Chat search ──
   "chatSearch.placeholder": "Поиск в чате...",

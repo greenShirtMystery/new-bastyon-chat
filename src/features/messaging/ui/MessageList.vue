@@ -15,6 +15,8 @@ import { MessageSkeleton } from "@/shared/ui/skeleton";
 import MessageContextMenu from "./MessageContextMenu.vue";
 import EmojiPicker from "./EmojiPicker.vue";
 import MediaViewer from "./MediaViewer.vue";
+import ReactionEffect from "./ReactionEffect.vue";
+import TypingBubble from "./TypingBubble.vue";
 import { DynamicScroller, DynamicScrollerItem } from "vue-virtual-scroller";
 import "vue-virtual-scroller/dist/vue-virtual-scroller.css";
 
@@ -109,9 +111,21 @@ const handlePollEnd = (messageId: string) => {
   endPoll(messageId);
 };
 
+const handleToggleReactionWithEffect = (messageId: string, emoji: string) => {
+  toggleReaction(messageId, emoji);
+  if (themeStore.animatedReactions) {
+    lastReactionEmoji.value = emoji;
+    setTimeout(() => { lastReactionEmoji.value = null; }, 100);
+  }
+};
+
 const handleContextReaction = (emoji: string, message: import("@/entities/chat").Message) => {
   toggleReaction(message.id, emoji);
   themeStore.addRecentEmoji(emoji);
+  if (themeStore.animatedReactions) {
+    lastReactionEmoji.value = emoji;
+    setTimeout(() => { lastReactionEmoji.value = null; }, 100);
+  }
 };
 
 const emojiPickerTarget = ref<import("@/entities/chat").Message | null>(null);
@@ -138,6 +152,8 @@ const handleEmojiSelect = (emoji: string) => {
   emojiPicker.value.show = false;
   emojiPickerTarget.value = null;
 };
+
+const lastReactionEmoji = ref<string | null>(null);
 
 const listRef = ref<HTMLElement>();
 const scrollerRef = ref<InstanceType<typeof DynamicScroller>>();
@@ -746,6 +762,16 @@ const typingText = computed(() => {
   return t("messageList.typingMany", { name: names[0], count: names.length - 1 });
 });
 
+const typingNames = computed(() => {
+  const roomId = chatStore.activeRoomId;
+  if (!roomId) return [];
+  const typingUsers = chatStore.getTypingUsers(roomId);
+  const myAddr = authStore.address ?? "";
+  return typingUsers
+    .filter((id: string) => id !== myAddr)
+    .map((id: string) => chatStore.getDisplayName(id));
+});
+
 /** Scroll to a specific message and flash highlight */
 const scrollToMessage = (messageId: string) => {
   const idx = virtualItems.value.findIndex(item => item.id === messageId);
@@ -912,7 +938,7 @@ defineExpose({ scrollToMessage, setSearchQuery });
               @reply="(msg) => { chatStore.replyingTo = { id: msg.id, senderId: msg.senderId, content: msg.content.slice(0, 150), type: msg.type }; }"
               @scroll-to-reply="scrollToMessage"
               @open-media="handleOpenMedia"
-              @toggle-reaction="(emoji, messageId) => toggleReaction(messageId, emoji)"
+              @toggle-reaction="(emoji, messageId) => handleToggleReactionWithEffect(messageId, emoji)"
               @add-reaction="handleOpenEmojiPicker"
               @poll-vote="handlePollVote"
               @poll-end="handlePollEnd"
@@ -924,14 +950,12 @@ defineExpose({ scrollToMessage, setSearchQuery });
             </div>
           </div>
 
-          <!-- Typing indicator -->
-          <div v-else-if="item.type === 'typing'" class="mx-auto flex max-w-6xl items-center gap-2 px-10 py-1">
-            <div class="flex gap-0.5">
-              <span class="h-1.5 w-1.5 animate-bounce rounded-full bg-text-on-main-bg-color [animation-delay:-0.3s]" />
-              <span class="h-1.5 w-1.5 animate-bounce rounded-full bg-text-on-main-bg-color [animation-delay:-0.15s]" />
-              <span class="h-1.5 w-1.5 animate-bounce rounded-full bg-text-on-main-bg-color" />
+          <!-- Typing bubble -->
+          <div v-else-if="item.type === 'typing'" class="mx-auto max-w-6xl px-4 py-1">
+            <div class="flex gap-2">
+              <div v-if="themeStore.showAvatarsInChat" class="w-8 shrink-0" />
+              <TypingBubble :names="typingNames" />
             </div>
-            <span class="text-xs text-text-on-main-bg-color">{{ typingText }}</span>
           </div>
         </DynamicScrollerItem>
       </template>
@@ -968,6 +992,8 @@ defineExpose({ scrollToMessage, setSearchQuery });
       :message-id="mediaViewerMessageId"
       @close="showMediaViewer = false"
     />
+
+    <ReactionEffect :emoji="lastReactionEmoji" />
 
     <!-- Scroll-to-bottom FAB with new message badge -->
     <transition name="fab">

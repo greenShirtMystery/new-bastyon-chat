@@ -391,6 +391,8 @@ export function useMessages() {
         type: file.type,
         size: file.size,
         url: localBlobUrl,
+        w: 480,
+        h: 480,
         duration: options.duration,
         videoNote: true,
       },
@@ -418,9 +420,9 @@ export function useMessages() {
         info: {
           mimetype: file.type,
           size: Math.round(file.size),
-          duration: options.duration ? Math.round(options.duration * 1000) : undefined,
           w: 480,
           h: 480,
+          duration: options.duration ? Math.round(options.duration * 1000) : undefined,
           videoNote: true,
           ...(secrets ? { secrets } : {}),
         },
@@ -978,6 +980,87 @@ export function useMessages() {
     }
   };
 
+  /** Send a GIF message (fetches GIF from URL, uploads to Matrix as image) */
+  const sendGif = async (gifUrl: string, info?: { w?: number; h?: number; title?: string }) => {
+    const roomId = chatStore.activeRoomId;
+    if (!roomId || !gifUrl) return;
+
+    const matrixService = getMatrixClientService();
+    if (!matrixService.isReady()) return;
+
+    const w = info?.w ?? 300;
+    const h = info?.h ?? 300;
+
+    // Fetch the GIF as blob
+    const response = await fetch(gifUrl);
+    if (!response.ok) {
+      console.error("Failed to fetch GIF:", response.status);
+      return;
+    }
+    const blob = await response.blob();
+    const file = new File([blob], "animation.gif", { type: "image/gif" });
+
+    // Optimistic message
+    const tempId = `msg_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+    const localBlobUrl = URL.createObjectURL(file);
+    const message: Message = {
+      id: tempId,
+      roomId,
+      senderId: authStore.address ?? "",
+      content: info?.title || "GIF",
+      timestamp: Date.now(),
+      status: MessageStatus.sending,
+      type: MessageType.image,
+      fileInfo: {
+        name: file.name,
+        type: file.type,
+        size: file.size,
+        url: localBlobUrl,
+        w,
+        h,
+      },
+    };
+    chatStore.addMessage(roomId, message);
+
+    try {
+      const roomCrypto = authStore.pcrypto?.rooms[roomId] as PcryptoRoomInstance | undefined;
+
+      let fileToUpload: Blob = file;
+      let secrets: Record<string, unknown> | undefined;
+
+      if (roomCrypto?.canBeEncrypt()) {
+        const encrypted = await roomCrypto.encryptFile(file);
+        secrets = encrypted.secrets;
+        fileToUpload = encrypted.file;
+      }
+
+      const url = await matrixService.uploadContent(fileToUpload);
+
+      const content: Record<string, unknown> = {
+        body: info?.title || "GIF",
+        msgtype: "m.image",
+        url,
+        info: {
+          w,
+          h,
+          mimetype: file.type,
+          size: file.size,
+          ...(secrets ? { secrets } : {}),
+        },
+      };
+
+      const serverEventId = await matrixService.sendEncryptedText(roomId, content);
+      if (serverEventId) {
+        chatStore.updateMessageIdAndStatus(roomId, tempId, serverEventId, MessageStatus.sent);
+      } else {
+        chatStore.updateMessageStatus(roomId, tempId, MessageStatus.sent);
+      }
+    } catch (e) {
+      console.error("Failed to send GIF:", e);
+      chatStore.updateMessageStatus(roomId, tempId, MessageStatus.failed);
+    }
+  };
+
   return {
     deleteMessage,
     drainOfflineQueue,
@@ -987,6 +1070,7 @@ export function useMessages() {
     loadMessages,
     sendAudio,
     sendFile,
+    sendGif,
     sendImage,
     sendMessage,
     sendPoll,
