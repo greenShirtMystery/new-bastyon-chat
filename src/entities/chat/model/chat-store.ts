@@ -1955,8 +1955,8 @@ export const useChatStore = defineStore(NAMESPACE, () => {
           type: (info?.mimetype as string) ?? "image/png",
           size: (info?.size as number) ?? 0,
           url: stickerUrl,
-          width: info?.w as number | undefined,
-          height: info?.h as number | undefined,
+          w: info?.w as number | undefined,
+          h: info?.h as number | undefined,
         } : undefined,
       };
     }
