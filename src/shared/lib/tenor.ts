@@ -13,7 +13,10 @@ const KLIPY_BASE = `https://api.klipy.com/api/v1/${KLIPY_API_KEY}/gifs`;
 export interface TenorGif {
   id: string;
   title: string;
+  /** Static jpg thumbnail for grid display */
   previewUrl: string;
+  /** Animated gif preview for hover */
+  animatedPreviewUrl: string;
   gifUrl: string;
   width: number;
   height: number;
@@ -56,13 +59,15 @@ interface KlipyResponse {
 }
 
 function mapResult(r: KlipyResult): TenorGif {
-  const preview = r.file.sm?.gif ?? r.file.xs?.gif ?? r.file.md?.gif;
+  const staticPreview = r.file.sm?.jpg ?? r.file.xs?.jpg ?? r.file.md?.jpg;
+  const animatedPreview = r.file.sm?.gif ?? r.file.xs?.gif ?? r.file.md?.gif;
   const full = r.file.md?.gif ?? r.file.hd?.gif ?? r.file.sm?.gif;
 
   return {
     id: String(r.id),
     title: r.title,
-    previewUrl: preview?.url ?? "",
+    previewUrl: staticPreview?.url ?? animatedPreview?.url ?? "",
+    animatedPreviewUrl: animatedPreview?.url ?? "",
     gifUrl: full?.url ?? "",
     width: full?.width ?? 220,
     height: full?.height ?? 220,

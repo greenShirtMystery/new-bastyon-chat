@@ -11,8 +11,10 @@ const loading = ref(false);
 const loadingMore = ref(false);
 const searchInputRef = ref<HTMLInputElement>();
 const scrollContainerRef = ref<HTMLElement>();
+const hoveredId = ref<string | null>(null);
 
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+let requestId = 0; // cancel stale requests
 
 // Load trending on mount
 onMounted(async () => {
@@ -22,15 +24,18 @@ onMounted(async () => {
 });
 
 async function loadTrending() {
+  const id = ++requestId;
   loading.value = true;
   try {
-    const result = await getTrending(20);
+    const result = await getTrending(24);
+    if (id !== requestId) return; // stale
     gifs.value = result.gifs;
     nextPos.value = result.next;
   } catch (e) {
+    if (id !== requestId) return;
     console.error("Failed to load trending GIFs:", e);
   } finally {
-    loading.value = false;
+    if (id === requestId) loading.value = false;
   }
 }
 
@@ -39,43 +44,48 @@ async function performSearch(query: string) {
     await loadTrending();
     return;
   }
+  const id = ++requestId;
   loading.value = true;
-  gifs.value = [];
-  nextPos.value = "";
+  // Don't clear gifs — keep showing old results until new ones arrive
   try {
-    const result = await searchGifs(query.trim(), 20);
+    const result = await searchGifs(query.trim(), 24);
+    if (id !== requestId) return; // stale
     gifs.value = result.gifs;
     nextPos.value = result.next;
   } catch (e) {
+    if (id !== requestId) return;
     console.error("Failed to search GIFs:", e);
   } finally {
-    loading.value = false;
+    if (id === requestId) loading.value = false;
   }
 }
 
 async function loadMore() {
   if (loadingMore.value || !nextPos.value) return;
+  const id = requestId; // don't increment — loadMore is continuation
   loadingMore.value = true;
   try {
     const query = search.value.trim();
     const result = query
-      ? await searchGifs(query, 20, nextPos.value)
-      : await getTrending(20, nextPos.value);
+      ? await searchGifs(query, 24, nextPos.value)
+      : await getTrending(24, nextPos.value);
+    if (id !== requestId) return;
     gifs.value.push(...result.gifs);
     nextPos.value = result.next;
   } catch (e) {
+    if (id !== requestId) return;
     console.error("Failed to load more GIFs:", e);
   } finally {
-    loadingMore.value = false;
+    if (id === requestId) loadingMore.value = false;
   }
 }
 
-// Debounced search
+// Debounced search — 500ms to avoid spamming API while typing
 watch(search, (val) => {
   if (debounceTimer) clearTimeout(debounceTimer);
   debounceTimer = setTimeout(() => {
     performSearch(val);
-  }, 300);
+  }, 500);
 });
 
 // Infinite scroll
@@ -90,6 +100,7 @@ function onScroll() {
 
 onBeforeUnmount(() => {
   if (debounceTimer) clearTimeout(debounceTimer);
+  requestId++; // cancel any in-flight requests
 });
 
 function selectGif(gif: TenorGif) {
@@ -147,14 +158,14 @@ function selectGif(gif: TenorGif) {
       class="min-h-0 flex-1 overflow-y-auto px-2 py-1"
       @scroll="onScroll"
     >
-      <!-- Loading state -->
-      <div v-if="loading" class="flex h-40 items-center justify-center">
+      <!-- Loading state (only when no results yet) -->
+      <div v-if="loading && gifs.length === 0" class="flex h-40 items-center justify-center">
         <div class="gif-spinner h-8 w-8 rounded-full border-2 border-neutral-grad-0 border-t-color-bg-ac" />
       </div>
 
       <!-- Empty state -->
       <div
-        v-else-if="gifs.length === 0"
+        v-else-if="!loading && gifs.length === 0"
         class="flex h-40 flex-col items-center justify-center gap-2 text-text-on-main-bg-color/50"
       >
         <svg
@@ -172,7 +183,7 @@ function selectGif(gif: TenorGif) {
         <span class="text-sm">No GIFs found</span>
       </div>
 
-      <!-- Grid -->
+      <!-- Grid: static jpg previews, animate on hover -->
       <div v-else class="grid grid-cols-2 gap-1.5">
         <button
           v-for="gif in gifs"
@@ -181,13 +192,15 @@ function selectGif(gif: TenorGif) {
           :style="{
             aspectRatio: `${gif.width} / ${gif.height}`,
           }"
+          @mouseenter="hoveredId = gif.id"
+          @mouseleave="hoveredId = null"
           @click="selectGif(gif)"
         >
           <img
-            :src="gif.previewUrl"
+            :src="hoveredId === gif.id ? gif.animatedPreviewUrl : gif.previewUrl"
             :alt="gif.title"
             loading="lazy"
-            class="h-full w-full object-cover transition-transform duration-150 group-hover:scale-105"
+            class="h-full w-full object-cover"
           />
           <div class="absolute inset-0 bg-black/0 transition-colors group-hover:bg-black/10" />
         </button>
@@ -199,7 +212,7 @@ function selectGif(gif: TenorGif) {
       </div>
     </div>
 
-    <!-- Tenor attribution -->
+    <!-- KLIPY attribution -->
     <div class="shrink-0 border-t border-neutral-grad-0/50 px-3 py-1.5 text-center">
       <span class="text-[10px] text-text-on-main-bg-color/40">Powered by KLIPY</span>
     </div>

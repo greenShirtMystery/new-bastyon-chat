@@ -161,8 +161,8 @@ const setSectionRef = (el: any, idx: number) => {
           class="emoji-panel absolute flex flex-col overflow-hidden rounded-2xl border border-neutral-grad-0 bg-background-total-theme shadow-2xl"
           :style="panelStyle"
         >
-          <!-- Main tabs: Emoji | GIF -->
-          <div class="flex shrink-0 border-b border-neutral-grad-0/50 px-2">
+          <!-- Main tabs: Emoji | GIF (hidden in reaction mode) -->
+          <div v-if="props.mode === 'input'" class="flex shrink-0 border-b border-neutral-grad-0/50 px-2">
             <button
               v-for="tab in (['emoji', 'gif'] as const)"
               :key="tab"
