@@ -14,7 +14,9 @@ import AttachmentPanel from "./AttachmentPanel.vue";
 import MediaPreview from "./MediaPreview.vue";
 import PollCreator from "./PollCreator.vue";
 import VoiceRecorder from "./VoiceRecorder.vue";
+import VideoCircleRecorder from "./VideoCircleRecorder.vue";
 import { useVoiceRecorder } from "../model/use-voice-recorder";
+import { useVideoCircleRecorder } from "../model/use-video-circle-recorder";
 import { useMentionAutocomplete } from "../model/use-mention-autocomplete";
 import MentionAutocomplete from "./MentionAutocomplete.vue";
 
@@ -28,10 +30,13 @@ const emit = defineEmits<{ donate: [] }>();
 const chatStore = useChatStore();
 const themeStore = useThemeStore();
 const { t } = useI18n();
-const { sendMessage, sendFile, sendImage, sendAudio, sendReply, editMessage, setTyping, sendPoll } = useMessages();
+const { sendMessage, sendFile, sendImage, sendAudio, sendVideoCircle, sendReply, editMessage, setTyping, sendPoll } = useMessages();
 const mediaUpload = useMediaUpload();
 const pasteDrop = usePasteDrop({
-  onMediaFiles: (files) => mediaUpload.addFiles(files),
+  onMediaFiles: (files) => {
+    mediaUpload.addFiles(files);
+    nextTick(() => textareaRef.value?.focus());
+  },
   onOtherFiles: async (files) => {
     sending.value = true;
     try {
@@ -40,10 +45,18 @@ const pasteDrop = usePasteDrop({
       }
     } finally {
       sending.value = false;
+      nextTick(() => textareaRef.value?.focus());
     }
   },
 });
 const voiceRecorder = useVoiceRecorder();
+const videoCircleRecorder = useVideoCircleRecorder();
+
+/** Toggle between voice and video circle recording mode */
+const recordingMode = ref<"voice" | "video">("voice");
+const toggleRecordingMode = () => {
+  recordingMode.value = recordingMode.value === "voice" ? "video" : "voice";
+};
 
 const text = ref("");
 const linkPreview = useLinkPreview(text);
@@ -120,13 +133,15 @@ const cancelEdit = () => {
   });
 };
 
-/** Auto-resize textarea to fit content (1 to 6 rows) */
+/** Auto-resize textarea to fit content (up to 6 rows, or 10 when editing on mobile) */
 const autoResize = () => {
   const el = textareaRef.value;
   if (!el) return;
   el.style.height = "auto";
   const lineHeight = 24; // ~text-base line height
-  const maxHeight = lineHeight * 6;
+  const isMobile = window.innerWidth < 640;
+  const maxRows = isEditing.value && isMobile ? 10 : 6;
+  const maxHeight = lineHeight * maxRows;
   el.style.height = `${Math.min(el.scrollHeight, maxHeight)}px`;
 };
 
@@ -204,6 +219,7 @@ const handlePhotoSelect = (e: Event) => {
   if (!files?.length) return;
   mediaUpload.addFiles(files);
   target.value = "";
+  nextTick(() => textareaRef.value?.focus());
 };
 
 const handleFileSelect = async (e: Event) => {
@@ -219,6 +235,7 @@ const handleFileSelect = async (e: Event) => {
   } finally {
     sending.value = false;
     target.value = "";
+    nextTick(() => textareaRef.value?.focus());
   }
 };
 
@@ -242,6 +259,7 @@ const handleMediaSend = async () => {
     }
   } finally {
     mediaUpload.clear();
+    nextTick(() => textareaRef.value?.focus());
   }
 };
 
@@ -254,6 +272,7 @@ const replyInputPreviewText = computed(() => {
   if (!reply) return "";
   if (reply.type === MessageType.image) return "Photo";
   if (reply.type === MessageType.video) return "Video";
+  if (reply.type === MessageType.videoCircle) return "Video message";
   if (reply.type === MessageType.audio) return "Voice message";
   if (reply.type === MessageType.file) return reply.content || "File";
   const text = stripBastyonLinks(stripMentionAddresses(reply.content));
@@ -275,12 +294,30 @@ const handleVoicePreviewSend = async () => {
   }
 };
 
+// Video circle recording handlers
+const handleVideoCircleSend = async () => {
+  const result = await videoCircleRecorder.stopAndSend();
+  if (result) {
+    await sendVideoCircle(result.file, { duration: result.duration });
+  }
+};
+
+const handleVideoCirclePreviewSend = async () => {
+  const result = await videoCircleRecorder.sendPreview();
+  if (result) {
+    await sendVideoCircle(result.file, { duration: result.duration });
+  }
+};
+
 const showEmojiPicker = ref(false);
 const emojiPickerPos = ref({ x: 0, y: 0 });
 
 /** Expose methods for ChatWindow drag-and-drop integration */
 defineExpose({
-  addMediaFiles: (files: File[]) => mediaUpload.addFiles(files),
+  addMediaFiles: (files: File[]) => {
+    mediaUpload.addFiles(files);
+    nextTick(() => textareaRef.value?.focus());
+  },
   sendOtherFiles: async (files: File[]) => {
     sending.value = true;
     try {
@@ -289,6 +326,7 @@ defineExpose({
       }
     } finally {
       sending.value = false;
+      nextTick(() => textareaRef.value?.focus());
     }
   },
 });
@@ -314,20 +352,20 @@ const insertEmoji = (emoji: string) => {
 
 <template>
   <div class="border-t border-neutral-grad-0 bg-background-total-theme">
-    <!-- Editing bar -->
+    <!-- Editing bar (compact on mobile) -->
     <transition name="input-bar">
       <div
         v-if="isEditing"
-        class="mx-auto flex max-w-6xl items-center gap-2 border-b border-neutral-grad-0 px-3 py-2"
+        class="mx-auto flex max-w-6xl items-center gap-1.5 border-b border-neutral-grad-0 px-2 py-1.5 sm:gap-2 sm:px-3 sm:py-2"
       >
-        <div class="flex h-8 w-8 items-center justify-center text-color-bg-ac">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <div class="flex h-6 w-6 shrink-0 items-center justify-center text-color-bg-ac sm:h-8 sm:w-8">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="sm:h-4 sm:w-4">
             <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
             <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
           </svg>
         </div>
         <div class="min-w-0 flex-1">
-          <div class="text-xs font-medium text-color-bg-ac">Editing</div>
+          <div class="text-xs font-medium text-color-bg-ac">{{ t('message.editing') }}</div>
           <div class="truncate text-xs text-text-on-main-bg-color">{{ chatStore.editingMessage?.content }}</div>
         </div>
         <button
@@ -408,7 +446,7 @@ const insertEmoji = (emoji: string) => {
       </div>
     </transition>
 
-    <!-- Voice recorder (replaces recording bar when active) -->
+    <!-- Voice recorder (replaces input bar when active) -->
     <VoiceRecorder
       v-if="voiceRecorder.state.value !== 'idle'"
       :state="voiceRecorder.state.value"
@@ -423,8 +461,24 @@ const insertEmoji = (emoji: string) => {
       @cancel="voiceRecorder.cancel()"
     />
 
+    <!-- Video circle recorder (replaces input bar when active) -->
+    <VideoCircleRecorder
+      v-else-if="videoCircleRecorder.state.value !== 'idle'"
+      :state="videoCircleRecorder.state.value"
+      :duration="videoCircleRecorder.duration.value"
+      :recorded-blob="videoCircleRecorder.recordedBlob.value"
+      :video-stream="videoCircleRecorder.videoStream.value"
+      @start="videoCircleRecorder.startRecording()"
+      @start-locked="videoCircleRecorder.startAndLock()"
+      @stop-and-send="handleVideoCircleSend"
+      @stop-and-preview="videoCircleRecorder.stopAndPreview()"
+      @send-preview="handleVideoCirclePreviewSend"
+      @lock="videoCircleRecorder.lock()"
+      @cancel="videoCircleRecorder.cancel()"
+    />
+
     <!-- Input row -->
-    <div v-else class="relative mx-auto flex max-w-6xl items-end gap-1.5 px-2 py-2">
+    <div v-else :class="['relative mx-auto flex max-w-6xl items-end gap-1.5 px-2 py-2', isEditing && 'editing-mode']">
       <!-- Mention autocomplete dropdown -->
       <MentionAutocomplete
         v-if="mention.active.value && mention.filteredMembers.value.length > 0 && chatStore.activeRoom?.isGroup"
@@ -450,9 +504,9 @@ const insertEmoji = (emoji: string) => {
         @change="handleFileSelect"
       />
 
-      <!-- Emoji button (left of textarea) -->
+      <!-- Emoji button (left of textarea) — hidden on mobile when editing -->
       <button
-        class="btn-press flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-text-on-main-bg-color/60 transition-colors hover:text-text-on-main-bg-color"
+        class="hide-on-mobile-edit btn-press flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-text-on-main-bg-color/60 transition-colors hover:text-text-on-main-bg-color"
         :title="t('message.emoji')"
         aria-label="Open emoji picker"
         @click="(e: MouseEvent) => { const rect = (e.currentTarget as HTMLElement).getBoundingClientRect(); emojiPickerPos = { x: rect.left, y: rect.top }; showEmojiPicker = !showEmojiPicker; }"
@@ -479,10 +533,10 @@ const insertEmoji = (emoji: string) => {
         @keyup="mention.onCursorChange()"
       />
 
-      <!-- PKOIN send button (right of textarea, before attach) -->
+      <!-- PKOIN send button (right of textarea, before attach) — hidden on mobile when editing -->
       <button
         v-if="props.showDonate"
-        class="btn-press flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-color-txt-ac/60 transition-colors hover:text-color-txt-ac"
+        class="hide-on-mobile-edit btn-press flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-color-txt-ac/60 transition-colors hover:text-color-txt-ac"
         :disabled="sending"
         :title="t('wallet.sendPkoin')"
         aria-label="Send PKOIN"
@@ -493,10 +547,10 @@ const insertEmoji = (emoji: string) => {
         </svg>
       </button>
 
-      <!-- Attachment button (right of textarea) -->
+      <!-- Attachment button (right of textarea) — hidden on mobile when editing -->
       <button
         ref="attachBtnRef"
-        class="btn-press flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-text-on-main-bg-color/60 transition-colors hover:text-text-on-main-bg-color"
+        class="hide-on-mobile-edit btn-press flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-text-on-main-bg-color/60 transition-colors hover:text-text-on-main-bg-color"
         :disabled="sending"
         :title="t('message.attach')"
         aria-label="Attach file"
@@ -544,11 +598,27 @@ const insertEmoji = (emoji: string) => {
           </svg>
         </button>
 
-        <!-- Mic button (shown when input is empty) — wrapped in a single-root <div>
-             so transition can properly attach leave/enter hooks. VoiceRecorder has
-             multiple root elements (v-if/v-else chain) which breaks out-in mode. -->
-        <div v-else key="mic" class="inline-flex">
+        <!-- Mic/Camera button (shown when input is empty) -->
+        <div v-else key="mic" class="inline-flex items-center gap-0.5">
+          <!-- Mode toggle button: switch between voice and video circle -->
+          <button
+            class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-text-on-main-bg-color/30 transition-colors hover:text-text-on-main-bg-color/60"
+            :title="recordingMode === 'voice' ? 'Switch to video message' : 'Switch to voice message'"
+            @click="toggleRecordingMode"
+          >
+            <!-- Show opposite mode icon as toggle hint -->
+            <svg v-if="recordingMode === 'voice'" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path d="M23 7l-7 5 7 5V7z" /><rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+            </svg>
+            <svg v-else width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+              <line x1="12" y1="19" x2="12" y2="23" /><line x1="8" y1="23" x2="16" y2="23" />
+            </svg>
+          </button>
+          <!-- Active recorder button (voice or video circle) -->
           <VoiceRecorder
+            v-if="recordingMode === 'voice'"
             :state="voiceRecorder.state.value"
             :duration="voiceRecorder.duration.value"
             :waveform-data="voiceRecorder.waveformData.value"
@@ -560,6 +630,20 @@ const insertEmoji = (emoji: string) => {
             @send-preview="handleVoicePreviewSend"
             @lock="voiceRecorder.lock()"
             @cancel="voiceRecorder.cancel()"
+          />
+          <VideoCircleRecorder
+            v-else
+            :state="videoCircleRecorder.state.value"
+            :duration="videoCircleRecorder.duration.value"
+            :recorded-blob="videoCircleRecorder.recordedBlob.value"
+            :video-stream="videoCircleRecorder.videoStream.value"
+            @start="videoCircleRecorder.startRecording()"
+            @start-locked="videoCircleRecorder.startAndLock()"
+            @stop-and-send="handleVideoCircleSend"
+            @stop-and-preview="videoCircleRecorder.stopAndPreview()"
+            @send-preview="handleVideoCirclePreviewSend"
+            @lock="videoCircleRecorder.lock()"
+            @cancel="videoCircleRecorder.cancel()"
           />
         </div>
       </transition>
@@ -600,7 +684,7 @@ const insertEmoji = (emoji: string) => {
       :caption="mediaUpload.caption.value"
       :caption-above="mediaUpload.captionAbove.value"
       :sending="mediaUpload.sending.value"
-      @close="mediaUpload.clear()"
+      @close="mediaUpload.clear(); nextTick(() => textareaRef?.focus())"
       @send="handleMediaSend"
       @update:active-index="mediaUpload.activeIndex.value = $event"
       @update:caption="mediaUpload.caption.value = $event"
@@ -635,6 +719,13 @@ const insertEmoji = (emoji: string) => {
 .input-bar-leave-from {
   max-height: 80px;
   opacity: 1;
+}
+
+/* Mobile editing: hide side buttons so textarea gets full width */
+@media (max-width: 639px) {
+  .editing-mode .hide-on-mobile-edit {
+    display: none;
+  }
 }
 
 /* Send/mic button morph */

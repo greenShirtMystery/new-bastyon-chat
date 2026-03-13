@@ -83,8 +83,14 @@ function matrixRoomToChatRoom(room: any, kit: MatrixKit, myUserId: string, nameH
         previewBody = "[voice message]";
         previewType = MessageType.audio;
       } else if (msgtype === "m.video") {
-        previewBody = "[video]";
-        previewType = MessageType.video;
+        const info = content.info as Record<string, unknown> | undefined;
+        if (info?.videoNote) {
+          previewBody = "[video message]";
+          previewType = MessageType.videoCircle;
+        } else {
+          previewBody = "[video]";
+          previewType = MessageType.video;
+        }
       } else {
         previewBody = (content?.body as string) ?? "";
       }
@@ -2018,7 +2024,7 @@ export const useChatStore = defineStore(NAMESPACE, () => {
       if (fileInfo) {
         if (mtype === "m.image") msgType = MessageType.image;
         else if (mtype === "m.audio") msgType = MessageType.audio;
-        else if (mtype === "m.video") msgType = MessageType.video;
+        else if (mtype === "m.video") msgType = fileInfo.videoNote ? MessageType.videoCircle : MessageType.video;
         else msgType = messageTypeFromMime(fileInfo.type);
         body = fileInfo.name;
       } else {

@@ -368,6 +368,76 @@ export function useMessages() {
     }
   };
 
+  /** Send a video circle (video note) message — circular video like Telegram */
+  const sendVideoCircle = async (file: File, options: { duration?: number } = {}) => {
+    const roomId = chatStore.activeRoomId;
+    if (!roomId || !file) return;
+
+    const matrixService = getMatrixClientService();
+    if (!matrixService.isReady()) return;
+
+    const tempId = `msg_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+    const localBlobUrl = URL.createObjectURL(file);
+    const message: Message = {
+      id: tempId,
+      roomId,
+      senderId: authStore.address ?? "",
+      content: "Video message",
+      timestamp: Date.now(),
+      status: MessageStatus.sending,
+      type: MessageType.videoCircle,
+      fileInfo: {
+        name: file.name,
+        type: file.type,
+        size: file.size,
+        url: localBlobUrl,
+        duration: options.duration,
+        videoNote: true,
+      },
+    };
+    chatStore.addMessage(roomId, message);
+
+    try {
+      const roomCrypto = authStore.pcrypto?.rooms[roomId] as PcryptoRoomInstance | undefined;
+
+      let fileToUpload: Blob = file;
+      let secrets: Record<string, unknown> | undefined;
+
+      if (roomCrypto?.canBeEncrypt()) {
+        const encrypted = await roomCrypto.encryptFile(file);
+        secrets = encrypted.secrets;
+        fileToUpload = encrypted.file;
+      }
+
+      const url = await matrixService.uploadContent(fileToUpload);
+
+      const content: Record<string, unknown> = {
+        body: "Video message",
+        msgtype: "m.video",
+        url,
+        info: {
+          mimetype: file.type,
+          size: Math.round(file.size),
+          duration: options.duration ? Math.round(options.duration * 1000) : undefined,
+          w: 480,
+          h: 480,
+          videoNote: true,
+          ...(secrets ? { secrets } : {}),
+        },
+      };
+
+      const serverEventId = await matrixService.sendEncryptedText(roomId, content);
+      if (serverEventId) {
+        chatStore.updateMessageIdAndStatus(roomId, tempId, serverEventId, MessageStatus.sent);
+      } else {
+        chatStore.updateMessageStatus(roomId, tempId, MessageStatus.sent);
+      }
+    } catch (e) {
+      console.error("Failed to send video circle:", e);
+      chatStore.updateMessageStatus(roomId, tempId, MessageStatus.failed);
+    }
+  };
+
   const loadMessages = async (roomId: string) => {
     await chatStore.loadRoomMessages(roomId);
   };
@@ -663,6 +733,19 @@ export function useMessages() {
               ...secretsSpread,
             },
           };
+        } else if (message.type === MessageType.videoCircle) {
+          content = {
+            body: "Video message",
+            msgtype: "m.video",
+            url,
+            info: {
+              w: 480, h: 480,
+              mimetype: fi.type, size: fi.size,
+              duration: fi.duration ? fi.duration * 1000 : undefined,
+              videoNote: true,
+              ...secretsSpread,
+            },
+          };
         } else if (message.type === MessageType.video) {
           content = {
             body: fi.caption || "Video",
@@ -908,6 +991,7 @@ export function useMessages() {
     sendMessage,
     sendPoll,
     sendReply,
+    sendVideoCircle,
     sendTransferMessage,
     setTyping,
     toggleReaction,

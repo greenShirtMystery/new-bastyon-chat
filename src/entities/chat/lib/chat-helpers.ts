@@ -93,6 +93,8 @@ export function parseFileInfo(content: Record<string, unknown>, msgtype: string)
       w: info?.w,
       h: info?.h,
       duration: info?.duration ? Math.round(info.duration / 1000) : undefined,
+      videoNote: info?.videoNote === true ? true : undefined,
+      thumbnailUrl: info?.thumbnailUrl ?? undefined,
       secrets: info?.secrets ? {
         block: info.secrets.block,
         keys: info.secrets.keys,

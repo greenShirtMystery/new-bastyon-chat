@@ -10,6 +10,7 @@ import PollCard from "./PollCard.vue";
 import TransferCard from "./TransferCard.vue";
 import ReactionRow from "./ReactionRow.vue";
 import VoiceMessage from "./VoiceMessage.vue";
+import VideoCirclePlayer from "./VideoCirclePlayer.vue";
 import { ref, inject, onMounted } from "vue";
 import { useLongPress, useSwipeGesture } from "@/shared/lib/gestures";
 import { useThemeStore } from "@/entities/theme";
@@ -217,6 +218,7 @@ const replyPreviewText = computed(() => {
   if (!reply.senderId && !reply.content) return "Deleted message";
   if (reply.type === MessageType.image) return "Photo";
   if (reply.type === MessageType.video) return "Video";
+  if (reply.type === MessageType.videoCircle) return "Video message";
   if (reply.type === MessageType.audio) return "Voice message";
   if (reply.type === MessageType.file) return reply.content || "File";
   const text = stripBastyonLinks(stripMentionAddresses(reply.content));
@@ -378,6 +380,26 @@ const replyPreviewText = computed(() => {
           <ReactionRow :reactions="message.reactions" :is-own="props.isOwn" @toggle="handleToggleReaction" @add-reaction="handleAddReaction" />
         </div>
 
+      </div>
+
+      <!-- Video Circle (video note) message -->
+      <div
+        v-else-if="message.type === MessageType.videoCircle && hasFileInfo"
+        class="inline-block"
+      >
+        <!-- Forwarded indicator -->
+        <div v-if="message.forwardedFrom" class="mb-1 truncate text-[11px] italic"
+          :class="props.isOwn ? 'text-text-on-bg-ac-color/70' : 'text-color-bg-ac'">
+          {{ t("message.forwardedFrom", { name: forwardedFromName }) }}
+        </div>
+        <VideoCirclePlayer :message="message" :is-own="props.isOwn" />
+        <!-- Timestamp below the circle -->
+        <div v-if="themeStore.showTimestamps" class="mt-1 flex items-center gap-1" :class="props.isOwn ? 'justify-end text-text-on-main-bg-color' : 'text-text-on-main-bg-color'">
+          <span class="text-[10px]">{{ time }}</span>
+          <MessageStatusIcon v-if="props.isOwn" :status="msgStatus" />
+        </div>
+        <!-- Reactions row -->
+        <ReactionRow v-if="message.reactions && Object.keys(message.reactions).length" :reactions="message.reactions" :is-own="props.isOwn" @toggle="handleToggleReaction" @add-reaction="handleAddReaction" />
       </div>
 
       <!-- Video message -->

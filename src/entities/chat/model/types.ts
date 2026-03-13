@@ -35,6 +35,10 @@ export interface FileInfo {
   caption?: string;
   /** If true, caption renders above media (Telegram feature) */
   captionAbove?: boolean;
+  /** True for video circle (video note) messages */
+  videoNote?: boolean;
+  /** Thumbnail URL for video circles */
+  thumbnailUrl?: string;
 }
 
 export interface ReplyTo {
@@ -113,6 +117,7 @@ export enum MessageType {
   system = "system",
   poll = "poll",
   transfer = "transfer",
+  videoCircle = "videoCircle",
 }
 
 export interface PollInfo {
