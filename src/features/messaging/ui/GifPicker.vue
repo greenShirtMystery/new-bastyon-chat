@@ -12,9 +12,12 @@ const loadingMore = ref(false);
 const searchInputRef = ref<HTMLInputElement>();
 const scrollContainerRef = ref<HTMLElement>();
 const hoveredId = ref<string | null>(null);
+const previewGif = ref<TenorGif | null>(null); // fullscreen preview on long-press
 
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 let requestId = 0; // cancel stale requests
+let longPressTimer: ReturnType<typeof setTimeout> | null = null;
+let longPressTriggered = false;
 
 // Load trending on mount
 onMounted(async () => {
@@ -100,11 +103,48 @@ function onScroll() {
 
 onBeforeUnmount(() => {
   if (debounceTimer) clearTimeout(debounceTimer);
+  if (longPressTimer) clearTimeout(longPressTimer);
   requestId++; // cancel any in-flight requests
 });
 
 function selectGif(gif: TenorGif) {
+  // Don't select if long-press preview was just shown
+  if (longPressTriggered) {
+    longPressTriggered = false;
+    return;
+  }
   emit("select", gif);
+}
+
+// --- Touch long-press for mobile preview ---
+function onTouchStart(gif: TenorGif) {
+  longPressTriggered = false;
+  longPressTimer = setTimeout(() => {
+    longPressTriggered = true;
+    previewGif.value = gif;
+    hoveredId.value = gif.id; // also animate the grid item
+  }, 300);
+}
+
+function onTouchEnd() {
+  if (longPressTimer) {
+    clearTimeout(longPressTimer);
+    longPressTimer = null;
+  }
+  previewGif.value = null;
+  hoveredId.value = null;
+}
+
+function onTouchMove() {
+  // Cancel long-press if finger moves (scrolling)
+  if (longPressTimer) {
+    clearTimeout(longPressTimer);
+    longPressTimer = null;
+  }
+  if (previewGif.value) {
+    previewGif.value = null;
+    hoveredId.value = null;
+  }
 }
 </script>
 
@@ -191,6 +231,10 @@ function selectGif(gif: TenorGif) {
           class="gif-item group relative mb-1.5 w-full overflow-hidden rounded-lg"
           @mouseenter="hoveredId = gif.id"
           @mouseleave="hoveredId = null"
+          @touchstart.passive="onTouchStart(gif)"
+          @touchend="onTouchEnd()"
+          @touchcancel="onTouchEnd()"
+          @touchmove.passive="onTouchMove()"
           @click="selectGif(gif)"
         >
           <img
@@ -202,6 +246,29 @@ function selectGif(gif: TenorGif) {
           <div class="absolute inset-0 rounded-lg bg-black/0 transition-colors group-hover:bg-black/10" />
         </button>
       </div>
+
+      <!-- Fullscreen preview overlay (mobile long-press) -->
+      <Teleport to="body">
+        <transition name="gif-preview">
+          <div
+            v-if="previewGif"
+            class="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm"
+            @touchend="onTouchEnd()"
+            @click="onTouchEnd()"
+          >
+            <div class="gif-preview-card mx-4 max-h-[70vh] max-w-[90vw] overflow-hidden rounded-2xl bg-background-total-theme shadow-2xl">
+              <img
+                :src="previewGif.animatedPreviewUrl"
+                :alt="previewGif.title"
+                class="block max-h-[65vh] w-full object-contain"
+              />
+              <div v-if="previewGif.title" class="px-3 py-2 text-center text-xs text-text-on-main-bg-color/60">
+                {{ previewGif.title }}
+              </div>
+            </div>
+          </div>
+        </transition>
+      </Teleport>
 
       <!-- Loading more spinner -->
       <div v-if="loadingMore" class="flex justify-center py-3">
@@ -241,6 +308,33 @@ function selectGif(gif: TenorGif) {
 .gif-item:active {
   transform: scale(0.97);
   transition: transform 0.1s ease;
+}
+
+/* Fullscreen preview transition */
+.gif-preview-enter-active {
+  transition: opacity 0.15s ease, transform 0.15s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.gif-preview-leave-active {
+  transition: opacity 0.1s ease-in, transform 0.1s ease-in;
+}
+.gif-preview-enter-from {
+  opacity: 0;
+  transform: scale(0.85);
+}
+.gif-preview-leave-to {
+  opacity: 0;
+  transform: scale(0.9);
+}
+.gif-preview-enter-to,
+.gif-preview-leave-from {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.gif-preview-card {
+  -webkit-user-select: none;
+  user-select: none;
+  touch-action: none;
 }
 
 /* Custom scrollbar */
