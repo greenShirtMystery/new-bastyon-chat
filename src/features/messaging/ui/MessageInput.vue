@@ -28,7 +28,7 @@ const emit = defineEmits<{ donate: [] }>();
 const chatStore = useChatStore();
 const themeStore = useThemeStore();
 const { t } = useI18n();
-const { sendMessage, sendFile, sendImage, sendAudio, sendReply, editMessage, setTyping, sendPoll } = useMessages();
+const { sendMessage, sendFile, sendImage, sendAudio, sendReply, editMessage, setTyping, sendPoll, sendSticker, sendGif } = useMessages();
 const mediaUpload = useMediaUpload();
 const pasteDrop = usePasteDrop({
   onMediaFiles: (files) => mediaUpload.addFiles(files),
@@ -310,6 +310,20 @@ const insertEmoji = (emoji: string) => {
   themeStore.addRecentEmoji(emoji);
   // In input mode, picker stays open — user closes by clicking outside
 };
+
+const handleStickerSelect = async (sticker: { url: string }) => {
+  showEmojiPicker.value = false;
+  await sendSticker(sticker.url);
+};
+
+const handleGifSelect = async (gif: { gifUrl: string; width: number; height: number; title: string }) => {
+  showEmojiPicker.value = false;
+  await sendGif(gif.gifUrl, { w: gif.width, h: gif.height, title: gif.title });
+};
+
+const handleKitchenSelect = async (imageUrl: string) => {
+  await sendSticker(imageUrl);
+};
 </script>
 
 <template>
@@ -572,6 +586,9 @@ const insertEmoji = (emoji: string) => {
       mode="input"
       @close="showEmojiPicker = false"
       @select="insertEmoji"
+      @select-sticker="handleStickerSelect"
+      @select-gif="handleGifSelect"
+      @select-kitchen="handleKitchenSelect"
     />
 
     <AttachmentPanel
