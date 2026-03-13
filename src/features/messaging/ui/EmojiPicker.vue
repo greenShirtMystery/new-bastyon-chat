@@ -2,6 +2,9 @@
 import { ref, computed, watch, nextTick } from "vue";
 import { useThemeStore } from "@/entities/theme";
 import { EMOJI_CATEGORIES, searchEmojis } from "@/shared/lib/emoji-data";
+import EmojiKitchenBar from "./EmojiKitchenBar.vue";
+import GifPicker from "./GifPicker.vue";
+import type { TenorGif } from "@/shared/lib/tenor";
 
 const PANEL_W = 370;
 const PANEL_H = 420;
@@ -19,7 +22,16 @@ const props = withDefaults(defineProps<Props>(), {
   y: 0,
   mode: "reaction",
 });
-const emit = defineEmits<{ close: []; select: [emoji: string] }>();
+const emit = defineEmits<{
+  close: [];
+  select: [emoji: string];
+  selectGif: [gif: TenorGif];
+  selectKitchen: [imageUrl: string];
+}>();
+
+type PickerTab = "emoji" | "gif";
+const activeTab = ref<PickerTab>("emoji");
+const lastSelectedEmoji = ref<string | null>(null);
 
 const themeStore = useThemeStore();
 const { t } = useI18n();
@@ -36,6 +48,8 @@ watch(() => props.show, (v) => {
   if (v) {
     search.value = "";
     activeCategoryIndex.value = 0;
+    activeTab.value = "emoji";
+    lastSelectedEmoji.value = null;
     nextTick(() => {
       searchInputRef.value?.focus();
       if (gridRef.value) gridRef.value.scrollTop = 0;
@@ -86,6 +100,7 @@ const filteredEmojis = computed(() => {
 });
 
 const handleSelect = (emoji: string) => {
+  lastSelectedEmoji.value = emoji;
   emit("select", emoji);
   if (props.mode === "reaction") {
     emit("close");
@@ -149,8 +164,23 @@ const setSectionRef = (el: any, idx: number) => {
           class="emoji-panel absolute flex flex-col overflow-hidden rounded-2xl border border-neutral-grad-0 bg-background-total-theme shadow-2xl"
           :style="panelStyle"
         >
+          <!-- Main tabs: Emoji | GIF (hidden in reaction mode) -->
+          <div v-if="props.mode === 'input'" class="flex shrink-0 border-b border-neutral-grad-0/50 px-2">
+            <button
+              v-for="tab in (['emoji', 'gif'] as const)"
+              :key="tab"
+              class="flex-1 py-1.5 text-center text-xs font-medium transition-colors"
+              :class="activeTab === tab
+                ? 'text-color-bg-ac border-b-2 border-color-bg-ac'
+                : 'text-text-on-main-bg-color/60 hover:text-text-on-main-bg-color'"
+              @click="activeTab = tab"
+            >
+              {{ tab === 'emoji' ? '😀' : 'GIF' }}
+            </button>
+          </div>
+
           <!-- Search -->
-          <div class="shrink-0 px-3 pt-3 pb-2">
+          <div v-if="activeTab === 'emoji'" class="shrink-0 px-3 pt-3 pb-2">
             <div class="relative">
               <svg
                 width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
@@ -178,7 +208,7 @@ const setSectionRef = (el: any, idx: number) => {
           </div>
 
           <!-- Category tabs (hidden during search) -->
-          <div v-if="!search" class="flex shrink-0 gap-0.5 border-b border-neutral-grad-0/50 px-2 pb-1">
+          <div v-if="activeTab === 'emoji' && !search" class="flex shrink-0 gap-0.5 border-b border-neutral-grad-0/50 px-2 pb-1">
             <button
               v-for="(section, i) in allSections"
               :key="section.key"
@@ -198,7 +228,7 @@ const setSectionRef = (el: any, idx: number) => {
           </div>
 
           <!-- Emoji grid — continuous scroll of all categories -->
-          <div ref="gridRef" class="min-h-0 flex-1 overflow-y-auto px-2 py-2" @scroll="onGridScroll">
+          <div v-if="activeTab === 'emoji'" ref="gridRef" class="min-h-0 flex-1 overflow-y-auto px-2 py-2" @scroll="onGridScroll">
             <!-- Search results -->
             <template v-if="search">
               <template v-if="filteredEmojis">
@@ -249,6 +279,20 @@ const setSectionRef = (el: any, idx: number) => {
               </div>
             </template>
           </div>
+
+          <!-- Emoji Kitchen bar -->
+          <EmojiKitchenBar
+            v-if="activeTab === 'emoji' && props.mode === 'input'"
+            :selected-emoji="lastSelectedEmoji"
+            @select="(url: string) => emit('selectKitchen', url)"
+          />
+
+          <!-- GIF tab -->
+          <GifPicker
+            v-if="activeTab === 'gif'"
+            class="min-h-0 flex-1"
+            @select="(g: TenorGif) => { emit('selectGif', g); emit('close'); }"
+          />
         </div>
       </div>
     </transition>

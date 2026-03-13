@@ -15,6 +15,8 @@ import { MessageSkeleton } from "@/shared/ui/skeleton";
 import MessageContextMenu from "./MessageContextMenu.vue";
 import EmojiPicker from "./EmojiPicker.vue";
 import MediaViewer from "./MediaViewer.vue";
+import ReactionEffect from "./ReactionEffect.vue";
+import TypingBubble from "./TypingBubble.vue";
 import { DynamicScroller, DynamicScrollerItem } from "vue-virtual-scroller";
 import "vue-virtual-scroller/dist/vue-virtual-scroller.css";
 
@@ -109,9 +111,21 @@ const handlePollEnd = (messageId: string) => {
   endPoll(messageId);
 };
 
+const handleToggleReactionWithEffect = (messageId: string, emoji: string) => {
+  toggleReaction(messageId, emoji);
+  if (themeStore.animatedReactions) {
+    lastReactionEmoji.value = emoji;
+    setTimeout(() => { lastReactionEmoji.value = null; }, 100);
+  }
+};
+
 const handleContextReaction = (emoji: string, message: import("@/entities/chat").Message) => {
   toggleReaction(message.id, emoji);
   themeStore.addRecentEmoji(emoji);
+  if (themeStore.animatedReactions) {
+    lastReactionEmoji.value = emoji;
+    setTimeout(() => { lastReactionEmoji.value = null; }, 100);
+  }
 };
 
 const emojiPickerTarget = ref<import("@/entities/chat").Message | null>(null);
@@ -139,6 +153,8 @@ const handleEmojiSelect = (emoji: string) => {
   emojiPickerTarget.value = null;
 };
 
+const lastReactionEmoji = ref<string | null>(null);
+
 const listRef = ref<HTMLElement>();
 const scrollerRef = ref<InstanceType<typeof DynamicScroller>>();
 const isNearBottom = ref(true);
@@ -149,6 +165,15 @@ const switching = ref(false); // true during room switch — suppresses watchers
 const settled = ref(false); // false until messages loaded + scrolled — hides scroller to prevent flicker
 const hasMore = ref(true);
 const newMessageCount = ref(0);
+
+// --- Predictive prefetch state ---
+const LOAD_THRESHOLD = 1200; // px from top — start loading (was 400)
+const PREFETCH_THRESHOLD = 2500; // px from top — background prefetch zone
+const VELOCITY_BOOST_THRESHOLD = 1500; // px/s — fast scroll triggers early prefetch
+const prefetching = ref(false); // true while background prefetch is in progress
+let lastScrollTop = 0;
+let lastScrollTime = 0;
+let scrollVelocity = 0; // px per second (positive = scrolling up)
 
 // --- Scroll position memory (per room) ---
 // Only saves position if user scrolled up significantly (> 800px from bottom).
@@ -288,6 +313,15 @@ watch(
     showDateHeader.value = false;
     recentMessageIds.value.clear();
     isNearBottom.value = true;
+    prefetching.value = false;
+    lastScrollTop = 0;
+    lastScrollTime = 0;
+    scrollVelocity = 0;
+    // Cancel pending rAF from old room to prevent it firing against new room
+    if (scrollThrottleRaf !== null) {
+      cancelAnimationFrame(scrollThrottleRaf);
+      scrollThrottleRaf = null;
+    }
 
     // 1. Show cached messages instantly (Telegram-style: no loading screen)
     await chatStore.loadCachedMessages(roomId);
@@ -440,32 +474,108 @@ const updateFloatingDate = () => {
   }, 1500);
 };
 
+/**
+ * Wait for DOM to fully settle after adding messages — nextTick alone is not enough
+ * because DynamicScroller's ResizeObserver may fire AFTER Vue's DOM patch.
+ * Double rAF guarantees the browser has painted and observers have run.
+ */
+const waitForDomSettle = (): Promise<void> =>
+  new Promise((resolve) => {
+    nextTick(() => {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => resolve());
+      });
+    });
+  });
+
+/** Load older messages and preserve scroll position */
+const doLoadMore = (roomId: string, container: HTMLElement): Promise<void> => {
+  if (prefetching.value) return Promise.resolve(); // avoid race with prefetch
+  const prevHeight = container.scrollHeight;
+  loadingMore.value = true;
+  return chatStore.loadMoreMessages(roomId).then(async (more) => {
+    hasMore.value = more;
+    await waitForDomSettle();
+    if (chatStore.activeRoomId !== roomId) return; // stale room guard
+    const el = getScrollContainer();
+    if (el) {
+      el.scrollTop += el.scrollHeight - prevHeight;
+    }
+    loadingMore.value = false;
+  }).catch(() => {
+    loadingMore.value = false;
+  });
+};
+
+/** Background prefetch: loads next batch silently so it's ready when user scrolls further */
+const doPrefetch = (roomId: string, container: HTMLElement) => {
+  if (prefetching.value || loadingMore.value || !hasMore.value) return;
+  const prevHeight = container.scrollHeight;
+  prefetching.value = true;
+  chatStore.loadMoreMessages(roomId).then(async (more) => {
+    hasMore.value = more;
+    await waitForDomSettle();
+    if (chatStore.activeRoomId !== roomId) return; // stale room guard
+    const el = getScrollContainer();
+    if (el) {
+      el.scrollTop += el.scrollHeight - prevHeight;
+    }
+    prefetching.value = false;
+  }).catch(() => {
+    prefetching.value = false;
+  });
+};
+
+let scrollThrottleRaf: number | null = null;
+
 const onScroll = () => {
-  if (switching.value) return; // Ignore scroll events during room transition
+  if (switching.value) return;
+
+  // Throttle via rAF — at most once per frame (~16ms)
+  if (scrollThrottleRaf !== null) return;
+  scrollThrottleRaf = requestAnimationFrame(() => {
+    scrollThrottleRaf = null;
+    onScrollThrottled();
+  });
+};
+
+const onScrollThrottled = () => {
+  if (switching.value) return;
   checkScroll();
   updateFloatingDate();
 
-  // Load more when scrolled near the top (Telegram-style smooth pagination)
   const container = getScrollContainer();
-  if (!container) return;
+  if (!container || !hasMore.value) return;
   const { scrollTop } = container;
-  if (scrollTop < 400 && !loadingMore.value && hasMore.value) {
-    const roomId = chatStore.activeRoomId;
-    if (!roomId) return;
-    const prevScrollHeight = container.scrollHeight;
-    loadingMore.value = true;
-    chatStore.loadMoreMessages(roomId).then((more) => {
-      hasMore.value = more;
-      // Preserve scroll position: keep the same content in view after new messages prepend
-      nextTick(() => {
-        const el = getScrollContainer();
-        if (el) {
-          const newScrollHeight = el.scrollHeight;
-          el.scrollTop += newScrollHeight - prevScrollHeight;
-        }
-        loadingMore.value = false;
-      });
-    });
+
+  // Calculate scroll velocity (positive means scrolling up)
+  const now = performance.now();
+  if (lastScrollTime > 0) {
+    const dt = (now - lastScrollTime) / 1000; // seconds
+    if (dt > 0) {
+      scrollVelocity = (lastScrollTop - scrollTop) / dt; // px/s, positive = up
+    }
+  }
+  lastScrollTop = scrollTop;
+  lastScrollTime = now;
+
+  const roomId = chatStore.activeRoomId;
+  if (!roomId) return;
+
+  // Determine effective threshold — fast scroll means load earlier
+  const effectiveLoadThreshold = scrollVelocity > VELOCITY_BOOST_THRESHOLD
+    ? PREFETCH_THRESHOLD
+    : LOAD_THRESHOLD;
+
+  // Primary load zone — user is close to top
+  if (scrollTop < effectiveLoadThreshold && !loadingMore.value && !prefetching.value) {
+    doLoadMore(roomId, container);
+    return;
+  }
+
+  // Prefetch zone — user is approaching, preload in background
+  if (scrollTop < PREFETCH_THRESHOLD && scrollVelocity > 0) {
+    doPrefetch(roomId, container);
   }
 };
 
@@ -500,6 +610,12 @@ const attachScrollListener = () => {
       contentResizeObserver = new ResizeObserver(() => {
         const el = scrollListenEl;
         if (!el || switching.value) return;
+        // Skip auto-scroll while loading older messages — doLoadMore/doPrefetch
+        // will handle scroll position restoration themselves.
+        if (loadingMore.value || prefetching.value) {
+          prevScrollHeight = el.scrollHeight;
+          return;
+        }
         const newHeight = el.scrollHeight;
         if (newHeight !== prevScrollHeight) {
           const heightDelta = newHeight - prevScrollHeight;
@@ -587,6 +703,9 @@ onUnmounted(() => {
   if (containerResizeObserver) {
     containerResizeObserver.disconnect();
   }
+  if (scrollThrottleRaf !== null) {
+    cancelAnimationFrame(scrollThrottleRaf);
+  }
   clearTimeout(dateHideTimer);
 });
 
@@ -631,6 +750,16 @@ const typingText = computed(() => {
     return t("messageList.typingTwo", { name1: names[0], name2: names[1] });
   }
   return t("messageList.typingMany", { name: names[0], count: names.length - 1 });
+});
+
+const typingNames = computed(() => {
+  const roomId = chatStore.activeRoomId;
+  if (!roomId) return [];
+  const typingUsers = chatStore.getTypingUsers(roomId);
+  const myAddr = authStore.address ?? "";
+  return typingUsers
+    .filter((id: string) => id !== myAddr)
+    .map((id: string) => chatStore.getDisplayName(id));
 });
 
 /** Scroll to a specific message and flash highlight */
@@ -786,7 +915,7 @@ defineExpose({ scrollToMessage, setSearchQuery });
               @reply="(msg) => { chatStore.replyingTo = { id: msg.id, senderId: msg.senderId, content: msg.content.slice(0, 150), type: msg.type }; }"
               @scroll-to-reply="scrollToMessage"
               @open-media="handleOpenMedia"
-              @toggle-reaction="(emoji, messageId) => toggleReaction(messageId, emoji)"
+              @toggle-reaction="(emoji, messageId) => handleToggleReactionWithEffect(messageId, emoji)"
               @add-reaction="handleOpenEmojiPicker"
               @poll-vote="handlePollVote"
               @poll-end="handlePollEnd"
@@ -798,14 +927,12 @@ defineExpose({ scrollToMessage, setSearchQuery });
             </div>
           </div>
 
-          <!-- Typing indicator -->
-          <div v-else-if="item.type === 'typing'" class="mx-auto flex max-w-6xl items-center gap-2 px-10 py-1">
-            <div class="flex gap-0.5">
-              <span class="h-1.5 w-1.5 animate-bounce rounded-full bg-text-on-main-bg-color [animation-delay:-0.3s]" />
-              <span class="h-1.5 w-1.5 animate-bounce rounded-full bg-text-on-main-bg-color [animation-delay:-0.15s]" />
-              <span class="h-1.5 w-1.5 animate-bounce rounded-full bg-text-on-main-bg-color" />
+          <!-- Typing bubble -->
+          <div v-else-if="item.type === 'typing'" class="mx-auto max-w-6xl px-4 py-1">
+            <div class="flex gap-2">
+              <div v-if="themeStore.showAvatarsInChat" class="w-8 shrink-0" />
+              <TypingBubble :names="typingNames" />
             </div>
-            <span class="text-xs text-text-on-main-bg-color">{{ typingText }}</span>
           </div>
         </DynamicScrollerItem>
       </template>
@@ -842,6 +969,8 @@ defineExpose({ scrollToMessage, setSearchQuery });
       :message-id="mediaViewerMessageId"
       @close="showMediaViewer = false"
     />
+
+    <ReactionEffect :emoji="lastReactionEmoji" />
 
     <!-- Scroll-to-bottom FAB with new message badge -->
     <transition name="fab">

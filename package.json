@@ -28,6 +28,7 @@
     "class-variance-authority": "^0.7.0",
     "create-hash": "^1.2.0",
     "dexie": "^4.3.0",
+    "emoji-kitchen-mart": "^6.0.5",
     "file-saver": "^2.0.5",
     "matrix-js-sdk-bastyon": "23.2.2",
     "miscreant": "^0.3.2",

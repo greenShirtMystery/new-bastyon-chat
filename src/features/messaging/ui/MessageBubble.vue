@@ -10,6 +10,7 @@ import PollCard from "./PollCard.vue";
 import TransferCard from "./TransferCard.vue";
 import ReactionRow from "./ReactionRow.vue";
 import VoiceMessage from "./VoiceMessage.vue";
+import VideoCirclePlayer from "./VideoCirclePlayer.vue";
 import { ref, inject, onMounted, onBeforeUnmount } from "vue";
 import { useLongPress, useSwipeGesture } from "@/shared/lib/gestures";
 import { useThemeStore } from "@/entities/theme";
@@ -224,6 +225,7 @@ const replyPreviewText = computed(() => {
   if (!reply.senderId && !reply.content) return "Deleted message";
   if (reply.type === MessageType.image) return "Photo";
   if (reply.type === MessageType.video) return "Video";
+  if (reply.type === MessageType.videoCircle) return "Video message";
   if (reply.type === MessageType.audio) return "Voice message";
   if (reply.type === MessageType.file) return reply.content || "File";
   const text = stripBastyonLinks(stripMentionAddresses(reply.content));
@@ -385,6 +387,22 @@ const replyPreviewText = computed(() => {
           <ReactionRow :reactions="message.reactions" :is-own="props.isOwn" @toggle="handleToggleReaction" @add-reaction="handleAddReaction" />
         </div>
 
+      </div>
+
+      <!-- Video circle (video note) message -->
+      <div
+        v-else-if="message.type === MessageType.videoCircle && hasFileInfo"
+        class="flex flex-col"
+      >
+        <VideoCirclePlayer :message="message" :is-own="props.isOwn" />
+        <div v-if="themeStore.showTimestamps" class="mt-0.5 flex items-center gap-1 self-end text-text-on-main-bg-color">
+          <span class="text-[10px]">{{ time }}</span>
+          <MessageStatusIcon v-if="props.isOwn" :status="msgStatus" />
+        </div>
+        <!-- Reactions row -->
+        <div v-if="message.reactions && Object.keys(message.reactions).length" class="mt-0.5">
+          <ReactionRow :reactions="message.reactions" :is-own="props.isOwn" @toggle="handleToggleReaction" @add-reaction="handleAddReaction" />
+        </div>
       </div>
 
       <!-- Video message -->

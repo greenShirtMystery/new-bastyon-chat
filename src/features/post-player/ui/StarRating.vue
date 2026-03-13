@@ -71,10 +71,10 @@ const onClick = (star: number) => {
         <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
       </svg>
     </div>
-    <span v-if="!compact && totalVotes > 0" class="text-xs opacity-60">
-      {{ average.toFixed(1) }} · {{ totalVotes }}
+    <span v-if="!compact && totalVotes > 0" class="text-xs text-text-on-main-bg-color">
+      {{ average.toFixed(1) }}
     </span>
-    <span v-if="compact && totalVotes > 0" class="text-[10px] opacity-60">
+    <span v-if="compact && totalVotes > 0" class="text-[10px] text-text-on-main-bg-color">
       {{ average.toFixed(1) }}
     </span>
   </div>

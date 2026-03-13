@@ -107,6 +107,7 @@ export const ru: Record<TranslationKey, string> = {
   "appearance.showTimestamps": "Время сообщений",
   "appearance.groupMessages": "Группировать сообщения",
   "appearance.enableAnimations": "Анимации",
+  "appearance.animatedReactions": "Анимированные реакции",
   "appearance.quickReactions": "Быстрые реакции",
   "appearance.quickReactionsDesc": "Настройте эмодзи в контекстном меню",
   "appearance.edit": "Изменить",
@@ -206,6 +207,9 @@ export const ru: Record<TranslationKey, string> = {
   "voice.send": "Отправить",
   "voice.discard": "Удалить",
   "voice.voiceMessage": "Голосовое сообщение",
+  "voice.slideCancel": "Сдвиньте для отмены",
+  "voice.hintVideo": "Нажмите для видео, удерживайте чтобы записать",
+  "voice.hintAudio": "Нажмите для аудио, удерживайте чтобы записать",
 
   // ── Chat search ──
   "chatSearch.placeholder": "Поиск в чате...",
@@ -446,6 +450,8 @@ export const ru: Record<TranslationKey, string> = {
   "post.video": "Видео",
   "post.article": "Статья",
   "post.openInBastyon": "Открыть в Forta",
+  "post.subscribe": "Подписаться",
+  "post.views": "Просмотры",
 
   // Post player
   "postPlayer.boost": "Поддержать",
@@ -456,7 +462,7 @@ export const ru: Record<TranslationKey, string> = {
   "postPlayer.send": "Отправить",
   "postPlayer.rated": "Вы оценили этот пост",
   "postPlayer.ratingRestricted": "Оценка ограничена",
-  "postPlayer.openPost": "Открыть пост",
+  "postPlayer.openPost": "Открыть",
   "postPlayer.searchChats": "Поиск чатов...",
 
   // ── Registration ──
