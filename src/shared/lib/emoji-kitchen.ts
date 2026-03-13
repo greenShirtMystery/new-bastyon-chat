@@ -1,9 +1,8 @@
 /**
  * Emoji Kitchen lookup wrapper.
  *
- * Uses the recipe data embedded in `emoji-kitchen-mart` to resolve
- * Google Emoji Kitchen combination images without mounting the full
- * picker web-component.
+ * Uses pre-extracted recipe data from emoji-kitchen-mart to resolve
+ * Google Emoji Kitchen combination images.
  */
 
 export interface KitchenCombo {
@@ -36,84 +35,28 @@ function unifiedToEmoji(unified: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Recipe dataset – lazily extracted from the emoji-kitchen-mart bundle
+// Recipe dataset – lazily loaded from pre-extracted JSON
 // ---------------------------------------------------------------------------
 
 type RecipeRow = [string, string, string]; // [leftUnified, rightUnified, date]
 type RecipeMap = Record<string, RecipeRow[]>;
 
 let _recipes: RecipeMap | null = null;
-
-/**
- * Lazily load and cache the recipe map.
- *
- * emoji-kitchen-mart embeds a large JSON blob with all known Emoji Kitchen
- * recipes. We pull it out of the bundled module source at runtime so we
- * don't have to duplicate the data.
- */
-function getRecipes(): RecipeMap {
-  if (_recipes) return _recipes;
-
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const fs = typeof require !== "undefined" ? require("fs") : null;
-    if (fs) {
-      // Node / SSR path – read from disk
-      const src: string = fs.readFileSync(
-        require.resolve("emoji-kitchen-mart/dist/main.js"),
-        "utf8",
-      );
-      _recipes = extractRecipes(src);
-    }
-  } catch {
-    // Ignore – fall through to the browser path
-  }
-
-  if (!_recipes) {
-    // Browser path – the data is already bundled into the app by the
-    // build tool when we import the module.  We rely on a small eval
-    // trick: import the raw source and extract the JSON.
-    // As a fallback we return an empty map so the feature degrades
-    // gracefully.
-    _recipes = {};
-  }
-
-  return _recipes;
-}
-
-function extractRecipes(source: string): RecipeMap {
-  const marker = 'JSON.parse(\'{"';
-  const start = source.indexOf(marker);
-  if (start === -1) return {};
-  const jsonStart = start + "JSON.parse('".length;
-  const jsonEnd = source.indexOf("')", jsonStart);
-  if (jsonEnd === -1) return {};
-  return JSON.parse(source.substring(jsonStart, jsonEnd)) as RecipeMap;
-}
-
-// ---------------------------------------------------------------------------
-// For the browser build we eagerly extract recipes from the module source.
-// Vite / Webpack will inline the import; we read the compiled JS text via
-// ?raw so the full picker component is NOT mounted.
-// ---------------------------------------------------------------------------
-let _browserRecipesLoaded = false;
+let _loading: Promise<RecipeMap> | null = null;
 
 async function ensureRecipes(): Promise<RecipeMap> {
-  if (_recipes && Object.keys(_recipes).length > 0) return _recipes;
-  if (_browserRecipesLoaded) return _recipes ?? {};
+  if (_recipes) return _recipes;
+  if (_loading) return _loading;
 
-  try {
-    // Dynamic import with ?raw – Vite resolves this at build time
-    const raw = await import("emoji-kitchen-mart/dist/main.js?raw");
-    const source: string =
-      typeof raw === "string" ? raw : (raw as { default: string }).default;
-    _recipes = extractRecipes(source);
-  } catch {
-    _recipes = _recipes ?? {};
-  }
+  _loading = import("./emoji-kitchen-data.json").then((mod) => {
+    _recipes = (mod.default ?? mod) as unknown as RecipeMap;
+    return _recipes;
+  }).catch(() => {
+    _recipes = {};
+    return _recipes;
+  });
 
-  _browserRecipesLoaded = true;
-  return _recipes;
+  return _loading;
 }
 
 // Kick off loading immediately so the data is ready when needed
@@ -147,7 +90,7 @@ function buildImageUrl(
  * Each result contains the partner emoji (native) and the combination image URL.
  */
 export function getKitchenCombos(emoji: string): KitchenCombo[] {
-  const recipes = getRecipes();
+  const recipes = _recipes ?? {};
   const unified = emojiToUnified(emoji);
 
   const combos: KitchenCombo[] = [];
@@ -198,7 +141,7 @@ export function getKitchenCombo(
   emoji1: string,
   emoji2: string,
 ): string | null {
-  const recipes = getRecipes();
+  const recipes = _recipes ?? {};
   const u1 = emojiToUnified(emoji1);
   const u2 = emojiToUnified(emoji2);
 
