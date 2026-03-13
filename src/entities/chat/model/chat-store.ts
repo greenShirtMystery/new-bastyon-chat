@@ -83,8 +83,8 @@ function matrixRoomToChatRoom(room: any, kit: MatrixKit, myUserId: string, nameH
         previewBody = "[voice message]";
         previewType = MessageType.audio;
       } else if (msgtype === "m.video") {
-        const vinfo = content.info as Record<string, unknown> | undefined;
-        if (vinfo?.videoNote) {
+        const info = content.info as Record<string, unknown> | undefined;
+        if (info?.videoNote) {
           previewBody = "[video message]";
           previewType = MessageType.videoCircle;
         } else {
