@@ -7,6 +7,7 @@ import { hexEncode } from "@/shared/lib/matrix/functions";
 import { useConnectivity } from "@/shared/lib/connectivity";
 import { enqueue, dequeue, getQueue } from "@/shared/lib/offline-queue";
 import type { QueuedMessage } from "@/shared/lib/offline-queue";
+import { isChatDbReady, getChatDb } from "@/shared/lib/local-db";
 
 export function useMessages() {
   const chatStore = useChatStore();
@@ -35,7 +36,45 @@ export function useMessages() {
 
     const trimmed = content.trim();
 
-    // Optimistic message
+    // New path: Dexie createLocal → liveQuery shows instantly → SyncEngine sends
+    if (isChatDbReady()) {
+      try {
+        const dbKit = getChatDb();
+        const localMsg = await dbKit.messages.createLocal({
+          roomId,
+          senderId: authStore.address ?? "",
+          content: trimmed,
+          type: MessageType.text,
+        });
+
+        // Enqueue for background sync (SyncEngine will encrypt + send via Matrix API)
+        await dbKit.syncEngine.enqueue(
+          "send_message",
+          roomId,
+          {
+            content: trimmed,
+            ...(linkPreview ? {
+              linkPreview: {
+                url: linkPreview.url,
+                site_name: linkPreview.siteName,
+                title: linkPreview.title,
+                description: linkPreview.description,
+                image_url: linkPreview.imageUrl,
+                image_width: linkPreview.imageWidth,
+                image_height: linkPreview.imageHeight,
+              },
+            } : {}),
+          },
+          localMsg.clientId,
+        );
+        return;
+      } catch (e) {
+        console.warn("[use-messages] Dexie sendMessage failed, falling back to legacy:", e);
+        // Fall through to legacy path
+      }
+    }
+
+    // Legacy path: optimistic addMessage + direct Matrix API call
     const tempId = `msg_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
     const message: Message = {
       id: tempId,
@@ -49,7 +88,6 @@ export function useMessages() {
     };
     chatStore.addMessage(roomId, message);
 
-    // If offline, queue the message for later
     if (!isOnline.value) {
       enqueue({ id: tempId, roomId, content: trimmed, timestamp: Date.now() });
       chatStore.updateMessageStatus(roomId, tempId, MessageStatus.sent);
@@ -57,12 +95,9 @@ export function useMessages() {
     }
 
     try {
-      // Check if room has encryption
       const roomCrypto = authStore.pcrypto?.rooms[roomId] as PcryptoRoomInstance | undefined;
-
       let serverEventId: string;
       if (roomCrypto?.canBeEncrypt()) {
-        // Send encrypted
         const encrypted = await roomCrypto.encryptEvent(trimmed);
         if (linkPreview) {
           (encrypted as Record<string, unknown>).url_preview = {
@@ -77,7 +112,6 @@ export function useMessages() {
         }
         serverEventId = await matrixService.sendEncryptedText(roomId, encrypted);
       } else {
-        // Send plaintext
         if (linkPreview) {
           const content: Record<string, unknown> = {
             body: trimmed,
@@ -97,8 +131,6 @@ export function useMessages() {
           serverEventId = await matrixService.sendText(roomId, trimmed);
         }
       }
-
-      // Replace temp ID with server event_id so read receipts can match
       if (serverEventId) {
         chatStore.updateMessageIdAndStatus(roomId, tempId, serverEventId, MessageStatus.sent);
       } else {
