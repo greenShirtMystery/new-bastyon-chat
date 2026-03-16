@@ -126,15 +126,22 @@ export function parseFileInfo(content: Record<string, unknown>, msgtype: string)
   return undefined;
 }
 
-/** Replace raw @hexid:server Matrix ID patterns with decoded Bastyon addresses.
- *  Used to clean up system messages that contain un-decoded Matrix IDs. */
+/** Replace raw Matrix IDs and bare hex-encoded addresses with decoded Bastyon addresses.
+ *  Handles both @hexid:server patterns and standalone hex strings (40+ chars). */
 export function cleanMatrixIds(text: string): string {
-  return text.replace(/@([a-f0-9]{20,}):([^\s]+)/gi, (_match, hexPart: string) => {
+  // 1. Replace @hexid:server patterns
+  let result = text.replace(/@([a-f0-9]{20,}):([^\s]+)/gi, (_match, hexPart: string) => {
     const addr = hexDecode(hexPart);
-    // Only use decoded if it's a valid alphanumeric Base58 address (not garbage)
     if (addr !== hexPart && /^[A-Za-z0-9]+$/.test(addr)) return addr;
     return hexPart.length > 16 ? hexPart.slice(0, 8) + "\u2026" : hexPart;
   });
+  // 2. Replace bare hex strings (40+ chars) — hex-encoded Bastyon addresses in system messages
+  result = result.replace(/\b([a-f0-9]{40,})\b/gi, (_match, hexPart: string) => {
+    const addr = hexDecode(hexPart);
+    if (addr !== hexPart && /^[A-Za-z0-9]+$/.test(addr)) return addr;
+    return hexPart.slice(0, 8) + "\u2026";
+  });
+  return result;
 }
 
 /** Resolve a system message template using a name-resolver function.
