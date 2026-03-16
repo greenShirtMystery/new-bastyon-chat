@@ -165,6 +165,7 @@ watch(unresolvedRoomSet, (set) => {
   const delay = NAME_RETRY_BASE_MS * Math.pow(2, nameRetryCount);
   nameRetryTimer = setTimeout(() => {
     nameRetryCount++;
+    console.debug(`[contact-list] name-retry attempt=${nameRetryCount} unresolved=${unresolvedRoomIds.length} delayMs=${delay}`);
     chatStore.clearProfileCache(unresolvedRoomIds);
     chatStore.loadProfilesForRoomIds(unresolvedRoomIds);
   }, delay);

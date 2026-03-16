@@ -326,6 +326,7 @@ watch(
     }
 
     // 1. Show cached messages instantly (Telegram-style: no loading screen)
+    const t0 = Date.now();
     const cacheAge = await chatStore.loadCachedMessages(roomId);
     if (isStale()) return;
 
@@ -339,6 +340,7 @@ watch(
     }
 
     const hasCached = chatStore.activeMessages.length > 0;
+    console.debug(`[msg-list] room=${roomId.slice(1, 8)} v=${myVersion} hasCached=${hasCached} msgs=${chatStore.activeMessages.length} dexieReady=${chatStore.dexieMessagesReady} hydrationMs=${Date.now() - t0}`);
     const STALE_THRESHOLD = 60_000; // 60 seconds
 
     if (hasCached) {
@@ -359,6 +361,7 @@ watch(
       switching.value = false;
       prevScrollHeight = el?.scrollHeight ?? 0;
       checkScroll();
+      console.debug(`[msg-list] settled room=${roomId.slice(1, 8)} v=${myVersion} by=cache msgs=${chatStore.activeMessages.length} totalMs=${Date.now() - t0}`);
 
       // Show "updating" indicator if cache is stale
       if (cacheAge > STALE_THRESHOLD) {
@@ -414,6 +417,8 @@ watch(
       switching.value = false;
       prevScrollHeight = el?.scrollHeight ?? 0;
       checkScroll();
+      const settledBy = chatStore.activeMessages.length > 0 ? "server" : "timeout";
+      console.debug(`[msg-list] settled room=${roomId.slice(1, 8)} v=${myVersion} by=${settledBy} msgs=${chatStore.activeMessages.length} totalMs=${Date.now() - t0}`);
     }
   },
   { immediate: true },
