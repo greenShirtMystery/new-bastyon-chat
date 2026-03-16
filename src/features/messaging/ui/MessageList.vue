@@ -366,9 +366,22 @@ watch(
       loading.value = true;
       try {
         await loadMessages(roomId);
-      } finally {
-        loading.value = false;
+      } catch { /* ignore */ }
+      if (isStale()) return;
+
+      // If still no messages, Matrix may not have synced yet.
+      // Keep skeleton visible and wait for messages to arrive (up to 8s).
+      if (chatStore.activeMessages.length === 0) {
+        const SYNC_WAIT_MS = 8_000;
+        const POLL_MS = 300;
+        const deadline = Date.now() + SYNC_WAIT_MS;
+        while (Date.now() < deadline && chatStore.activeMessages.length === 0) {
+          await new Promise(r => setTimeout(r, POLL_MS));
+          if (isStale()) return;
+        }
       }
+
+      loading.value = false;
       if (isStale()) return;
 
       await nextTick();
@@ -828,12 +841,12 @@ defineExpose({ scrollToMessage, setSearchQuery });
       </div>
     </transition>
 
-    <!-- Loading state -->
-    <MessageSkeleton v-if="loading" />
+    <!-- Loading state (show skeleton during loading OR switching while messages haven't arrived) -->
+    <MessageSkeleton v-if="loading || (switching && chatStore.activeMessages.length === 0)" />
 
-    <!-- Empty state (overlay, not v-if/v-else — avoids DynamicScroller unmount/mount blink) -->
+    <!-- Empty state (only after fully loaded + settled, not during switching) -->
     <div
-      v-if="!loading && chatStore.activeMessages.length === 0 && settled"
+      v-if="!loading && !switching && chatStore.activeMessages.length === 0 && settled"
       class="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 text-text-on-main-bg-color"
     >
       <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" class="opacity-20">
