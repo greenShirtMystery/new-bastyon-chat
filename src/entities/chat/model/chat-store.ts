@@ -3507,5 +3507,9 @@ export const useChatStore = defineStore(NAMESPACE, () => {
     getDbKit,
     expandMessageWindow,
     messageWindowSize,
+    /** Clear profile-requested flags for given rooms so loadProfilesForRoomIds retries them */
+    clearProfileCache(roomIds: string[]) {
+      for (const id of roomIds) profilesRequestedForRooms.delete(id);
+    },
   };
 });
