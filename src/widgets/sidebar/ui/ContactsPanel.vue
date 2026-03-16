@@ -114,8 +114,15 @@ const toggleSearch = () => {
 
     <!-- List -->
     <div class="flex-1 overflow-y-auto">
+      <!-- Skeleton while rooms haven't loaded yet -->
+      <div v-if="contacts.length === 0 && !chatStore.roomsInitialized" class="space-y-1 p-2">
+        <div v-for="i in 5" :key="i" class="flex items-center gap-3 px-4 py-2.5">
+          <div class="h-10 w-10 shrink-0 animate-pulse rounded-full bg-neutral-grad-2" />
+          <div class="h-4 w-24 animate-pulse rounded bg-neutral-grad-2" />
+        </div>
+      </div>
       <div
-        v-if="contacts.length === 0"
+        v-else-if="contacts.length === 0"
         class="p-6 text-center text-sm text-text-on-main-bg-color"
       >
         {{ searchQuery.trim() ? t("contacts.noFound") : t("contacts.noYet") }}

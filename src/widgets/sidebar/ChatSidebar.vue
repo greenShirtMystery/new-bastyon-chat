@@ -61,7 +61,9 @@ const cancelLoading = () => {
 stopWatch = watch(
   [() => chatStore.sortedRooms.length, () => chatStore.namesReady],
   ([len, names]) => {
-    // Both rooms and names loaded — reveal everything at once
+    // Show list as soon as rooms are available — inline skeletons handle unresolved names
+    if (len > 0) cancelLoading();
+    // Also cancel when names are ready (even if list was already shown)
     if (len > 0 && names) cancelLoading();
   },
   { immediate: true },
