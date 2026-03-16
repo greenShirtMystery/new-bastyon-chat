@@ -736,6 +736,19 @@ export const useChatStore = defineStore(NAMESPACE, () => {
     const viewportIds = sortedRooms.value.slice(0, 15).map(r => r.id);
     if (viewportIds.length > 0) loadProfilesForRoomIds(viewportIds);
 
+    // Background: load profiles for remaining rooms in batches (after viewport)
+    const remainingIds = sortedRooms.value.slice(15).map(r => r.id);
+    if (remainingIds.length > 0) {
+      const BG_BATCH = 10;
+      const BG_DELAY = 500;
+      (async () => {
+        for (let i = 0; i < remainingIds.length; i += BG_BATCH) {
+          await new Promise(r => setTimeout(r, BG_DELAY));
+          loadProfilesForRoomIds(remainingIds.slice(i, i + BG_BATCH));
+        }
+      })();
+    }
+
     // One-time: load members for rooms with stale lazy-load cache (only 1 member = self)
     if (willLoadMembers) {
       membersLoadedOnce = true;
