@@ -1,5 +1,12 @@
-import { shallowRef, watch, onScopeDispose, type ShallowRef } from "vue";
+import { shallowRef, ref, watch, onScopeDispose, type ShallowRef, type Ref } from "vue";
 import { liveQuery } from "dexie";
+
+export interface LiveQueryResult<T> {
+  /** Reactive query data (starts as `initial`, updates on every DB change) */
+  data: ShallowRef<T>;
+  /** `false` until the first query result arrives; resets to `false` on dep change */
+  isReady: Ref<boolean>;
+}
 
 /**
  * Vue 3 composable that wraps Dexie's liveQuery into a reactive ShallowRef.
@@ -14,16 +21,19 @@ export function useLiveQuery<T>(
   querier: () => T | Promise<T>,
   deps?: () => unknown,
   initial?: T,
-): ShallowRef<T> {
-  const result = shallowRef<T>(initial as T) as ShallowRef<T>;
+): LiveQueryResult<T> {
+  const data = shallowRef<T>(initial as T) as ShallowRef<T>;
+  const isReady = ref(false);
   let subscription: { unsubscribe(): void } | null = null;
 
   const subscribe = () => {
     subscription?.unsubscribe();
+    isReady.value = false;
     const observable = liveQuery(querier);
     subscription = observable.subscribe({
       next: (value: T) => {
-        result.value = value;
+        data.value = value;
+        isReady.value = true;
       },
       error: (err: unknown) => {
         console.error("[useLiveQuery] query error:", err);
@@ -44,5 +54,5 @@ export function useLiveQuery<T>(
     subscription = null;
   });
 
-  return result;
+  return { data, isReady };
 }

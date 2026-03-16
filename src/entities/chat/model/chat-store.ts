@@ -483,7 +483,7 @@ export const useChatStore = defineStore(NAMESPACE, () => {
   };
 
   // Primary message source: Dexie liveQuery (auto-subscribes to DB changes)
-  const dexieMessages = useLiveQuery(
+  const { data: dexieMessages, isReady: dexieMessagesReady } = useLiveQuery(
     () => {
       if (!activeRoomId.value || !chatDbKitRef.value) return [] as import("@/shared/lib/local-db").LocalMessage[];
       return chatDbKitRef.value.messages.getMessages(
@@ -496,7 +496,7 @@ export const useChatStore = defineStore(NAMESPACE, () => {
   );
 
   // Dexie-backed room list (auto-updates on any room table write)
-  const dexieRooms = useLiveQuery(
+  const { data: dexieRooms, isReady: dexieRoomsReady } = useLiveQuery(
     () => {
       if (!chatDbKitRef.value) return [] as import("@/shared/lib/local-db").LocalRoom[];
       return chatDbKitRef.value.rooms.getAllRooms();
@@ -513,10 +513,12 @@ export const useChatStore = defineStore(NAMESPACE, () => {
 
   // Convert Dexie LocalMessage[] → Message[] for UI, fallback to old shallowRef during migration
   const activeMessages = computed<Message[]>(() => {
-    if (chatDbKitRef.value && dexieMessages.value.length > 0) {
+    if (chatDbKitRef.value) {
+      // Single source of truth: always use Dexie when initialized
+      // (returns [] while liveQuery hasn't responded — UI uses dexieMessagesReady to show skeleton)
       return localToMessages(dexieMessages.value);
     }
-    // Fallback: use old in-memory store (during init or if Dexie empty)
+    // Fallback: use old in-memory store only when Dexie not yet initialized
     return activeRoomId.value ? (messages.value[activeRoomId.value] ?? []) : [];
   });
 
@@ -525,9 +527,9 @@ export const useChatStore = defineStore(NAMESPACE, () => {
   );
 
   const sortedRooms = computed(() => {
-    // Use Dexie rooms if available, fallback to old shallowRef during migration
+    // Use Dexie rooms when initialized (single source of truth), fallback to old shallowRef otherwise
     let source: ChatRoom[];
-    if (chatDbKitRef.value && dexieRooms.value.length > 0) {
+    if (chatDbKitRef.value) {
       source = dexieRooms.value.map(lr => ({
         id: lr.id,
         name: lr.name,
@@ -563,7 +565,7 @@ export const useChatStore = defineStore(NAMESPACE, () => {
   });
 
   const totalUnread = computed(() => {
-    if (chatDbKitRef.value && dexieRooms.value.length > 0) {
+    if (chatDbKitRef.value) {
       return dexieRooms.value
         .filter(r => !deletedRoomIds.value.has(r.id))
         .reduce((sum, r) => sum + r.unreadCount, 0);
@@ -3389,16 +3391,31 @@ export const useChatStore = defineStore(NAMESPACE, () => {
   /** Load cached messages. Returns cache age in ms (0 if no cache). */
   const loadCachedMessages = async (roomId: string): Promise<number> => {
     if (messages.value[roomId]?.length) return 0; // already have messages
+
+    // Primary path: read from Dexie (local-first source of truth)
+    if (chatDbKitRef.value) {
+      try {
+        const localMsgs = await chatDbKitRef.value.messages.getMessages(roomId, 50);
+        if (localMsgs.length > 0) {
+          // Dexie data will arrive via liveQuery → activeMessages computed.
+          // No need to write to messages.value — just signal that cache exists.
+          return 0;
+        }
+      } catch (e) {
+        console.warn("[chat-store] loadCachedMessages (Dexie) failed:", e);
+      }
+      return 0;
+    }
+
+    // Fallback: old localStorage cache (only when Dexie not yet initialized)
     try {
       const cached = await getCachedMessages(roomId);
       if (cached.length > 0 && !messages.value[roomId]?.length) {
         const msgs = cached as Message[];
-        // Drop stale optimistic messages from previous sessions
         const cleaned = msgs.filter(
           m => m.status !== MessageStatus.sending && m.status !== MessageStatus.failed,
         );
         backfillCallInfo(cleaned);
-        // Sanitize cached messages that may contain raw Matrix IDs
         for (const m of cleaned) {
           if (m.content.includes("@") && /@[a-f0-9]{20,}:/i.test(m.content)) {
             m.content = cleanMatrixIds(m.content);
@@ -3502,6 +3519,8 @@ export const useChatStore = defineStore(NAMESPACE, () => {
     chatDbKitRef,
     setChatDbKit,
     getDbKit,
+    dexieMessagesReady,
+    dexieRoomsReady,
     expandMessageWindow,
     messageWindowSize,
     /** Clear profile-requested flags for given rooms so loadProfilesForRoomIds retries them */

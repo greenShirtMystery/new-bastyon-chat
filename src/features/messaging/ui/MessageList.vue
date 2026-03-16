@@ -329,6 +329,15 @@ watch(
     const cacheAge = await chatStore.loadCachedMessages(roomId);
     if (isStale()) return;
 
+    // Wait for Dexie liveQuery to deliver first response (usually <10ms)
+    if (chatStore.chatDbKitRef && !chatStore.dexieMessagesReady) {
+      const readyDeadline = Date.now() + 200; // max 200ms wait
+      while (!chatStore.dexieMessagesReady && Date.now() < readyDeadline) {
+        await new Promise(r => setTimeout(r, 10));
+        if (isStale()) return;
+      }
+    }
+
     const hasCached = chatStore.activeMessages.length > 0;
     const STALE_THRESHOLD = 60_000; // 60 seconds
 
@@ -841,12 +850,12 @@ defineExpose({ scrollToMessage, setSearchQuery });
       </div>
     </transition>
 
-    <!-- Loading state (show skeleton during loading OR switching while messages haven't arrived) -->
-    <MessageSkeleton v-if="loading || (switching && chatStore.activeMessages.length === 0)" />
+    <!-- Loading state (show skeleton during loading, switching, or while Dexie hasn't responded) -->
+    <MessageSkeleton v-if="loading || (switching && chatStore.activeMessages.length === 0) || (chatStore.chatDbKitRef && !chatStore.dexieMessagesReady)" />
 
-    <!-- Empty state (only after fully loaded + settled, not during switching) -->
+    <!-- Empty state (only after fully loaded + settled + Dexie ready, not during switching) -->
     <div
-      v-if="!loading && !switching && chatStore.activeMessages.length === 0 && settled"
+      v-if="!loading && !switching && chatStore.activeMessages.length === 0 && settled && chatStore.dexieMessagesReady"
       class="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 text-text-on-main-bg-color"
     >
       <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" class="opacity-20">

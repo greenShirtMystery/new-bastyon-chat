@@ -385,7 +385,7 @@ const getRoomLongPress = (room: ChatRoom) => {
 <template>
   <div class="flex flex-col">
     <div
-      v-if="filteredRooms.length === 0"
+      v-if="filteredRooms.length === 0 && chatStore.roomsInitialized"
       class="flex flex-col items-center gap-3 px-6 py-12 text-center"
     >
       <div class="flex h-14 w-14 items-center justify-center rounded-full bg-neutral-grad-0">
@@ -450,9 +450,9 @@ const getRoomLongPress = (room: ChatRoom) => {
         >
           <!-- Avatar -->
           <div class="relative shrink-0">
-            <!-- Skeleton circle while name is unresolved and avatar is just a default letter circle -->
+            <!-- Skeleton circle while name is unresolved -->
             <div
-              v-if="isRoomNameUnresolved(item as ChatRoom) && !(item as ChatRoom).avatar?.startsWith('http')"
+              v-if="isRoomNameUnresolved(item as ChatRoom)"
               class="h-10 w-10 animate-pulse rounded-full bg-neutral-grad-2"
             />
             <UserAvatar
