@@ -118,16 +118,10 @@ function _resolveRoomName(room: ChatRoom, allUsers: Record<string, any>, myHexId
   if (!room.isGroup) {
     const names = _resolveMemberNames(room, allUsers, myHexId);
     if (names.length > 0) return names.join(", ");
-    // Fallback: show address from avatar or decoded member hex
-    if (room.avatar?.startsWith("__pocketnet__:")) {
-      return room.avatar.slice("__pocketnet__:".length);
-    }
-    const otherMembers = room.members.filter(m => m !== myHexId);
-    if (otherMembers.length > 0) {
-      const addr = cachedHexDecode(otherMembers[0]);
-      if (/^[A-Za-z0-9]+$/.test(addr)) return addr;
-    }
-    return cleanMatrixIds(room.name);
+    // No resolved display name yet — return the original room name
+    // (likely a Matrix ID or hex hash) so isUnresolvedName() keeps the
+    // skeleton placeholder visible until userStore loads the profile.
+    return room.name;
   }
   if (room.name?.startsWith("@")) return room.name.slice(1);
   if (!isUnresolvedName(room.name)) return cleanMatrixIds(room.name);

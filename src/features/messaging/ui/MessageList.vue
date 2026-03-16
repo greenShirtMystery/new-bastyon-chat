@@ -401,7 +401,14 @@ const lastMessageIdentity = computed(() => {
 });
 
 watch(lastMessageIdentity, (newVal, oldVal) => {
-  if (!newVal || !oldVal || switching.value || loadingMore.value) return;
+  if (!newVal || switching.value || loadingMore.value) return;
+
+  // Messages appeared for the first time (e.g. Dexie async load after room open)
+  // — always scroll to bottom so the user sees the latest messages.
+  if (!oldVal) {
+    scrollToBottom();
+    return;
+  }
 
   const msgs = chatStore.activeMessages;
   const lastMsg = msgs[msgs.length - 1];
