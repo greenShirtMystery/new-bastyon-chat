@@ -172,7 +172,7 @@ export function useScrollToMessage(
 
           // After fetching from server, events get ingested into Dexie via sync.
           // Wait a bit for the ingest, then retry from Dexie.
-          await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+          await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
 
           if (isChatDbReady()) {
             const db = getChatDb();
@@ -197,7 +197,7 @@ export function useScrollToMessage(
 
         // ---- LAYOUT: wait for Vue + DynamicScroller render ----
         setPhase("layout");
-        await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+        await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
 
         // Find the target in the newly loaded virtualItems
         const newIdx = findInLoaded(messageId);

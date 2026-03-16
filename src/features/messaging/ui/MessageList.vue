@@ -625,7 +625,7 @@ const doLoadNewer = async (roomId: string) => {
     callInfo: lm.callInfo,
     pollInfo: lm.pollInfo,
     transferInfo: lm.transferInfo,
-  }));
+  } as import("@/entities/chat").Message));
 
   chatStore.enterDetachedMode(roomId, [...chatStore.activeMessages, ...mapped]);
 };
