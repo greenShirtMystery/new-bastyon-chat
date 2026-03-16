@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, nextTick } from "vue";
+import { ref, computed, nextTick, watch, onUnmounted } from "vue";
 import { useChatStore } from "@/entities/chat";
 import type { ChatRoom, Message } from "@/entities/chat";
 import { MessageType, MessageStatus } from "@/entities/chat";
@@ -134,6 +134,31 @@ const resolveRoomName = (room: ChatRoom): string => {
   return roomNameMap.value[room.id] ?? cleanMatrixIds(room.name);
 };
 
+// --- Retry unresolved room names (up to 5 attempts with exponential backoff) ---
+let nameRetryCount = 0;
+let nameRetryTimer: ReturnType<typeof setTimeout> | undefined;
+const MAX_NAME_RETRIES = 5;
+const NAME_RETRY_BASE_MS = 2_000; // 2s, 4s, 8s, 16s, 32s
+
+watch(roomNameMap, (map) => {
+  if (nameRetryCount >= MAX_NAME_RETRIES) return;
+  const unresolvedRoomIds = Object.entries(map)
+    .filter(([, name]) => isUnresolvedName(name))
+    .map(([id]) => id);
+  if (unresolvedRoomIds.length === 0) {
+    nameRetryCount = 0; // all resolved — reset for future rooms
+    return;
+  }
+  clearTimeout(nameRetryTimer);
+  const delay = NAME_RETRY_BASE_MS * Math.pow(2, nameRetryCount);
+  nameRetryTimer = setTimeout(() => {
+    nameRetryCount++;
+    chatStore.clearProfileCache(unresolvedRoomIds);
+    chatStore.loadProfilesForRoomIds(unresolvedRoomIds);
+  }, delay);
+}, { immediate: true });
+
+onUnmounted(() => clearTimeout(nameRetryTimer));
 
 /** Format last message preview — delegated to shared composable */
 
