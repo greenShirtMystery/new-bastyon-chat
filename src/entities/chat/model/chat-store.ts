@@ -1067,10 +1067,12 @@ export const useChatStore = defineStore(NAMESPACE, () => {
 
   /** Load user profiles for members of specific rooms (viewport-based lazy loading).
    *  Uses Matrix SDK addresses when available (most complete), falls back to ChatRoom.members.
-   *  Only marks a room as "requested" if we actually found addresses to load or all are cached. */
+   *  Only marks a room as "requested" if we actually found addresses to load or all are cached.
+   *  On batch load failure, unblocks affected rooms so retry can happen on next call. */
   const loadProfilesForRoomIds = (roomIds: string[]) => {
     const uStore = useUserStore();
     const addressesToLoad: string[] = [];
+    const roomsInThisBatch: string[] = [];
     for (const roomId of roomIds) {
       if (profilesRequestedForRooms.has(roomId)) continue;
 
@@ -1078,6 +1080,7 @@ export const useChatStore = defineStore(NAMESPACE, () => {
       const sdkAddrs = matrixRoomAddresses.get(roomId);
       if (sdkAddrs && sdkAddrs.length > 0) {
         profilesRequestedForRooms.add(roomId);
+        roomsInThisBatch.push(roomId);
         for (const addr of sdkAddrs) {
           if (!uStore.users[addr]) addressesToLoad.push(addr);
         }
@@ -1098,10 +1101,16 @@ export const useChatStore = defineStore(NAMESPACE, () => {
         } catch { /* ignore invalid hex */ }
       }
       // Only mark as requested if we found member addresses (otherwise retry later when members load)
-      if (foundAddrs) profilesRequestedForRooms.add(roomId);
+      if (foundAddrs) {
+        profilesRequestedForRooms.add(roomId);
+        roomsInThisBatch.push(roomId);
+      }
     }
     if (addressesToLoad.length > 0) {
-      uStore.loadUsersBatch([...new Set(addressesToLoad)]);
+      uStore.loadUsersBatch([...new Set(addressesToLoad)]).catch(() => {
+        // Unblock rooms so they can be retried on next viewport load
+        for (const id of roomsInThisBatch) profilesRequestedForRooms.delete(id);
+      });
     }
   };
 
@@ -2499,9 +2508,11 @@ export const useChatStore = defineStore(NAMESPACE, () => {
       let msgCount = countMessages(timelineEvents);
 
       if (msgCount < MIN_MESSAGES) {
-        // Retry once if timeline is completely empty — sync may not have populated it yet
+        // Brief yield if timeline is empty — sync may not have populated it yet
         if (timelineEvents.length === 0) {
-          await new Promise(r => setTimeout(r, 1500));
+          await new Promise(r => setTimeout(r, 300));
+          timelineEvents = getTimelineEvents(matrixRoom);
+          msgCount = countMessages(timelineEvents);
         }
 
         // Keep scrolling back until we have enough messages or hit the beginning

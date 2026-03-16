@@ -379,15 +379,21 @@ watch(
       if (isStale()) return;
 
       // If still no messages, Matrix may not have synced yet.
-      // Keep skeleton visible and wait for messages to arrive (up to 8s).
+      // Keep skeleton visible and wait reactively for messages to arrive (up to 8s).
       if (chatStore.activeMessages.length === 0) {
         const SYNC_WAIT_MS = 8_000;
-        const POLL_MS = 300;
-        const deadline = Date.now() + SYNC_WAIT_MS;
-        while (Date.now() < deadline && chatStore.activeMessages.length === 0) {
-          await new Promise(r => setTimeout(r, POLL_MS));
-          if (isStale()) return;
-        }
+        await new Promise<void>((resolve) => {
+          const timer = setTimeout(resolve, SYNC_WAIT_MS);
+          const stopWatch = watch(
+            () => chatStore.activeMessages.length,
+            (len) => {
+              if (len > 0) { clearTimeout(timer); stopWatch(); resolve(); }
+            },
+          );
+          // Also clean up watcher on timeout
+          setTimeout(() => stopWatch(), SYNC_WAIT_MS + 50);
+        });
+        if (isStale()) return;
       }
 
       loading.value = false;
