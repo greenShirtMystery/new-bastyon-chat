@@ -3,6 +3,7 @@
 // ---------------------------------------------------------------------------
 
 export { ChatDatabase } from "./schema";
+export { useLiveQuery } from "./use-live-query";
 export type {
   LocalRoom,
   LocalMessage,
