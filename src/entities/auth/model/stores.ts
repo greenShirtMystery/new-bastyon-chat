@@ -12,6 +12,7 @@ import {
 import type { UserWithPrivateKeys } from "@/entities/matrix/model/matrix-crypto";
 import { useCallService } from "@/features/video-calls/model/call-service";
 import { getmatrixid } from "@/shared/lib/matrix/functions";
+import { initChatDb } from "@/shared/lib/local-db";
 import { useLocalStorage } from "@/shared/lib/browser";
 import { convertToHexString } from "@/shared/lib/convert-to-hex-string";
 import { mergeObjects } from "@/shared/lib/merge-objects";
@@ -254,6 +255,19 @@ export const useAuthStore = defineStore(NAMESPACE, () => {
       // Step 7: Wire Matrix events → chat store
       matrixError.value = "Wiring events...";
       const chatStore = useChatStore();
+
+      // Step 6.5: Initialize local-first database
+      const chatDbKit = initChatDb(
+        LSAuthData.address!,
+        async (roomId: string) => pcrypto.value?.rooms[roomId],
+      );
+      chatStore.setChatDbKit(chatDbKit);
+
+      // Wire SyncEngine connectivity
+      if (typeof window !== "undefined") {
+        window.addEventListener("online", () => chatDbKit.syncEngine.setOnline(true));
+        window.addEventListener("offline", () => chatDbKit.syncEngine.setOnline(false));
+      }
       chatStore.setHelpers(matrixKit.value!, cryptoInstance);
 
       matrixService.setHandlers({

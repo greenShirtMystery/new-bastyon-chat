@@ -10,6 +10,7 @@ import { useUserStore } from "@/entities/user/model";
 import { defineStore } from "pinia";
 import { computed, ref, shallowRef, triggerRef } from "vue";
 
+import type { ChatDbKit } from "@/shared/lib/local-db";
 import type { ChatRoom, FileInfo, LinkPreview, Message, PollInfo, ReplyTo, TransferInfo } from "./types";
 import { MessageStatus, MessageType } from "./types";
 
@@ -476,6 +477,17 @@ export const useChatStore = defineStore(NAMESPACE, () => {
   // References to matrix helpers (set by auth store after init)
   const matrixKitRef = shallowRef<MatrixKit | null>(null);
   const pcryptoRef = shallowRef<Pcrypto | null>(null);
+  const chatDbKitRef = shallowRef<ChatDbKit | null>(null);
+
+  const setChatDbKit = (kit: ChatDbKit) => {
+    chatDbKitRef.value = kit;
+  };
+
+  /** Get the Dexie kit (throws if not initialized) */
+  const getDbKit = (): ChatDbKit => {
+    if (!chatDbKitRef.value) throw new Error("[chat-store] ChatDbKit not initialized");
+    return chatDbKitRef.value;
+  };
 
   const activeRoom = computed(() => {
     // Access rooms.value to register Vue reactive dependency
@@ -3271,5 +3283,8 @@ export const useChatStore = defineStore(NAMESPACE, () => {
     updateMessageId,
     updateMessageIdAndStatus,
     updateMessageStatus,
+    chatDbKitRef,
+    setChatDbKit,
+    getDbKit,
   };
 });
