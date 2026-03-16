@@ -505,6 +505,16 @@ export const useChatStore = defineStore(NAMESPACE, () => {
     [] as import("@/shared/lib/local-db").LocalMessage[],
   );
 
+  // Dexie-backed room list (auto-updates on any room table write)
+  const dexieRooms = useLiveQuery(
+    () => {
+      if (!chatDbKitRef.value) return [] as import("@/shared/lib/local-db").LocalRoom[];
+      return chatDbKitRef.value.rooms.getAllRooms();
+    },
+    () => chatDbKitRef.value,
+    [] as import("@/shared/lib/local-db").LocalRoom[],
+  );
+
   const activeRoom = computed(() => {
     // Access rooms.value to register Vue reactive dependency
     void rooms.value;
@@ -524,22 +534,52 @@ export const useChatStore = defineStore(NAMESPACE, () => {
     activeMessages.value.filter(m => m.type === MessageType.image || m.type === MessageType.video)
   );
 
-  const sortedRooms = computed(() =>
-    [...rooms.value]
+  const sortedRooms = computed(() => {
+    // Use Dexie rooms if available, fallback to old shallowRef during migration
+    let source: ChatRoom[];
+    if (chatDbKitRef.value && dexieRooms.value.length > 0) {
+      source = dexieRooms.value.map(lr => ({
+        id: lr.id,
+        name: lr.name,
+        avatar: lr.avatar,
+        isGroup: lr.isGroup,
+        members: lr.members,
+        membership: lr.membership as "join" | "invite",
+        unreadCount: lr.unreadCount,
+        topic: lr.topic,
+        updatedAt: lr.updatedAt,
+        lastMessage: lr.lastMessagePreview ? {
+          id: "",
+          roomId: lr.id,
+          senderId: lr.lastMessageSenderId ?? "",
+          content: lr.lastMessagePreview,
+          timestamp: lr.lastMessageTimestamp ?? lr.updatedAt,
+          status: MessageStatus.sent,
+          type: lr.lastMessageType ?? MessageType.text,
+        } as Message : undefined,
+      } as ChatRoom));
+    } else {
+      source = rooms.value;
+    }
+
+    return [...source]
       .filter(r => !deletedRoomIds.value.has(r.id))
       .sort((a, b) => {
-        // Pinned rooms first
         const aPinned = pinnedRoomIds.value.has(a.id) ? 1 : 0;
         const bPinned = pinnedRoomIds.value.has(b.id) ? 1 : 0;
         if (aPinned !== bPinned) return bPinned - aPinned;
-        // Chronological — most recent activity first (matches original bastyon-chat)
         return b.updatedAt - a.updatedAt;
-      })
-  );
+      });
+  });
 
-  const totalUnread = computed(() =>
-    rooms.value.reduce((sum, r) => sum + r.unreadCount, 0)
-  );
+  const totalUnread = computed(() => {
+    if (chatDbKitRef.value && dexieRooms.value.length > 0) {
+      return dexieRooms.value
+        .filter(r => !deletedRoomIds.value.has(r.id))
+        .reduce((sum, r) => sum + r.unreadCount, 0);
+    }
+    return rooms.value.reduce((sum, r) => sum + r.unreadCount, 0);
+  });
 
   /** Set helper references from auth store */
   const setHelpers = (kit: MatrixKit, crypto: Pcrypto) => {
