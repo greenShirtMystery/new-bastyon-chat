@@ -10,7 +10,7 @@ import { useUserStore } from "@/entities/user/model";
 import { defineStore } from "pinia";
 import { computed, ref, shallowRef, triggerRef } from "vue";
 
-import type { ChatDbKit } from "@/shared/lib/local-db";
+import type { ChatDbKit, ParsedMessage, LocalRoom } from "@/shared/lib/local-db";
 import type { ChatRoom, FileInfo, LinkPreview, Message, PollInfo, ReplyTo, TransferInfo } from "./types";
 import { MessageStatus, MessageType } from "./types";
 
@@ -647,6 +647,30 @@ export const useChatStore = defineStore(NAMESPACE, () => {
     rooms.value = newRooms;
     rebuildRoomsMap();
 
+    // Dual-write: persist rooms to Dexie
+    if (chatDbKitRef.value) {
+      const localRooms: LocalRoom[] = newRooms.map(r => ({
+        id: r.id,
+        name: r.name,
+        avatar: r.avatar,
+        isGroup: r.isGroup,
+        members: r.members,
+        membership: (r.membership ?? "join") as "join" | "invite" | "leave",
+        unreadCount: r.unreadCount,
+        topic: r.topic || "",
+        updatedAt: r.updatedAt,
+        syncedAt: Date.now(),
+        hasMoreHistory: true,
+        lastMessagePreview: r.lastMessage?.content?.slice(0, 200),
+        lastMessageTimestamp: r.lastMessage?.timestamp,
+        lastMessageSenderId: r.lastMessage?.senderId,
+        lastMessageType: r.lastMessage?.type,
+      }));
+      chatDbKitRef.value.rooms.bulkUpsertRooms(localRooms).catch(e => {
+        console.warn("[chat-store] Dexie room sync failed:", e);
+      });
+    }
+
     // Build user display name cache from room members (sync — no API calls)
     // Only run loadMissingMembers once AND only when we have actual rooms
     const willLoadMembers = !membersLoadedOnce && interactiveRooms.length > 0;
@@ -811,6 +835,37 @@ export const useChatStore = defineStore(NAMESPACE, () => {
 
     if (changed.size > 0 || removed) {
       triggerRef(rooms);
+    }
+
+    // Dual-write: persist changed rooms to Dexie
+    if (chatDbKitRef.value && changed.size > 0) {
+      const changedLocalRooms: LocalRoom[] = [];
+      for (const roomId of changed) {
+        const r = roomsMap.get(roomId);
+        if (!r) continue;
+        changedLocalRooms.push({
+          id: r.id,
+          name: r.name,
+          avatar: r.avatar,
+          isGroup: r.isGroup,
+          members: r.members,
+          membership: (r.membership ?? "join") as "join" | "invite" | "leave",
+          unreadCount: r.unreadCount,
+          topic: r.topic || "",
+          updatedAt: r.updatedAt,
+          syncedAt: Date.now(),
+          hasMoreHistory: true,
+          lastMessagePreview: r.lastMessage?.content?.slice(0, 200),
+          lastMessageTimestamp: r.lastMessage?.timestamp,
+          lastMessageSenderId: r.lastMessage?.senderId,
+          lastMessageType: r.lastMessage?.type,
+        });
+      }
+      if (changedLocalRooms.length > 0) {
+        chatDbKitRef.value.rooms.bulkUpsertRooms(changedLocalRooms).catch(e => {
+          console.warn("[chat-store] Dexie incremental room sync failed:", e);
+        });
+      }
     }
 
     // Update display names only for changed rooms
@@ -2403,6 +2458,32 @@ export const useChatStore = defineStore(NAMESPACE, () => {
 
       setMessages(roomId, msgs);
 
+      // Dual-write: persist all parsed messages to Dexie
+      if (chatDbKitRef.value && msgs.length > 0) {
+        const parsedMessages: ParsedMessage[] = msgs
+          .filter(m => m.id && !m.id.startsWith("msg_")) // Skip optimistic temp messages
+          .map(m => ({
+            eventId: m.id,
+            roomId: m.roomId,
+            senderId: m.senderId,
+            content: m.content,
+            timestamp: m.timestamp,
+            type: m.type,
+            fileInfo: m.fileInfo,
+            replyTo: m.replyTo,
+            forwardedFrom: m.forwardedFrom,
+            callInfo: m.callInfo,
+            pollInfo: m.pollInfo,
+            transferInfo: m.transferInfo,
+            linkPreview: m.linkPreview,
+            deleted: m.deleted,
+            systemMeta: m.systemMeta,
+          }));
+        chatDbKitRef.value.eventWriter.writeMessages(parsedMessages).catch(e => {
+          console.warn("[chat-store] EventWriter.writeMessages failed:", e);
+        });
+      }
+
       // Load server-synced pinned messages after messages are available
       if (roomId === activeRoomId.value) {
         await loadPinnedMessages(roomId);
@@ -2576,6 +2657,33 @@ export const useChatStore = defineStore(NAMESPACE, () => {
     triggerRef(messages);
   };
 
+  /** Dual-write: persist a parsed message to Dexie alongside the in-memory store */
+  const dexieWriteMessage = (msg: Message, roomId: string, raw: Record<string, unknown>) => {
+    if (!chatDbKitRef.value) return;
+    const parsed: ParsedMessage = {
+      eventId: raw.event_id as string,
+      roomId,
+      senderId: msg.senderId,
+      content: msg.content,
+      timestamp: msg.timestamp,
+      type: msg.type,
+      clientId: (raw.unsigned as any)?.transaction_id,
+      fileInfo: msg.fileInfo,
+      replyTo: msg.replyTo,
+      forwardedFrom: msg.forwardedFrom,
+      callInfo: msg.callInfo,
+      pollInfo: msg.pollInfo,
+      transferInfo: msg.transferInfo,
+      linkPreview: msg.linkPreview,
+      deleted: msg.deleted,
+      systemMeta: msg.systemMeta,
+    };
+    const myAddr = useAuthStore().address ?? "";
+    chatDbKitRef.value.eventWriter.writeMessage(parsed, myAddr, activeRoomId.value).catch(e => {
+      console.warn("[chat-store] EventWriter.writeMessage failed:", e);
+    });
+  };
+
   /** Handle incoming timeline event from Matrix sync */
   const handleTimelineEvent = async (event: unknown, roomId: string) => {
     try {
@@ -2605,6 +2713,7 @@ export const useChatStore = defineStore(NAMESPACE, () => {
         const sysMsg = buildSystemMessage(raw, roomId);
         if (sysMsg) {
           addMessage(roomId, sysMsg);
+          dexieWriteMessage(sysMsg, roomId, raw);
         }
         return;
       }
@@ -2636,6 +2745,7 @@ export const useChatStore = defineStore(NAMESPACE, () => {
           callInfo: { callType: isVideo ? "video" : "voice", missed: reason === "invite_timeout", duration: Math.round(durationMs / 1000) },
         };
         addMessage(roomId, sysMsg);
+        dexieWriteMessage(sysMsg, roomId, raw);
         return;
       }
 
@@ -2659,7 +2769,7 @@ export const useChatStore = defineStore(NAMESPACE, () => {
           text: (a.body as string) ?? ((a["org.matrix.msc1767.text"] as string) ?? ""),
         }));
         const pollInfo: PollInfo = { question, options, votes: {} };
-        addMessage(roomId, {
+        const pollMsg: Message = {
           id: raw.event_id as string,
           roomId,
           senderId: matrixIdToAddress(raw.sender as string),
@@ -2668,7 +2778,9 @@ export const useChatStore = defineStore(NAMESPACE, () => {
           status: MessageStatus.sent,
           type: MessageType.poll,
           pollInfo,
-        });
+        };
+        addMessage(roomId, pollMsg);
+        dexieWriteMessage(pollMsg, roomId, raw);
         return;
       }
 
@@ -2768,7 +2880,7 @@ export const useChatStore = defineStore(NAMESPACE, () => {
       const mtype0 = content.msgtype as string;
       if (mtype0 === "m.notice" && content.txId) {
         const txBody = (content.body as string) ?? `Sent ${content.amount} PKOIN`;
-        addMessage(roomId, {
+        const transferMsg: Message = {
           id: raw.event_id as string,
           roomId,
           senderId: matrixIdToAddress(raw.sender as string),
@@ -2783,7 +2895,9 @@ export const useChatStore = defineStore(NAMESPACE, () => {
             to: content.to as string,
             message: txBody || undefined,
           },
-        });
+        };
+        addMessage(roomId, transferMsg);
+        dexieWriteMessage(transferMsg, roomId, raw);
         if (roomId === activeRoomId.value) {
           sendReadReceiptIfVisible(roomId, event);
         }
@@ -2814,7 +2928,7 @@ export const useChatStore = defineStore(NAMESPACE, () => {
         try {
           const transfer = JSON.parse(body);
           const displayBody = transfer.message || `Sent ${transfer.amount} PKOIN`;
-          addMessage(roomId, {
+          const encTransferMsg: Message = {
             id: raw.event_id as string,
             roomId,
             senderId: matrixIdToAddress(raw.sender as string),
@@ -2829,7 +2943,9 @@ export const useChatStore = defineStore(NAMESPACE, () => {
               to: transfer.to as string,
               message: transfer.message || undefined,
             },
-          });
+          };
+          addMessage(roomId, encTransferMsg);
+          dexieWriteMessage(encTransferMsg, roomId, raw);
           if (roomId === activeRoomId.value) {
             sendReadReceiptIfVisible(roomId, event);
           }
@@ -2904,6 +3020,7 @@ export const useChatStore = defineStore(NAMESPACE, () => {
       };
 
       addMessage(roomId, message);
+      dexieWriteMessage(message, roomId, raw);
 
       // Auto-send read receipt if this room is currently active (visibility-aware)
       if (roomId === activeRoomId.value) {
