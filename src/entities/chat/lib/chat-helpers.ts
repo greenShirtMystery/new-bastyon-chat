@@ -167,7 +167,7 @@ export function isUnresolvedName(name: string): boolean {
   if (/^[a-f0-9]{8}\u2026/i.test(name)) return true; // truncated hex (8chars…)
   if (/^@[a-f0-9]{20,}:/i.test(name)) return true; // raw Matrix ID @hexid:server
   if (/^![a-zA-Z0-9]+:/i.test(name)) return true; // Matrix room ID !abc:server
-  if (/^[A-Za-z0-9]{26,}$/.test(name)) return true; // raw Bastyon address (base58, 26-34 chars)
+  if (/^[A-Za-z0-9]{20,}$/.test(name)) return true; // raw Bastyon address (base58, 20+ chars)
   return false;
 }
 
