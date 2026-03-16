@@ -366,9 +366,22 @@ watch(
       loading.value = true;
       try {
         await loadMessages(roomId);
-      } finally {
-        loading.value = false;
+      } catch { /* ignore */ }
+      if (isStale()) return;
+
+      // If still no messages, Matrix may not have synced yet.
+      // Keep skeleton visible and wait for messages to arrive (up to 8s).
+      if (chatStore.activeMessages.length === 0) {
+        const SYNC_WAIT_MS = 8_000;
+        const POLL_MS = 300;
+        const deadline = Date.now() + SYNC_WAIT_MS;
+        while (Date.now() < deadline && chatStore.activeMessages.length === 0) {
+          await new Promise(r => setTimeout(r, POLL_MS));
+          if (isStale()) return;
+        }
       }
+
+      loading.value = false;
       if (isStale()) return;
 
       await nextTick();
@@ -391,45 +404,46 @@ watch(
   { immediate: true },
 );
 
-// Auto-scroll only if user is near bottom; otherwise increment new message count.
-// Exception: when the newly added message is our own (we sent it), always scroll to bottom
-// so we see the sent message even if we were scrolled up.
-// Also track new real-time messages for entrance animation
-watch(
-  () => chatStore.activeMessages.length,
-  (newLen, oldLen) => {
-    // Skip during room switch, pagination, or bulk loads
-    if (switching.value || loadingMore.value) return;
+// Track the last message's identity to detect real appends
+// (replaces unreliable length-based watcher that missed setMessages replacements)
+const lastMessageIdentity = computed(() => {
+  const msgs = chatStore.activeMessages;
+  if (!msgs.length) return null;
+  const last = msgs[msgs.length - 1];
+  return `${last.id}:${msgs.length}`;
+});
 
-    const delta = oldLen !== undefined ? newLen - oldLen : 0;
-    if (delta > 10) return;
+watch(lastMessageIdentity, (newVal, oldVal) => {
+  if (!newVal || switching.value || loadingMore.value) return;
 
-    const msgs = chatStore.activeMessages;
-    const lastAddedIsOwn = oldLen !== undefined && delta > 0 && msgs[newLen - 1]?.senderId === authStore.address;
+  // Messages appeared for the first time (e.g. Dexie async load after room open)
+  // — always scroll to bottom so the user sees the latest messages.
+  if (!oldVal) {
+    scrollToBottom();
+    return;
+  }
 
-    if (lastAddedIsOwn) {
-      // Мы только что отправили сообщение — прокручиваем вниз, чтобы его видеть
-      scrollToBottom();
-    } else if (isNearBottom.value) {
-      scrollToBottom();
-    } else if (delta > 0) {
-      newMessageCount.value += delta;
-    }
-    // Track newly arrived messages for entrance animation (only appended, not paginated)
-    if (!loading.value && oldLen !== undefined && delta > 0) {
-      const capturedIds: string[] = [];
-      for (let i = oldLen; i < newLen; i++) {
-        if (msgs[i]) {
-          recentMessageIds.value.add(msgs[i].id);
-          capturedIds.push(msgs[i].id);
-        }
-      }
-      setTimeout(() => {
-        capturedIds.forEach(id => recentMessageIds.value.delete(id));
-      }, 350);
-    }
-  },
-);
+  const msgs = chatStore.activeMessages;
+  const lastMsg = msgs[msgs.length - 1];
+  if (!lastMsg) return;
+
+  const lastAddedIsOwn = lastMsg.senderId === authStore.address;
+
+  if (lastAddedIsOwn || isNearBottom.value) {
+    scrollToBottom();
+  } else {
+    newMessageCount.value++;
+  }
+
+  // Track newly arrived messages for entrance animation
+  if (!loading.value) {
+    recentMessageIds.value.add(lastMsg.id);
+    const capturedId = lastMsg.id;
+    setTimeout(() => {
+      recentMessageIds.value.delete(capturedId);
+    }, 350);
+  }
+});
 
 /** Remove animation class immediately after the CSS animation finishes.
  *  This prevents DynamicScroller from accidentally replaying the entrance
@@ -501,6 +515,8 @@ const waitForDomSettle = (): Promise<void> =>
 /** Load older messages and preserve scroll position */
 const doLoadMore = (roomId: string, container: HTMLElement): Promise<void> => {
   if (prefetching.value) return Promise.resolve(); // avoid race with prefetch
+  // Expand Dexie query window for instant local pagination
+  chatStore.expandMessageWindow();
   const prevHeight = container.scrollHeight;
   loadingMore.value = true;
   return chatStore.loadMoreMessages(roomId).then(async (more) => {
@@ -825,12 +841,12 @@ defineExpose({ scrollToMessage, setSearchQuery });
       </div>
     </transition>
 
-    <!-- Loading state -->
-    <MessageSkeleton v-if="loading" />
+    <!-- Loading state (show skeleton during loading OR switching while messages haven't arrived) -->
+    <MessageSkeleton v-if="loading || (switching && chatStore.activeMessages.length === 0)" />
 
-    <!-- Empty state (overlay, not v-if/v-else — avoids DynamicScroller unmount/mount blink) -->
+    <!-- Empty state (only after fully loaded + settled, not during switching) -->
     <div
-      v-if="!loading && chatStore.activeMessages.length === 0 && settled"
+      v-if="!loading && !switching && chatStore.activeMessages.length === 0 && settled"
       class="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 text-text-on-main-bg-color"
     >
       <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" class="opacity-20">

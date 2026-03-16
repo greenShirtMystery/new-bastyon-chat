@@ -30,6 +30,9 @@ export interface ParsedMessage {
   transferInfo?: TransferInfo;
   /** Present when the message is our own echo (matched by clientId) */
   clientId?: string;
+  linkPreview?: import("@/entities/chat/model/types").LinkPreview;
+  deleted?: boolean;
+  systemMeta?: { template: string; senderAddr: string; targetAddr?: string };
 }
 
 /** A parsed reaction event */
@@ -103,20 +106,25 @@ export class EventWriter {
   /**
    * Write a single incoming message to local DB.
    * Handles dedup (own echo via clientId, duplicate eventId).
-   * Returns the write result for the caller to decide on UI update.
+   * Only increments unread for messages from OTHER users in NON-ACTIVE rooms.
    */
   async writeMessage(
     parsed: ParsedMessage,
+    myAddress: string,
+    activeRoomId: string | null,
   ): Promise<"inserted" | "updated" | "duplicate"> {
     const localMsg = this.toLocalMessage(parsed);
     const result = await this.messageRepo.upsertFromServer(localMsg);
 
-    // Update room metadata if message was actually new
     if (result === "inserted" || result === "updated") {
       await this.updateRoomPreview(parsed);
     }
 
     if (result === "inserted") {
+      // Only increment unread for OTHER people's messages in NON-ACTIVE rooms
+      if (parsed.senderId !== myAddress && parsed.roomId !== activeRoomId) {
+        await this.incrementUnread(parsed.roomId);
+      }
       this.onChange?.(parsed.roomId);
     }
 
@@ -297,6 +305,9 @@ export class EventWriter {
       callInfo: parsed.callInfo,
       pollInfo: parsed.pollInfo,
       transferInfo: parsed.transferInfo,
+      linkPreview: parsed.linkPreview,
+      deleted: parsed.deleted,
+      systemMeta: parsed.systemMeta,
     };
   }
 

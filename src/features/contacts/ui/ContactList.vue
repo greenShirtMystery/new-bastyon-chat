@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, nextTick } from "vue";
+import { ref, computed, nextTick, watch, onUnmounted } from "vue";
 import { useChatStore } from "@/entities/chat";
 import type { ChatRoom, Message } from "@/entities/chat";
 import { MessageType, MessageStatus } from "@/entities/chat";
@@ -100,7 +100,10 @@ function _resolveMemberNames(room: ChatRoom, allUsers: Record<string, any>, myHe
     const addr = cachedHexDecode(hexId);
     if (/^[A-Za-z0-9]+$/.test(addr)) {
       const user = allUsers[addr];
-      if (user?.name) { names.push(user.name); continue; }
+      // Only use name if it's a real display name, not the raw address
+      if (user?.name && !isUnresolvedName(user.name) && user.name !== addr) {
+        names.push(user.name); continue;
+      }
     }
   }
 
@@ -108,26 +111,31 @@ function _resolveMemberNames(room: ChatRoom, allUsers: Record<string, any>, myHe
   if (names.length === 0 && room.avatar?.startsWith("__pocketnet__:")) {
     const avatarAddr = room.avatar.slice("__pocketnet__:".length);
     const user = allUsers[avatarAddr];
-    if (user?.name && user.name !== avatarAddr) names.push(user.name);
+    if (user?.name && !isUnresolvedName(user.name) && user.name !== avatarAddr) names.push(user.name);
   }
 
   return names;
 }
 
+/** Track which rooms have no real display name yet */
+const unresolvedRoomSet = computed(() => {
+  const set = new Set<string>();
+  const allUsers = userStore.users;
+  const myHexId = authStore.address ? hexEncode(authStore.address) : "";
+  for (const room of chatStore.sortedRooms) {
+    const resolved = _resolveMemberNames(room, allUsers, myHexId);
+    if (resolved.length === 0) set.add(room.id);
+  }
+  return set;
+});
+
+const isRoomNameUnresolved = (room: ChatRoom): boolean => unresolvedRoomSet.value.has(room.id);
+
 function _resolveRoomName(room: ChatRoom, allUsers: Record<string, any>, myHexId: string): string {
   if (!room.isGroup) {
     const names = _resolveMemberNames(room, allUsers, myHexId);
     if (names.length > 0) return names.join(", ");
-    // Fallback: show address from avatar or decoded member hex
-    if (room.avatar?.startsWith("__pocketnet__:")) {
-      return room.avatar.slice("__pocketnet__:".length);
-    }
-    const otherMembers = room.members.filter(m => m !== myHexId);
-    if (otherMembers.length > 0) {
-      const addr = cachedHexDecode(otherMembers[0]);
-      if (/^[A-Za-z0-9]+$/.test(addr)) return addr;
-    }
-    return cleanMatrixIds(room.name);
+    return room.name;
   }
   if (room.name?.startsWith("@")) return room.name.slice(1);
   if (!isUnresolvedName(room.name)) return cleanMatrixIds(room.name);
@@ -140,6 +148,29 @@ const resolveRoomName = (room: ChatRoom): string => {
   return roomNameMap.value[room.id] ?? cleanMatrixIds(room.name);
 };
 
+// --- Retry unresolved room names (up to 5 attempts with exponential backoff) ---
+let nameRetryCount = 0;
+let nameRetryTimer: ReturnType<typeof setTimeout> | undefined;
+const MAX_NAME_RETRIES = 5;
+const NAME_RETRY_BASE_MS = 2_000; // 2s, 4s, 8s, 16s, 32s
+
+watch(unresolvedRoomSet, (set) => {
+  if (nameRetryCount >= MAX_NAME_RETRIES) return;
+  const unresolvedRoomIds = [...set];
+  if (unresolvedRoomIds.length === 0) {
+    nameRetryCount = 0;
+    return;
+  }
+  clearTimeout(nameRetryTimer);
+  const delay = NAME_RETRY_BASE_MS * Math.pow(2, nameRetryCount);
+  nameRetryTimer = setTimeout(() => {
+    nameRetryCount++;
+    chatStore.clearProfileCache(unresolvedRoomIds);
+    chatStore.loadProfilesForRoomIds(unresolvedRoomIds);
+  }, delay);
+}, { immediate: true });
+
+onUnmounted(() => clearTimeout(nameRetryTimer));
 
 /** Format last message preview — delegated to shared composable */
 
@@ -419,8 +450,13 @@ const getRoomLongPress = (room: ChatRoom) => {
         >
           <!-- Avatar -->
           <div class="relative shrink-0">
+            <!-- Skeleton circle while name is unresolved and avatar is just a default letter circle -->
+            <div
+              v-if="isRoomNameUnresolved(item as ChatRoom) && !(item as ChatRoom).avatar?.startsWith('http')"
+              class="h-10 w-10 animate-pulse rounded-full bg-neutral-grad-2"
+            />
             <UserAvatar
-              v-if="(item as ChatRoom).avatar?.startsWith('__pocketnet__:')"
+              v-else-if="(item as ChatRoom).avatar?.startsWith('__pocketnet__:')"
               :address="(item as ChatRoom).avatar!.replace('__pocketnet__:', '')"
               size="md"
             />
@@ -439,7 +475,7 @@ const getRoomLongPress = (room: ChatRoom) => {
           <div class="min-w-0 flex-1">
             <!-- Name row: name + timestamp + pin/mute icons -->
             <div class="flex items-center justify-between gap-2">
-              <span v-if="isUnresolvedName(resolveRoomName(item as ChatRoom))" class="inline-block h-3.5 w-24 animate-pulse rounded bg-neutral-grad-2" />
+              <span v-if="isRoomNameUnresolved(item as ChatRoom)" class="inline-block h-3.5 w-24 animate-pulse rounded bg-neutral-grad-2" />
               <span v-else class="flex items-center gap-1 truncate text-[15px] font-medium text-text-color">
                 {{ resolveRoomName(item as ChatRoom) }}
                 <svg v-if="chatStore.pinnedRoomIds.has((item as ChatRoom).id)" width="12" height="12" viewBox="0 0 24 24" fill="currentColor" class="shrink-0 text-text-on-main-bg-color">
