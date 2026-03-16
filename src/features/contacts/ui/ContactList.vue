@@ -100,7 +100,10 @@ function _resolveMemberNames(room: ChatRoom, allUsers: Record<string, any>, myHe
     const addr = cachedHexDecode(hexId);
     if (/^[A-Za-z0-9]+$/.test(addr)) {
       const user = allUsers[addr];
-      if (user?.name) { names.push(user.name); continue; }
+      // Only use name if it's a real display name, not the raw address
+      if (user?.name && !isUnresolvedName(user.name) && user.name !== addr) {
+        names.push(user.name); continue;
+      }
     }
   }
 
@@ -108,7 +111,7 @@ function _resolveMemberNames(room: ChatRoom, allUsers: Record<string, any>, myHe
   if (names.length === 0 && room.avatar?.startsWith("__pocketnet__:")) {
     const avatarAddr = room.avatar.slice("__pocketnet__:".length);
     const user = allUsers[avatarAddr];
-    if (user?.name && user.name !== avatarAddr) names.push(user.name);
+    if (user?.name && !isUnresolvedName(user.name) && user.name !== avatarAddr) names.push(user.name);
   }
 
   return names;
@@ -438,8 +441,13 @@ const getRoomLongPress = (room: ChatRoom) => {
         >
           <!-- Avatar -->
           <div class="relative shrink-0">
+            <!-- Skeleton circle while name is unresolved and avatar is just a default letter circle -->
+            <div
+              v-if="isUnresolvedName(resolveRoomName(item as ChatRoom)) && !(item as ChatRoom).avatar?.startsWith('http')"
+              class="h-10 w-10 animate-pulse rounded-full bg-neutral-grad-2"
+            />
             <UserAvatar
-              v-if="(item as ChatRoom).avatar?.startsWith('__pocketnet__:')"
+              v-else-if="(item as ChatRoom).avatar?.startsWith('__pocketnet__:')"
               :address="(item as ChatRoom).avatar!.replace('__pocketnet__:', '')"
               size="md"
             />
