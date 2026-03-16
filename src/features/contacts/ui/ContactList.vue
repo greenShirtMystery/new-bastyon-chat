@@ -117,13 +117,24 @@ function _resolveMemberNames(room: ChatRoom, allUsers: Record<string, any>, myHe
   return names;
 }
 
+/** Track which rooms have no real display name yet */
+const unresolvedRoomSet = computed(() => {
+  const set = new Set<string>();
+  const allUsers = userStore.users;
+  const myHexId = authStore.address ? hexEncode(authStore.address) : "";
+  for (const room of chatStore.sortedRooms) {
+    const resolved = _resolveMemberNames(room, allUsers, myHexId);
+    if (resolved.length === 0) set.add(room.id);
+  }
+  return set;
+});
+
+const isRoomNameUnresolved = (room: ChatRoom): boolean => unresolvedRoomSet.value.has(room.id);
+
 function _resolveRoomName(room: ChatRoom, allUsers: Record<string, any>, myHexId: string): string {
   if (!room.isGroup) {
     const names = _resolveMemberNames(room, allUsers, myHexId);
     if (names.length > 0) return names.join(", ");
-    // No resolved display name yet — return the original room name
-    // (likely a Matrix ID or hex hash) so isUnresolvedName() keeps the
-    // skeleton placeholder visible until userStore loads the profile.
     return room.name;
   }
   if (room.name?.startsWith("@")) return room.name.slice(1);
@@ -143,13 +154,11 @@ let nameRetryTimer: ReturnType<typeof setTimeout> | undefined;
 const MAX_NAME_RETRIES = 5;
 const NAME_RETRY_BASE_MS = 2_000; // 2s, 4s, 8s, 16s, 32s
 
-watch(roomNameMap, (map) => {
+watch(unresolvedRoomSet, (set) => {
   if (nameRetryCount >= MAX_NAME_RETRIES) return;
-  const unresolvedRoomIds = Object.entries(map)
-    .filter(([, name]) => isUnresolvedName(name))
-    .map(([id]) => id);
+  const unresolvedRoomIds = [...set];
   if (unresolvedRoomIds.length === 0) {
-    nameRetryCount = 0; // all resolved — reset for future rooms
+    nameRetryCount = 0;
     return;
   }
   clearTimeout(nameRetryTimer);
@@ -443,7 +452,7 @@ const getRoomLongPress = (room: ChatRoom) => {
           <div class="relative shrink-0">
             <!-- Skeleton circle while name is unresolved and avatar is just a default letter circle -->
             <div
-              v-if="isUnresolvedName(resolveRoomName(item as ChatRoom)) && !(item as ChatRoom).avatar?.startsWith('http')"
+              v-if="isRoomNameUnresolved(item as ChatRoom) && !(item as ChatRoom).avatar?.startsWith('http')"
               class="h-10 w-10 animate-pulse rounded-full bg-neutral-grad-2"
             />
             <UserAvatar
@@ -466,7 +475,7 @@ const getRoomLongPress = (room: ChatRoom) => {
           <div class="min-w-0 flex-1">
             <!-- Name row: name + timestamp + pin/mute icons -->
             <div class="flex items-center justify-between gap-2">
-              <span v-if="isUnresolvedName(resolveRoomName(item as ChatRoom))" class="inline-block h-3.5 w-24 animate-pulse rounded bg-neutral-grad-2" />
+              <span v-if="isRoomNameUnresolved(item as ChatRoom)" class="inline-block h-3.5 w-24 animate-pulse rounded bg-neutral-grad-2" />
               <span v-else class="flex items-center gap-1 truncate text-[15px] font-medium text-text-color">
                 {{ resolveRoomName(item as ChatRoom) }}
                 <svg v-if="chatStore.pinnedRoomIds.has((item as ChatRoom).id)" width="12" height="12" viewBox="0 0 24 24" fill="currentColor" class="shrink-0 text-text-on-main-bg-color">
