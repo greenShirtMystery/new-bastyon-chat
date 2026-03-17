@@ -492,7 +492,7 @@ const getRoomLongPress = (room: ChatRoom) => {
                 :class="(item as ChatRoom).unreadCount > 0 ? 'text-color-bg-ac' : 'text-text-on-main-bg-color'"
               >
                 <MessageStatusIcon
-                  v-if="(item as ChatRoom).lastMessage!.senderId === authStore.address && (item as ChatRoom).lastMessage!.type !== MessageType.system"
+                  v-if="(item as ChatRoom).lastMessage!.senderId === authStore.address && (item as ChatRoom).lastMessage!.type !== MessageType.system && (item as ChatRoom).lastMessage!.content !== ''"
                   :status="(item as ChatRoom).lastMessage!.status"
                 />
                 {{ formatRelativeTime(new Date((item as ChatRoom).lastMessage!.timestamp)) }}
