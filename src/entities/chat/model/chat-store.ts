@@ -2975,46 +2975,48 @@ export const useChatStore = defineStore(NAMESPACE, () => {
         return;
       }
 
-      // Own-echo dedup: when Dexie is active, our echo is handled entirely
-      // by upsertFromServer (clientId match via transaction_id). Skip the
-      // in-memory addMessage path to avoid creating a visual duplicate.
-      // The dexieWriteMessage call below still runs to ensure the echo
-      // is reconciled in Dexie.
+      // Own-echo dedup: the bastyon Matrix SDK does NOT set
+      // unsigned.transaction_id on echoes. Instead it emits local events
+      // with ~!roomId:uuid format before the server assigns a real $eventId.
+      // When Dexie is active, pending messages are in Dexie (not in-memory).
+      // Skip ALL own echoes — confirmSent() handles the reconciliation.
       const matrixService = getMatrixClientService();
       const myUserId = matrixService.getUserId();
-      const txnId = (raw.unsigned as any)?.transaction_id;
-      const isOwnMessage = myUserId && raw.sender === myUserId;
-      // DEBUG: trace echo dedup decision
-      if (isOwnMessage) {
-        console.log("[DEDUP-DEBUG] Own message echo:", {
-          eventId: raw.event_id,
-          txnId,
-          unsigned: raw.unsigned,
-          hasDexie: !!chatDbKitRef.value,
-          sender: raw.sender,
-          myUserId,
-        });
-      }
-      const isOwnEcho = isOwnMessage && txnId;
-      if (isOwnEcho && chatDbKitRef.value) {
-        // Dexie path: let upsertFromServer handle dedup via clientId
-        dexieWriteMessage(
-          {
-            id: raw.event_id as string,
-            roomId,
-            senderId: matrixIdToAddress(raw.sender as string),
-            content: "",
-            timestamp: (raw.origin_server_ts as number) ?? Date.now(),
-            status: MessageStatus.sent,
-            type: MessageType.text,
-          },
-          roomId,
-          raw,
-        );
-        return;
-      }
-      // Legacy path: check in-memory pending messages
       if (myUserId && raw.sender === myUserId) {
+        if (chatDbKitRef.value) {
+          // Dexie path: check if there are any pending/syncing messages in this room.
+          // If yes, this echo is for one of them — skip it entirely.
+          // confirmSent() will update the pending row with the real eventId.
+          // If the echo has a real $eventId and confirmSent already ran,
+          // upsertFromServer will catch it as "duplicate" by eventId.
+          const pendingMsgs = await chatDbKitRef.value.messages.getPendingMessages(roomId);
+          if (pendingMsgs.length > 0) {
+            return;
+          }
+          // No pending messages — could be from another device or confirmSent
+          // already ran. Let upsertFromServer handle dedup by eventId.
+          // Only write to Dexie, skip in-memory addMessage to avoid duplicates.
+          const eventId = raw.event_id as string;
+          // Skip local SDK event IDs (~! prefix) — the real $ event will follow
+          if (eventId.startsWith("~")) {
+            return;
+          }
+          dexieWriteMessage(
+            {
+              id: eventId,
+              roomId,
+              senderId: matrixIdToAddress(raw.sender as string),
+              content: "",
+              timestamp: (raw.origin_server_ts as number) ?? Date.now(),
+              status: MessageStatus.sent,
+              type: MessageType.text,
+            },
+            roomId,
+            raw,
+          );
+          return;
+        }
+        // Legacy path: check in-memory pending messages
         const roomMsgs = messages.value[roomId];
         const hasPending = roomMsgs?.some(
           (m) => m.senderId === matrixIdToAddress(myUserId) && m.status === MessageStatus.sending
