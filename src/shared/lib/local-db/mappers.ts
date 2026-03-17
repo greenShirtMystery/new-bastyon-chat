@@ -38,7 +38,7 @@ export function localToMessages(locals: LocalMessage[]): Message[] {
   return locals.map(localToMessage);
 }
 
-function localStatusToMessageStatus(status: LocalMessageStatus): MessageStatus {
+export function localStatusToMessageStatus(status: LocalMessageStatus): MessageStatus {
   switch (status) {
     case "pending":
     case "syncing":

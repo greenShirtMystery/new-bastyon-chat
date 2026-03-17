@@ -11,7 +11,7 @@ import { defineStore } from "pinia";
 import { computed, ref, shallowRef, triggerRef } from "vue";
 
 import type { ChatDbKit, ParsedMessage, LocalRoom } from "@/shared/lib/local-db";
-import { useLiveQuery, localToMessages } from "@/shared/lib/local-db";
+import { useLiveQuery, localToMessages, messageStatusToLocal, localStatusToMessageStatus } from "@/shared/lib/local-db";
 import type { ChatRoom, FileInfo, LinkPreview, Message, PollInfo, ReplyTo, TransferInfo } from "./types";
 import { MessageStatus, MessageType } from "./types";
 
@@ -549,7 +549,9 @@ export const useChatStore = defineStore(NAMESPACE, () => {
           senderId: lr.lastMessageSenderId ?? "",
           content: lr.lastMessagePreview,
           timestamp: lr.lastMessageTimestamp ?? lr.updatedAt,
-          status: MessageStatus.sent,
+          status: lr.lastMessageStatus
+            ? localStatusToMessageStatus(lr.lastMessageStatus)
+            : MessageStatus.sent,
           type: lr.lastMessageType ?? MessageType.text,
         } as Message : undefined,
       } as ChatRoom));
@@ -718,6 +720,9 @@ export const useChatStore = defineStore(NAMESPACE, () => {
         lastMessageTimestamp: r.lastMessage?.timestamp,
         lastMessageSenderId: r.lastMessage?.senderId,
         lastMessageType: r.lastMessage?.type,
+        lastMessageStatus: r.lastMessage?.status
+          ? messageStatusToLocal(r.lastMessage.status)
+          : undefined,
       }));
       chatDbKitRef.value.rooms.bulkUpsertRooms(localRooms).catch(e => {
         console.warn("[chat-store] Dexie room sync failed:", e);
@@ -927,6 +932,9 @@ export const useChatStore = defineStore(NAMESPACE, () => {
           lastMessageTimestamp: r.lastMessage?.timestamp,
           lastMessageSenderId: r.lastMessage?.senderId,
           lastMessageType: r.lastMessage?.type,
+          lastMessageStatus: r.lastMessage?.status
+            ? messageStatusToLocal(r.lastMessage.status)
+            : undefined,
         });
       }
       if (changedLocalRooms.length > 0) {
