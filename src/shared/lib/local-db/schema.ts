@@ -49,6 +49,10 @@ export interface LocalRoom {
   members: string[];             // hex-encoded Bastyon addresses
   membership: "join" | "invite" | "leave";
   unreadCount: number;
+  /** Watermark: timestamp of last inbound message WE have read (0 = unread) */
+  lastReadInboundTs: number;
+  /** Watermark: timestamp of our last outbound message the OTHER party has read (0 = unread) */
+  lastReadOutboundTs: number;
   topic?: string;
   updatedAt: number;             // timestamp of last activity
 
@@ -272,6 +276,40 @@ export class ChatDatabase extends Dexie {
         await messages.bulkDelete(toDelete);
         console.log(`[ChatDB] Dedup migration: removed ${toDelete.length} duplicate/orphaned messages`);
       }
+    });
+
+    // Version 4: add read watermarks to rooms, backfill from message statuses
+    this.version(4).stores({
+      rooms: "id, updatedAt, membership",
+      messages: "++localId, eventId, clientId, [roomId+timestamp], [roomId+status], senderId",
+      users: "address, updatedAt",
+      pendingOps: "++id, [roomId+createdAt], status",
+      syncState: "key",
+      attachments: "++id, messageLocalId, status",
+      decryptionQueue: "++id, eventId, roomId, status, [status+nextAttemptAt]",
+    }).upgrade(async (tx) => {
+      const rooms = tx.table("rooms");
+      const messages = tx.table("messages");
+
+      const allRooms = await rooms.toArray();
+      for (const room of allRooms) {
+        // Backfill outbound watermark: find the latest "read" message we sent
+        const readMsgs = await messages
+          .where("[roomId+status]")
+          .equals([room.id, "read"])
+          .toArray();
+        const latestRead = readMsgs.reduce(
+          (max: number, m: any) => (m.timestamp > max ? m.timestamp : max),
+          0,
+        );
+
+        await rooms.update(room.id, {
+          lastReadInboundTs: 0,
+          lastReadOutboundTs: latestRead,
+        });
+      }
+
+      console.log(`[ChatDB] Watermark migration: backfilled ${allRooms.length} rooms`);
     });
   }
 }
