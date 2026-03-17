@@ -2729,49 +2729,102 @@ export const useChatStore = defineStore(NAMESPACE, () => {
 
   /** Set the server-confirmed event ID for an own reaction */
   const setReactionEventId = (roomId: string, messageId: string, emoji: string, eventId: string) => {
+    // In-memory update (fallback path)
     const roomMessages = messages.value[roomId];
-    if (!roomMessages) return;
-    const msg = roomMessages.find(m => m.id === messageId);
-    if (msg?.reactions?.[emoji]) {
-      msg.reactions[emoji].myEventId = eventId;
-      triggerRef(messages);
+    if (roomMessages) {
+      const msg = roomMessages.find(m => m.id === messageId);
+      if (msg?.reactions?.[emoji]) {
+        msg.reactions[emoji].myEventId = eventId;
+        triggerRef(messages);
+      }
+    }
+
+    // Dexie write: persist the server event ID so removal works
+    if (chatDbKitRef.value) {
+      chatDbKitRef.value.messages.getByEventId(messageId).then(local => {
+        if (!local?.reactions?.[emoji]) return;
+        local.reactions[emoji].myEventId = eventId;
+        return chatDbKitRef.value!.messages.updateReactions(messageId, local.reactions);
+      }).catch(() => {});
     }
   };
 
   /** Optimistic add: instantly show a reaction before server confirms */
   const optimisticAddReaction = (roomId: string, messageId: string, emoji: string, userAddress: string) => {
+    // In-memory update (fallback path)
     const roomMessages = messages.value[roomId];
-    if (!roomMessages) return;
-    const msg = roomMessages.find(m => m.id === messageId);
-    if (!msg) return;
-    if (!msg.reactions) msg.reactions = {};
-    if (!msg.reactions[emoji]) {
-      msg.reactions[emoji] = { count: 0, users: [] };
+    if (roomMessages) {
+      const msg = roomMessages.find(m => m.id === messageId);
+      if (msg) {
+        if (!msg.reactions) msg.reactions = {};
+        if (!msg.reactions[emoji]) {
+          msg.reactions[emoji] = { count: 0, users: [] };
+        }
+        const rd = msg.reactions[emoji];
+        if (!rd.users.includes(userAddress)) {
+          rd.users.push(userAddress);
+          rd.count++;
+        }
+        rd.myEventId = "__optimistic__";
+        triggerRef(messages);
+      }
     }
-    const rd = msg.reactions[emoji];
-    if (!rd.users.includes(userAddress)) {
-      rd.users.push(userAddress);
-      rd.count++;
+
+    // Dexie write: liveQuery will auto-update UI
+    if (chatDbKitRef.value) {
+      chatDbKitRef.value.messages.getByEventId(messageId).then(local => {
+        if (!local) return;
+        const reactions = local.reactions ?? {};
+        if (!reactions[emoji]) {
+          reactions[emoji] = { count: 0, users: [] };
+        }
+        const rd = reactions[emoji];
+        if (!rd.users.includes(userAddress)) {
+          rd.users.push(userAddress);
+          rd.count = rd.users.length;
+        }
+        // Don't overwrite a real server ID if echo arrived before this async write
+        if (!rd.myEventId || !rd.myEventId.startsWith("$")) {
+          rd.myEventId = "__optimistic__";
+        }
+        return chatDbKitRef.value!.messages.updateReactions(messageId, reactions);
+      }).catch(() => {});
     }
-    // myEventId will be set by applyReaction when the server echoes back
-    rd.myEventId = "__optimistic__";
-    triggerRef(messages);
   };
 
   /** Optimistic remove: instantly hide a reaction before server confirms */
   const optimisticRemoveReaction = (roomId: string, messageId: string, emoji: string, userAddress: string) => {
+    // In-memory update (fallback path)
     const roomMessages = messages.value[roomId];
-    if (!roomMessages) return;
-    const msg = roomMessages.find(m => m.id === messageId);
-    if (!msg?.reactions?.[emoji]) return;
-    const rd = msg.reactions[emoji];
-    rd.users = rd.users.filter(u => u !== userAddress);
-    rd.count = rd.users.length;
-    delete rd.myEventId;
-    if (rd.count === 0) {
-      delete msg.reactions[emoji];
+    if (roomMessages) {
+      const msg = roomMessages.find(m => m.id === messageId);
+      if (msg?.reactions?.[emoji]) {
+        const rd = msg.reactions[emoji];
+        rd.users = rd.users.filter(u => u !== userAddress);
+        rd.count = rd.users.length;
+        delete rd.myEventId;
+        if (rd.count === 0) {
+          delete msg.reactions[emoji];
+        }
+        triggerRef(messages);
+      }
     }
-    triggerRef(messages);
+
+    // Dexie write: liveQuery will auto-update UI
+    if (chatDbKitRef.value) {
+      chatDbKitRef.value.messages.getByEventId(messageId).then(local => {
+        if (!local?.reactions?.[emoji]) return;
+        const reactions = local.reactions;
+        const rd = reactions[emoji];
+        rd.users = rd.users.filter(u => u !== userAddress);
+        rd.count = rd.users.length;
+        delete rd.myEventId;
+        if (rd.count === 0) {
+          delete reactions[emoji];
+        }
+        return chatDbKitRef.value!.messages.updateReactions(messageId, reactions);
+      }).catch(() => {});
+    }
   };
 
   /** Dual-write: persist a parsed message to Dexie alongside the in-memory store */
