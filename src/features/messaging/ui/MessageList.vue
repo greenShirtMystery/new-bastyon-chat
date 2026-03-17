@@ -112,12 +112,7 @@ const handlePollEnd = (messageId: string) => {
   endPoll(messageId);
 };
 
-// Suppress ResizeObserver auto-scroll when reactions change message height
-let suppressResizeScroll = false;
-
 const handleToggleReactionWithEffect = (messageId: string, emoji: string) => {
-  suppressResizeScroll = true;
-  setTimeout(() => { suppressResizeScroll = false; }, 500);
   toggleReaction(messageId, emoji);
   if (themeStore.animatedReactions) {
     lastReactionEmoji.value = emoji;
@@ -126,8 +121,6 @@ const handleToggleReactionWithEffect = (messageId: string, emoji: string) => {
 };
 
 const handleContextReaction = (emoji: string, message: import("@/entities/chat").Message) => {
-  suppressResizeScroll = true;
-  setTimeout(() => { suppressResizeScroll = false; }, 500);
   toggleReaction(message.id, emoji);
   themeStore.addRecentEmoji(emoji);
   if (themeStore.animatedReactions) {
@@ -749,9 +742,9 @@ const attachScrollListener = () => {
         if (newHeight !== prevScrollHeight) {
           const heightDelta = newHeight - prevScrollHeight;
           prevScrollHeight = newHeight;
-          // If we were near bottom, keep us at bottom (compensate for image loads etc.)
-          // Skip when reaction toggled — user expects stable scroll position.
-          if (isNearBottom.value && heightDelta > 0 && !suppressResizeScroll) {
+          // If we were near bottom, keep us at bottom (compensate for image loads, reactions etc.)
+          // Handles both height increase (reaction added) and decrease (reaction removed).
+          if (isNearBottom.value && heightDelta !== 0) {
             el.scrollTop = el.scrollHeight + 9999;
           }
         }
