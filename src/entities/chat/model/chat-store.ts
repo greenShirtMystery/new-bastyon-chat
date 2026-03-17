@@ -2616,10 +2616,20 @@ export const useChatStore = defineStore(NAMESPACE, () => {
             linkPreview: m.linkPreview,
             deleted: m.deleted,
             systemMeta: m.systemMeta,
+            reactions: m.reactions,
           }));
         chatDbKitRef.value.eventWriter.writeMessages(parsedMessages).catch(e => {
           console.warn("[chat-store] EventWriter.writeMessages failed:", e);
         });
+
+        // Sync reactions to Dexie for messages that already existed (bulkInsert skips duplicates).
+        // This ensures Dexie has up-to-date reactions from the timeline.
+        const dbKit = chatDbKitRef.value;
+        for (const m of msgs) {
+          if (m.reactions && Object.keys(m.reactions).length > 0 && m.id && !m.id.startsWith("msg_")) {
+            dbKit.messages.updateReactions(m.id, m.reactions).catch(() => {});
+          }
+        }
       }
 
       // Load server-synced pinned messages after messages are available
