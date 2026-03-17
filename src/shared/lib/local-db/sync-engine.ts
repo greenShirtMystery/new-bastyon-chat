@@ -176,7 +176,7 @@ export class SyncEngine {
         };
       }
 
-      serverEventId = await matrixService.sendEncryptedText(op.roomId, encrypted);
+      serverEventId = await matrixService.sendEncryptedText(op.roomId, encrypted, op.clientId);
     } else {
       const content: Record<string, unknown> = {
         msgtype: "m.text",
@@ -193,7 +193,7 @@ export class SyncEngine {
           sender_name: payload.forwardedFrom.senderName,
         };
       }
-      serverEventId = await matrixService.sendEncryptedText(op.roomId, content);
+      serverEventId = await matrixService.sendEncryptedText(op.roomId, content, op.clientId);
     }
 
     // Update local message: pending → synced
