@@ -12,7 +12,7 @@ import { defineStore } from "pinia";
 import { computed, ref, shallowRef, triggerRef } from "vue";
 
 import type { ChatDbKit, ParsedMessage, LocalRoom } from "@/shared/lib/local-db";
-import { useLiveQuery, localToMessages, messageStatusToLocal, localStatusToMessageStatus } from "@/shared/lib/local-db";
+import { useLiveQuery, localToMessages, messageStatusToLocal, localStatusToMessageStatus, deriveOutboundStatus } from "@/shared/lib/local-db";
 import type { ChatRoom, FileInfo, LinkPreview, Message, PollInfo, ReplyTo, TransferInfo } from "./types";
 import { MessageStatus, MessageType } from "./types";
 
@@ -467,6 +467,11 @@ export const useChatStore = defineStore(NAMESPACE, () => {
   const markRoomAsRead = (roomId: string) => {
     const room = getRoomById(roomId);
     if (room) room.unreadCount = 0;
+
+    // Persist to Dexie (was missing — caused unread count resurrection after reload)
+    if (chatDbKitRef.value) {
+      chatDbKitRef.value.eventWriter.clearUnread(roomId).catch(() => {});
+    }
   };
 
   // References to matrix helpers (set by auth store after init)
@@ -507,6 +512,13 @@ export const useChatStore = defineStore(NAMESPACE, () => {
     [] as import("@/shared/lib/local-db").LocalRoom[],
   );
 
+  // Outbound watermark for active room — used to derive message statuses
+  const activeRoomOutboundWatermark = computed(() => {
+    if (!activeRoomId.value) return 0;
+    const lr = dexieRooms.value.find(r => r.id === activeRoomId.value);
+    return lr?.lastReadOutboundTs ?? 0;
+  });
+
   const activeRoom = computed(() => {
     // Access rooms.value to register Vue reactive dependency
     void rooms.value;
@@ -519,7 +531,7 @@ export const useChatStore = defineStore(NAMESPACE, () => {
     if (chatDbKitRef.value) {
       // Single source of truth: always use Dexie when initialized
       // (returns [] while liveQuery hasn't responded — UI uses dexieMessagesReady to show skeleton)
-      msgs = localToMessages(dexieMessages.value);
+      msgs = localToMessages(dexieMessages.value, activeRoomOutboundWatermark.value);
     } else {
       // Fallback: use old in-memory store only when Dexie not yet initialized
       msgs = activeRoomId.value ? (messages.value[activeRoomId.value] ?? []) : [];
@@ -565,9 +577,11 @@ export const useChatStore = defineStore(NAMESPACE, () => {
           senderId: lr.lastMessageSenderId ?? "",
           content: lr.lastMessagePreview,
           timestamp: lr.lastMessageTimestamp ?? lr.updatedAt,
-          status: lr.lastMessageStatus
-            ? localStatusToMessageStatus(lr.lastMessageStatus)
-            : MessageStatus.sent,
+          status: deriveOutboundStatus(
+              "synced",
+              lr.lastMessageTimestamp ?? 0,
+              lr.lastReadOutboundTs ?? 0,
+            ),
           type: lr.lastMessageType ?? MessageType.text,
         } as Message : undefined,
         lastMessageReaction: lr.lastMessageReaction ?? undefined,
@@ -1318,9 +1332,20 @@ export const useChatStore = defineStore(NAMESPACE, () => {
       const room = getRoomById(roomId);
       if (room) room.unreadCount = 0;
 
-      // Clear unread in Dexie (source of truth after migration)
+      // Write inbound watermark + clear unread in Dexie
       if (chatDbKitRef.value) {
-        chatDbKitRef.value.eventWriter.clearUnread(roomId).catch(() => {});
+        // Find latest inbound message timestamp for watermark
+        const roomMsgs = messages.value[roomId];
+        const myAddr = useAuthStore().address;
+        const lastInboundTs = roomMsgs
+          ?.filter(m => m.senderId !== myAddr)
+          .reduce((max, m) => (m.timestamp > max ? m.timestamp : max), 0) ?? 0;
+
+        if (lastInboundTs > 0) {
+          chatDbKitRef.value.rooms.markAsRead(roomId, lastInboundTs).catch(() => {});
+        } else {
+          chatDbKitRef.value.eventWriter.clearUnread(roomId).catch(() => {});
+        }
       }
 
       // Ensure member profiles are loaded for the active room
@@ -3311,81 +3336,45 @@ export const useChatStore = defineStore(NAMESPACE, () => {
   /** Handle read receipt events from other users */
   const handleReceiptEvent = (event: unknown, room: unknown) => {
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const receiptEvent = event as any;
       const roomObj = room as Record<string, unknown>;
       const roomId = roomObj?.roomId as string;
       if (!roomId) return;
-      if (!roomId) return;
-
-      const roomMessages = messages.value[roomId];
-      if (!roomMessages) return;
-      if (!roomMessages) return;
 
       const matrixService = getMatrixClientService();
       const myUserId = matrixService.getUserId();
 
-      // Get receipt content: { eventId: { "m.read": { userId: { ts } } } }
       const content = receiptEvent?.getContent?.() ?? receiptEvent?.event?.content;
       if (!content) return;
-      if (!content) return;
 
-      let statusChanged = false;
       for (const [eventId, receiptTypes] of Object.entries(content)) {
         const readReceipts = (receiptTypes as Record<string, unknown>)?.["m.read"] as Record<string, unknown> | undefined;
         if (!readReceipts) continue;
 
         for (const userId of Object.keys(readReceipts)) {
-          if (userId === myUserId) continue; // skip our own receipts
           if (userId === myUserId) continue;
 
-          const msgIdx = roomMessages.findIndex(m => m.id === eventId);
-          if (msgIdx >= 0) {
-            const myAddr = matrixIdToAddress(myUserId ?? "");
-            // Mark this message and all earlier own messages as read
-            for (let i = msgIdx; i >= 0; i--) {
-              const msg = roomMessages[i];
-              if (msg.senderId !== myAddr) continue;
-              if (msg.status === MessageStatus.read) break;
-              if (msg.status === MessageStatus.sent || msg.status === MessageStatus.delivered) {
-                msg.status = MessageStatus.read;
-                statusChanged = true;
-              }
-            }
-          }
-        }
-      }
-      triggerRef(messages);
+          // Find the message timestamp for the watermark
+          const roomMessages = messages.value[roomId];
+          const msg = roomMessages?.find(m => m.id === eventId);
+          const receiptData = (readReceipts[userId] as Record<string, unknown>) ?? {};
+          const timestamp = msg?.timestamp ?? (receiptData.ts as number) ?? 0;
+          if (timestamp === 0) continue;
 
-      // Dual-write: persist receipts to Dexie
-      if (chatDbKitRef.value) {
-        for (const [eventId, receiptTypes] of Object.entries(content)) {
-          const readReceipts = (receiptTypes as Record<string, unknown>)?.["m.read"] as Record<string, unknown> | undefined;
-          if (!readReceipts) continue;
-          for (const userId of Object.keys(readReceipts)) {
-            if (userId === myUserId) continue;
+          // Write watermark to Dexie (single source of truth)
+          if (chatDbKitRef.value) {
             chatDbKitRef.value.eventWriter.writeReceipt({
               eventId,
               readerAddress: matrixIdToAddress(userId),
               roomId,
+              timestamp,
             }).catch(() => {});
           }
         }
       }
 
-      // Sync sidebar: if any status changed, update room.lastMessage.
-      // Find the sidebar's lastMessage by ID in the messages array (not just the last element)
-      // to handle cases where lastMessage isn't the most recent message.
-      if (statusChanged) {
-        const room = getRoomById(roomId);
-        if (room?.lastMessage) {
-          const updatedMsg = roomMessages.find(m => m.id === room.lastMessage!.id);
-          if (updatedMsg && room.lastMessage.status !== updatedMsg.status) {
-            room.lastMessage = { ...updatedMsg };
-          }
-          triggerRef(rooms);
-        }
-      }
+      // Trigger reactivity for in-memory path
+      triggerRef(rooms);
     } catch (e) {
       console.warn("[chat-store] handleReceiptEvent error:", e);
     }
