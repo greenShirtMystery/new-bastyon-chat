@@ -487,7 +487,8 @@ export function useMessages() {
   /** Toggle a reaction on a message.
    *  - One reaction per user: choosing a different emoji replaces the old one.
    *  - Clicking the same emoji removes it (toggle off).
-   *  - Includes optimistic local update for instant feedback. */
+   *  - Includes optimistic local update for instant feedback.
+   *  - Uses SyncEngine queue for reliable delivery with retry. */
   const toggleReaction = async (messageId: string, emoji: string) => {
     const roomId = chatStore.activeRoomId;
     if (!roomId) return;
@@ -523,22 +524,62 @@ export function useMessages() {
         const reactionEventId = existingSameEmoji.myEventId;
         if (!isServerEventId(reactionEventId)) return; // still in-flight, ignore
         chatStore.optimisticRemoveReaction(roomId, messageId, emoji, myAddress);
-        await matrixService.redactEvent(roomId, reactionEventId);
+
+        // Use SyncEngine for reliable delivery with retry
+        if (isChatDbReady()) {
+          const dbKit = getChatDb();
+          await dbKit.syncEngine.enqueue(
+            "remove_reaction",
+            roomId,
+            { eventId: messageId, reactionEventId },
+            undefined,
+            3, // maxRetries — reactions are lightweight, 3 is enough
+          );
+          console.info("[Reaction] enqueued remove_reaction", { roomId, messageId, emoji });
+        } else {
+          // Fallback: direct API call if Dexie not ready
+          await matrixService.redactEvent(roomId, reactionEventId);
+        }
       } else {
         // Remove previous different-emoji reaction first (one reaction per user)
         if (existingOtherEmoji && isServerEventId(existingOtherEventId)) {
           const prevEventId = existingOtherEventId!;
           chatStore.optimisticRemoveReaction(roomId, messageId, existingOtherEmoji, myAddress);
-          await matrixService.redactEvent(roomId, prevEventId);
+
+          if (isChatDbReady()) {
+            const dbKit = getChatDb();
+            await dbKit.syncEngine.enqueue(
+              "remove_reaction",
+              roomId,
+              { eventId: messageId, reactionEventId: prevEventId },
+              undefined,
+              3,
+            );
+          } else {
+            await matrixService.redactEvent(roomId, prevEventId);
+          }
         }
         // Send new reaction
         chatStore.optimisticAddReaction(roomId, messageId, emoji, myAddress);
-        const realEventId = await matrixService.sendReaction(roomId, messageId, emoji);
-        // Store the server-assigned event ID so redaction works later
-        chatStore.setReactionEventId(roomId, messageId, emoji, realEventId);
+
+        if (isChatDbReady()) {
+          const dbKit = getChatDb();
+          await dbKit.syncEngine.enqueue(
+            "send_reaction",
+            roomId,
+            { eventId: messageId, emoji },
+            undefined,
+            3,
+          );
+          console.info("[Reaction] enqueued send_reaction", { roomId, messageId, emoji });
+        } else {
+          // Fallback: direct API call if Dexie not ready
+          const realEventId = await matrixService.sendReaction(roomId, messageId, emoji);
+          chatStore.setReactionEventId(roomId, messageId, emoji, realEventId);
+        }
       }
     } catch (e) {
-      console.error("Failed to toggle reaction:", e);
+      console.error("[Reaction] Failed to toggle reaction:", e);
       await chatStore.loadRoomMessages(roomId);
     }
   };

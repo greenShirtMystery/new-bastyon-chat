@@ -199,6 +199,23 @@ const virtualItems = computed<VirtualItem[]>(() => {
 
   for (let i = 0; i < msgs.length; i++) {
     const msg = msgs[i];
+
+    // Skip ghost messages: no content, no media, not deleted, not system
+    if (
+      !msg.deleted &&
+      !msg.content &&
+      !msg.fileInfo &&
+      !msg.pollInfo &&
+      !msg.callInfo &&
+      !msg.transferInfo &&
+      msg.type !== "system"
+    ) {
+      if (import.meta.env.DEV) {
+        console.warn("[MessageList] ghost message filtered:", msg.id, msg.senderId, msg.status);
+      }
+      continue;
+    }
+
     const prevMsg = msgs[i - 1];
     const dateLabel = getDateLabel(msg.timestamp, prevMsg?.timestamp);
 
@@ -919,7 +936,7 @@ defineExpose({ scrollToMessage, setSearchQuery });
       v-if="!loading"
       ref="scrollerRef"
       :items="virtualItems"
-      :min-item-size="48"
+      :min-item-size="72"
       key-field="id"
       class="h-full overflow-y-auto overscroll-contain px-4 py-3"
       :style="{ opacity: settled ? 1 : 0, transition: settled ? 'opacity 0.1s ease-out' : 'none' }"
@@ -940,8 +957,12 @@ defineExpose({ scrollToMessage, setSearchQuery });
           :size-dependencies="[
             item.type === 'message' ? item.message?.content : item.label,
             item.message?.fileInfo?.w,
+            item.message?.fileInfo?.h,
+            item.message?.replyTo?.content,
+            item.message?.forwardedFrom,
             item.message?.reactions ? Object.keys(item.message.reactions).length : 0,
             item.message?.deleted,
+            item.message?.type,
           ]"
         >
           <!-- Pagination happens silently (Telegram-style, no spinner) -->
