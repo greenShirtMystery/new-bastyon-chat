@@ -86,14 +86,14 @@ const toggleCaptionPosition = () => {
               <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="text-white"><polygon points="5 3 19 12 5 21 5 3" /></svg>
             </div>
             <!-- Remove button -->
-            <button
-              class="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-white"
+            <div
+              class="absolute -right-1 -top-1 flex h-5 w-5 cursor-pointer items-center justify-center rounded-full bg-red-500 text-white"
               @click.stop="emit('removeFile', i)"
             >
               <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
                 <path d="M18 6L6 18" /><path d="M6 6l12 12" />
               </svg>
-            </button>
+            </div>
           </button>
         </div>
 

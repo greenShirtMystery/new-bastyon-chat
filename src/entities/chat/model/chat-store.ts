@@ -2963,6 +2963,14 @@ export const useChatStore = defineStore(NAMESPACE, () => {
           }
         }
       }
+      // Replace the array reference when statuses changed so that activeMessages computed
+      // returns a new reference. With shallowRef + no-spread in activeMessages, in-place
+      // mutations don't change the array reference, so Vue's computed optimization would
+      // see "no change" and skip re-rendering the chat view (same bug as with in-place push
+      // described in addMessage). This is the root cause of sidebar showing read but chat not.
+      if (statusChanged) {
+        messages.value[roomId] = [...roomMessages];
+      }
       triggerRef(messages);
 
       // Sync sidebar: if any status changed, update room.lastMessage.
