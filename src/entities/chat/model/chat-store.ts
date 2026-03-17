@@ -541,7 +541,7 @@ export const useChatStore = defineStore(NAMESPACE, () => {
     if (chatDbKitRef.value) {
       // Single source of truth: always use Dexie when initialized
       // (returns [] while liveQuery hasn't responded — UI uses dexieMessagesReady to show skeleton)
-      const myAddr = useAuthStore().address;
+      const myAddr = useAuthStore().address ?? undefined;
       msgs = localToMessages(dexieMessages.value, activeRoomOutboundWatermark.value, myAddr);
     } else {
       // Fallback: use old in-memory store only when Dexie not yet initialized
