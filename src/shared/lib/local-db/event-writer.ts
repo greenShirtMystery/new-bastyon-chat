@@ -1,4 +1,4 @@
-import type { ChatDatabase, LocalMessage, LocalMessageStatus } from "./schema";
+import type { ChatDatabase, LocalMessage } from "./schema";
 import type { MessageRepository } from "./message-repository";
 import type { RoomRepository } from "./room-repository";
 import type { UserRepository } from "./user-repository";
@@ -65,6 +65,8 @@ export interface ParsedReceipt {
   eventId: string;
   readerAddress: string;
   roomId: string;
+  /** Timestamp of the read message — used to advance the outbound watermark */
+  timestamp: number;
 }
 
 type OnChangeCallback = (roomId: string) => void;
@@ -265,18 +267,12 @@ export class EventWriter {
   // Read receipts
   // ---------------------------------------------------------------------------
 
-  /** Update read status for a message */
+  /** Update outbound read watermark for a room (someone read our message) */
   async writeReceipt(receipt: ParsedReceipt): Promise<void> {
-    const msg = await this.messageRepo.getByEventId(receipt.eventId);
-    if (!msg) return;
-
-    // If this is someone reading our message, mark it as "read"
-    if (msg.status === "synced" || msg.status === "delivered") {
-      await this.messageRepo.updateStatus(
-        { eventId: receipt.eventId },
-        "read" as LocalMessageStatus,
-      );
-    }
+    // Advance the outbound watermark — all our messages with ts <= receipt.timestamp
+    // are now considered "read" (derived, no per-message update needed)
+    await this.roomRepo.updateOutboundWatermark(receipt.roomId, receipt.timestamp);
+    this.onChange?.(receipt.roomId);
   }
 
   // ---------------------------------------------------------------------------
