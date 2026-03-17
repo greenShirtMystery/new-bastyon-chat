@@ -359,12 +359,12 @@ export class EventWriter {
     content: string,
     transferAmount?: number,
   ): string {
-    if (type === MessageType.image) return "📷 Photo";
-    if (type === MessageType.video) return "🎬 Video";
-    if (type === MessageType.audio) return "🎵 Audio";
-    if (type === MessageType.file) return "📎 File";
-    if (type === MessageType.poll) return "📊 Poll";
-    if (type === MessageType.transfer) return `💰 ${transferAmount ?? 0} PKOIN`;
+    if (type === MessageType.image) return "[photo]";
+    if (type === MessageType.video) return "[video]";
+    if (type === MessageType.audio) return "[voice message]";
+    if (type === MessageType.file) return "[file]";
+    if (type === MessageType.poll) return "[poll]";
+    if (type === MessageType.transfer) return `[transfer] ${transferAmount ?? 0} PKOIN`;
     return content;
   }
 
