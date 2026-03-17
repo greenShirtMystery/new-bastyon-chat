@@ -57,6 +57,7 @@ export interface LocalRoom {
   lastMessageTimestamp?: number;
   lastMessageSenderId?: string;
   lastMessageType?: MessageType;
+  lastMessageStatus?: LocalMessageStatus;
 
   // Sync metadata
   syncedAt: number;              // last sync from server
