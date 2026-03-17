@@ -1108,6 +1108,9 @@ export const useChatStore = defineStore(NAMESPACE, () => {
     }
   };
 
+  // Track initial unread count at the moment a room is opened (for scroll-to-unread positioning)
+  const roomOpenUnreadCounts: Record<string, number> = {};
+
   // Pending read receipt: sent when tab becomes visible
   let pendingReadReceipt: { roomId: string; event: unknown } | null = null;
 
@@ -1144,7 +1147,11 @@ export const useChatStore = defineStore(NAMESPACE, () => {
     activeRoomId.value = roomId;
     if (roomId) {
       const room = getRoomById(roomId);
-      if (room) room.unreadCount = 0;
+      // Save unread count before clearing — MessageList uses it for scroll-to-unread
+      if (room) {
+        roomOpenUnreadCounts[roomId] = room.unreadCount;
+        room.unreadCount = 0;
+      }
 
       // Ensure member profiles are loaded for the active room
       profilesRequestedForRooms.delete(roomId);
@@ -1153,21 +1160,28 @@ export const useChatStore = defineStore(NAMESPACE, () => {
       // Don't auto-join invited rooms — let the user preview first
       if (room?.membership === "invite") return;
 
-      // Send read receipt for last event in the room (only if tab is visible)
-      try {
-        const matrixService = getMatrixClientService();
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const matrixRoom = matrixService.getRoom(roomId) as any;
-        if (matrixRoom) {
-          const events = matrixRoom.timeline ?? matrixRoom.getLiveTimeline?.()?.getEvents?.() ?? [];
-          if (events.length > 0) {
-            const lastEvent = events[events.length - 1];
-            sendReadReceiptIfVisible(roomId, lastEvent);
-          }
-        }
-      } catch (e) {
-        console.warn("[chat-store] sendReadReceipt error:", e);
-      }
+      // Read receipt is now sent by the viewport tracker in MessageList
+      // (only for messages that actually enter the visible area)
+    }
+  };
+
+  /** Return the unread count that was stored when the room was last opened.
+   *  Used by MessageList to position the initial scroll target. */
+  const getRoomOpenUnreadCount = (roomId: string): number =>
+    roomOpenUnreadCounts[roomId] ?? 0;
+
+  /** Send a read receipt for a specific message (called by the viewport tracker).
+   *  Finds the Matrix event by ID and delegates to sendReadReceiptIfVisible. */
+  const sendReadReceiptForMessage = (roomId: string, messageId: string) => {
+    try {
+      const matrixService = getMatrixClientService();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const matrixRoom = matrixService.getRoom(roomId) as any;
+      if (!matrixRoom) return;
+      const event = matrixRoom.findEventById?.(messageId);
+      if (event) sendReadReceiptIfVisible(roomId, event);
+    } catch (e) {
+      console.warn("[chat-store] sendReadReceiptForMessage error:", e);
     }
   };
 
@@ -3251,6 +3265,8 @@ export const useChatStore = defineStore(NAMESPACE, () => {
     declineInvite,
     inviteCount,
     setActiveRoom,
+    getRoomOpenUnreadCount,
+    sendReadReceiptForMessage,
     setHelpers,
     muteMember,
     setMemberPowerLevel,

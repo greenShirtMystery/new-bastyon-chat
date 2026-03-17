@@ -185,7 +185,7 @@ const MIN_DIST_TO_SAVE = 800; // px — don't save if just slightly scrolled
 /** Flatten messages + date separators into a single virtual list */
 interface VirtualItem {
   id: string;
-  type: "message" | "date-separator" | "typing";
+  type: "message" | "date-separator" | "typing" | "unread-divider";
   message?: import("@/entities/chat").Message;
   label?: string;
   index?: number;
@@ -193,7 +193,15 @@ interface VirtualItem {
 
 const virtualItems = computed<VirtualItem[]>(() => {
   const msgs = chatStore.activeMessages;
+  const roomId = chatStore.activeRoomId;
+  const myAddr = authStore.address;
   const items: VirtualItem[] = [];
+
+  // Index of the first unread foreign message (from others, not us)
+  const openUnread = roomId ? chatStore.getRoomOpenUnreadCount(roomId) : 0;
+  // The last `openUnread` messages in the array are considered unread.
+  // But we only show the divider when the first of them is from someone else.
+  const firstUnreadMsgIdx = openUnread > 0 ? Math.max(0, msgs.length - openUnread) : -1;
 
   for (let i = 0; i < msgs.length; i++) {
     const msg = msgs[i];
@@ -203,6 +211,11 @@ const virtualItems = computed<VirtualItem[]>(() => {
     if (dateLabel) {
       const stableId = (msg as any)._key || msg.id;
       items.push({ id: `date-${stableId}`, type: "date-separator", label: dateLabel });
+    }
+
+    // Insert "unread messages" divider before the first unread foreign message
+    if (i === firstUnreadMsgIdx && msg.senderId !== myAddr) {
+      items.push({ id: `unread-divider-${roomId}`, type: "unread-divider" });
     }
 
     // Use _key (stable across tempId→serverId rename) to prevent DynamicScroller
@@ -280,6 +293,82 @@ const scrollToBottom = (smooth = false, onSettled?: () => void) => {
   });
 };
 
+/** Scroll to either the unread-divider (if there are unread messages) or to the bottom.
+ *  Called once after a room is rendered for the first time.
+ *
+ *  We use scrollerRef.scrollToItem(idx) rather than querying the DOM directly
+ *  because DynamicScroller only renders items in the current viewport — the
+ *  unread-divider element won't exist in the DOM until we scroll near it. */
+const scrollToInitialPosition = (roomId: string, el: HTMLElement | null) => {
+  if (!el) return;
+  const unreadCount = chatStore.getRoomOpenUnreadCount(roomId);
+  if (unreadCount > 0 && scrollerRef.value) {
+    const dividerIdx = virtualItems.value.findIndex(item => item.type === "unread-divider");
+    if (dividerIdx >= 0) {
+      scrollerRef.value.scrollToItem(dividerIdx);
+      return;
+    }
+  }
+  // Default: scroll to bottom
+  el.scrollTop = el.scrollHeight + 9999;
+};
+
+// Map from roomId → id of the last message we sent a read receipt for
+const lastSentReceiptIds = new Map<string, string>();
+
+/** Scan currently visible message elements and send a read receipt for the
+ *  latest foreign message that is actually within the scroll container's viewport.
+ *  This is the Telegram-style "mark as read only what you see" mechanic. */
+const checkVisibleForRead = () => {
+  const roomId = chatStore.activeRoomId;
+  if (!roomId || switching.value) return;
+
+  const msgs = chatStore.activeMessages;
+  if (!msgs.length) return;
+
+  const myAddr = authStore.address;
+  const container = getScrollContainer();
+  if (!container) return;
+
+  const { top: containerTop, bottom: containerBottom } = container.getBoundingClientRect();
+  const messageEls = container.querySelectorAll("[data-message-id]");
+
+  let latestTs = -1;
+  let latestId: string | null = null;
+
+  for (const el of messageEls) {
+    const { top, bottom } = el.getBoundingClientRect();
+    // Fully or partially within the scroll container viewport
+    if (top >= containerBottom || bottom <= containerTop) continue;
+
+    const msgId = el.getAttribute("data-message-id");
+    if (!msgId) continue;
+
+    // Find the message in the active list (virtual list only renders visible items,
+    // so querySelectorAll returns at most ~20 elements — linear search is fine)
+    const msg = msgs.find(m => m.id === msgId);
+    if (!msg || msg.senderId === myAddr) continue;
+
+    if (msg.timestamp > latestTs) {
+      latestTs = msg.timestamp;
+      latestId = msg.id;
+    }
+  }
+
+  if (!latestId) return;
+
+  // Skip if we already sent a receipt for this message or a newer one
+  const prevId = lastSentReceiptIds.get(roomId);
+  if (prevId === latestId) return;
+  if (prevId) {
+    const prevMsg = msgs.find(m => m.id === prevId);
+    if (prevMsg && prevMsg.timestamp >= latestTs) return;
+  }
+
+  lastSentReceiptIds.set(roomId, latestId);
+  chatStore.sendReadReceiptForMessage(roomId, latestId);
+};
+
 // --- Message entrance animation ---
 const recentMessageIds = ref(new Set<string>());
 
@@ -319,6 +408,7 @@ watch(
     lastScrollTop = 0;
     lastScrollTime = 0;
     scrollVelocity = 0;
+    lastSentReceiptIds.delete(roomId);
     // Cancel pending rAF from old room to prevent it firing against new room
     if (scrollThrottleRaf !== null) {
       cancelAnimationFrame(scrollThrottleRaf);
@@ -337,19 +427,25 @@ watch(
       // set scroll position, THEN reveal. User never sees the jump.
       await nextTick();
       if (isStale()) return;
+      // Wait one rAF so DynamicScroller's ResizeObserver measures item heights
+      // before we query element positions (needed for accurate scroll-to-unread).
+      await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+      if (isStale()) return;
 
       const saved = savedScrollPositions.get(roomId);
       const el = getScrollContainer();
       if (saved && el) {
         el.scrollTop = el.scrollHeight - el.clientHeight - saved.distFromBottom;
         savedScrollPositions.delete(roomId);
-      } else if (el) {
-        el.scrollTop = el.scrollHeight + 9999;
+      } else {
+        scrollToInitialPosition(roomId, el);
       }
       settled.value = true;
       switching.value = false;
       prevScrollHeight = el?.scrollHeight ?? 0;
       checkScroll();
+      // Check which messages are already visible at the initial position
+      nextTick(() => checkVisibleForRead());
 
       // Show "updating" indicator if cache is stale
       if (cacheAge > STALE_THRESHOLD) {
@@ -373,19 +469,22 @@ watch(
 
       await nextTick();
       if (isStale()) return;
+      await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+      if (isStale()) return;
 
       const saved = savedScrollPositions.get(roomId);
       const el = getScrollContainer();
       if (saved && el) {
         el.scrollTop = el.scrollHeight - el.clientHeight - saved.distFromBottom;
         savedScrollPositions.delete(roomId);
-      } else if (el) {
-        el.scrollTop = el.scrollHeight + 9999;
+      } else {
+        scrollToInitialPosition(roomId, el);
       }
       settled.value = true;
       switching.value = false;
       prevScrollHeight = el?.scrollHeight ?? 0;
       checkScroll();
+      nextTick(() => checkVisibleForRead());
     }
   },
   { immediate: true },
@@ -553,6 +652,7 @@ const onScrollThrottled = () => {
   if (switching.value) return;
   checkScroll();
   updateFloatingDate();
+  checkVisibleForRead();
 
   const container = getScrollContainer();
   if (!container || !hasMore.value) return;
@@ -880,6 +980,17 @@ defineExpose({ scrollToMessage, setSearchQuery });
             <span class="rounded-full bg-neutral-grad-0/80 px-3 py-1 text-xs text-text-on-main-bg-color backdrop-blur-sm">
               {{ item.label }}
             </span>
+          </div>
+
+          <!-- Unread messages divider -->
+          <div
+            v-else-if="item.type === 'unread-divider'"
+            class="mx-auto flex max-w-6xl items-center gap-3 py-2"
+            data-unread-divider
+          >
+            <div class="h-px flex-1 bg-color-bg-ac/40" />
+            <span class="shrink-0 text-xs text-color-bg-ac">{{ t("messageList.newMessages") }}</span>
+            <div class="h-px flex-1 bg-color-bg-ac/40" />
           </div>
 
           <!-- Call event card (bubble-style, aligned like a message) -->

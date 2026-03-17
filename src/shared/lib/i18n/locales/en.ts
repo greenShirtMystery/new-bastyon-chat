@@ -182,6 +182,7 @@ export const en = {
 
   // ── Message list ──
   "messageList.noMessages": "No messages yet. Start a conversation!",
+  "messageList.newMessages": "New messages",
   "messageList.isTyping": "{name} is typing",
   "messageList.peopleTyping": "{count} people are typing",
   "messageList.typingTwo": "{name1} and {name2} are typing",
