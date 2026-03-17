@@ -524,59 +524,18 @@ export function useMessages() {
         const reactionEventId = existingSameEmoji.myEventId;
         if (!isServerEventId(reactionEventId)) return; // still in-flight, ignore
         chatStore.optimisticRemoveReaction(roomId, messageId, emoji, myAddress);
-
-        // Use SyncEngine for reliable delivery with retry
-        if (isChatDbReady()) {
-          const dbKit = getChatDb();
-          await dbKit.syncEngine.enqueue(
-            "remove_reaction",
-            roomId,
-            { eventId: messageId, reactionEventId },
-            undefined,
-            3, // maxRetries — reactions are lightweight, 3 is enough
-          );
-          console.info("[Reaction] enqueued remove_reaction", { roomId, messageId, emoji });
-        } else {
-          // Fallback: direct API call if Dexie not ready
-          await matrixService.redactEvent(roomId, reactionEventId);
-        }
+        await matrixService.redactEvent(roomId, reactionEventId);
       } else {
         // Remove previous different-emoji reaction first (one reaction per user)
         if (existingOtherEmoji && isServerEventId(existingOtherEventId)) {
           const prevEventId = existingOtherEventId!;
           chatStore.optimisticRemoveReaction(roomId, messageId, existingOtherEmoji, myAddress);
-
-          if (isChatDbReady()) {
-            const dbKit = getChatDb();
-            await dbKit.syncEngine.enqueue(
-              "remove_reaction",
-              roomId,
-              { eventId: messageId, reactionEventId: prevEventId },
-              undefined,
-              3,
-            );
-          } else {
-            await matrixService.redactEvent(roomId, prevEventId);
-          }
+          await matrixService.redactEvent(roomId, prevEventId);
         }
-        // Send new reaction
+        // Send new reaction — optimistic update + direct API call
         chatStore.optimisticAddReaction(roomId, messageId, emoji, myAddress);
-
-        if (isChatDbReady()) {
-          const dbKit = getChatDb();
-          await dbKit.syncEngine.enqueue(
-            "send_reaction",
-            roomId,
-            { eventId: messageId, emoji },
-            undefined,
-            3,
-          );
-          console.info("[Reaction] enqueued send_reaction", { roomId, messageId, emoji });
-        } else {
-          // Fallback: direct API call if Dexie not ready
-          const realEventId = await matrixService.sendReaction(roomId, messageId, emoji);
-          chatStore.setReactionEventId(roomId, messageId, emoji, realEventId);
-        }
+        const realEventId = await matrixService.sendReaction(roomId, messageId, emoji);
+        chatStore.setReactionEventId(roomId, messageId, emoji, realEventId);
       }
     } catch (e) {
       console.error("[Reaction] Failed to toggle reaction:", e);
