@@ -6,8 +6,16 @@ import { MessageStatus } from "@/entities/chat/model/types";
  * Convert a LocalMessage (Dexie row) to a Message (UI type).
  * Used by liveQuery consumers so components don't know about LocalMessage.
  */
-export function localToMessage(local: LocalMessage): Message & { _key?: string } {
+export function localToMessage(
+  local: LocalMessage,
+  outboundWatermark?: number,
+  myAddress?: string,
+): Message & { _key?: string } {
   const isDeleted = local.deleted || local.softDeleted;
+  const isOwnMessage = myAddress && local.senderId === myAddress;
+  const status = (outboundWatermark !== undefined && isOwnMessage)
+    ? deriveOutboundStatus(local.status, local.timestamp, outboundWatermark)
+    : localStatusToMessageStatus(local.status);
   return {
     id: local.eventId ?? local.clientId,
     // Stable key for Vue :key binding — clientId never changes,
@@ -17,7 +25,7 @@ export function localToMessage(local: LocalMessage): Message & { _key?: string }
     senderId: local.senderId,
     content: isDeleted ? "" : local.content,
     timestamp: local.timestamp,
-    status: localStatusToMessageStatus(local.status),
+    status,
     type: local.type,
     fileInfo: isDeleted ? undefined : local.fileInfo,
     replyTo: isDeleted ? undefined : local.replyTo,
@@ -34,8 +42,8 @@ export function localToMessage(local: LocalMessage): Message & { _key?: string }
 }
 
 /** Map LocalMessage[] to Message[] (preserves order) */
-export function localToMessages(locals: LocalMessage[]): Message[] {
-  return locals.map(localToMessage);
+export function localToMessages(locals: LocalMessage[], outboundWatermark?: number, myAddress?: string): Message[] {
+  return locals.map(l => localToMessage(l, outboundWatermark, myAddress));
 }
 
 export function localStatusToMessageStatus(status: LocalMessageStatus): MessageStatus {
@@ -52,6 +60,29 @@ export function localStatusToMessageStatus(status: LocalMessageStatus): MessageS
     case "read":
       return MessageStatus.read;
   }
+}
+
+/**
+ * Derive the display status for an outbound (own) message
+ * by comparing its timestamp against the room's outbound read watermark.
+ *
+ * This replaces per-message "read"/"delivered" status with a pure derivation
+ * from the room-level watermark, ensuring Chat List and Chat Room always agree.
+ */
+export function deriveOutboundStatus(
+  localStatus: LocalMessageStatus,
+  messageTimestamp: number,
+  roomLastReadOutboundTs: number,
+): MessageStatus {
+  // Local-only statuses take priority (not yet on server)
+  if (localStatus === "pending" || localStatus === "syncing") return MessageStatus.sending;
+  if (localStatus === "failed") return MessageStatus.failed;
+
+  // Derived from watermark: if the other party read up to this timestamp → read
+  if (roomLastReadOutboundTs >= messageTimestamp) return MessageStatus.read;
+
+  // On server but not yet read
+  return MessageStatus.sent;
 }
 
 /** Map MessageStatus to LocalMessageStatus (for optimistic writes) */

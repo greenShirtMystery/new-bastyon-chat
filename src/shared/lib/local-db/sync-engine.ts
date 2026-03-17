@@ -138,8 +138,6 @@ export class SyncEngine {
         return this.syncVotePoll(op);
       case "send_transfer":
         return this.syncSendTransfer(op);
-      case "send_read_receipt":
-        return this.syncSendReadReceipt(op);
       default:
         console.warn("[SyncEngine] Unknown operation type:", op.type);
     }
@@ -381,22 +379,6 @@ export class SyncEngine {
     }
 
     await this.messageRepo.confirmSent(op.clientId, serverEventId);
-  }
-
-  private async syncSendReadReceipt(op: PendingOperation): Promise<void> {
-    const payload = op.payload as { eventId: string };
-    const matrixService = getMatrixClientService();
-    // Build a minimal event-like object for the SDK
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const matrixRoom = matrixService.getRoom(op.roomId) as any;
-    if (!matrixRoom) return;
-
-    const timeline = matrixRoom.getLiveTimeline?.()?.getEvents?.() ?? [];
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const event = timeline.find((e: any) => e?.event?.event_id === payload.eventId);
-    if (event) {
-      await matrixService.sendReadReceipt(event);
-    }
   }
 
   // ---------------------------------------------------------------------------
