@@ -23,7 +23,7 @@ type VirtualItem = { id: string; message?: Message };
 // LocalMessage → Message mapper
 // ---------------------------------------------------------------------------
 
-function toMessage(lm: LocalMessage): Message {
+export function toMessage(lm: LocalMessage): Message {
   const statusMap: Record<string, MessageStatus> = {
     read: MessageStatus.read,
     synced: MessageStatus.sent,
@@ -63,6 +63,7 @@ export function useScrollToMessage(
   getScrollContainer: () => HTMLElement | null,
 ) {
   const scrollTarget = ref<ScrollTarget | null>(null);
+  const chatStore = useChatStore();
   const { toast } = useToast();
 
   // ---- helpers ----
@@ -121,6 +122,10 @@ export function useScrollToMessage(
   // ---- main flow ----
 
   async function scrollToMessage(messageId: string) {
+    // Cancel any in-progress scroll for a different message
+    if (scrollTarget.value && scrollTarget.value.messageId !== messageId && scrollTarget.value.phase !== "fail") {
+      scrollTarget.value = null;
+    }
     // Dedup: ignore if already processing the same message
     if (scrollTarget.value?.messageId === messageId && scrollTarget.value.phase !== "fail") {
       return;
@@ -150,7 +155,7 @@ export function useScrollToMessage(
         if (isChatDbReady()) {
           const db = getChatDb();
           const ctx = await db.messages.getMessageContext(
-            chatStore().activeRoomId!,
+            chatStore.activeRoomId!,
             messageId,
           );
           if (ctx) {
@@ -159,32 +164,45 @@ export function useScrollToMessage(
           }
         }
 
-        // If not in Dexie, try Matrix server
+        // If not in Dexie, try Matrix server — load timeline around the event
         if (!contextMessages) {
-          const matrixService = getMatrixClientService();
-          const roomId = chatStore().activeRoomId!;
-          const rawEvents = await matrixService.fetchEventContext(roomId, messageId, 50);
+          try {
+            const matrixService = getMatrixClientService();
+            const roomId = chatStore.activeRoomId!;
+            const rawEvents = await matrixService.fetchEventContext(roomId, messageId, 50);
 
-          if (!rawEvents || rawEvents.length === 0) {
-            fail("Message not found");
-            return;
-          }
-
-          // After fetching from server, events get ingested into Dexie via sync.
-          // Wait a bit for the ingest, then retry from Dexie.
-          await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
-
-          if (isChatDbReady()) {
-            const db = getChatDb();
-            const ctx = await db.messages.getMessageContext(roomId, messageId);
-            if (ctx) {
-              contextMessages = ctx.messages;
-              targetIndex = ctx.targetIndex;
+            if (!rawEvents || rawEvents.length === 0) {
+              fail("Сообщение не найдено");
+              return;
             }
-          }
 
-          if (!contextMessages) {
-            // Last resort: continue to next attempt
+            // fetchEventContext loaded events into the Matrix SDK's timeline.
+            // Re-parse the full timeline to update the store and Dexie.
+            await chatStore.loadRoomMessages(roomId);
+
+            // Now check if the message is in the loaded list
+            await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
+            const retryIdx = findInLoaded(messageId);
+            if (retryIdx >= 0) {
+              await doScroll(retryIdx, messageId);
+              return;
+            }
+
+            // If still not in virtualItems, try Dexie context (loadRoomMessages wrote to Dexie)
+            if (isChatDbReady()) {
+              const db = getChatDb();
+              const ctx = await db.messages.getMessageContext(roomId, messageId);
+              if (ctx) {
+                contextMessages = ctx.messages;
+                targetIndex = ctx.targetIndex;
+              }
+            }
+
+            if (!contextMessages) {
+              continue; // retry
+            }
+          } catch (e) {
+            console.warn("[scroll-to-message] server fallback error:", e);
             continue;
           }
         }
@@ -192,8 +210,7 @@ export function useScrollToMessage(
         // ---- REPLACE: enter detached mode ----
         setPhase("replace");
         const mapped = contextMessages.map(toMessage);
-        const store = chatStore();
-        store.enterDetachedMode(store.activeRoomId!, mapped);
+        chatStore.enterDetachedMode(chatStore.activeRoomId!, mapped);
 
         // ---- LAYOUT: wait for Vue + DynamicScroller render ----
         setPhase("layout");
@@ -241,15 +258,7 @@ export function useScrollToMessage(
       highlight(el);
     }
 
-    scrollTarget.value = { ...scrollTarget.value!, phase: "done" };
     scrollTarget.value = null;
-  }
-
-  // Lazy chatStore accessor (avoids calling useChatStore at module level)
-  let _chatStore: ReturnType<typeof useChatStore> | null = null;
-  function chatStore() {
-    if (!_chatStore) _chatStore = useChatStore();
-    return _chatStore;
   }
 
   return { scrollToMessage, scrollTarget };

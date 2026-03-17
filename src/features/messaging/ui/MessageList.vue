@@ -8,7 +8,7 @@ import { cleanMatrixIds, resolveSystemText } from "@/entities/chat/lib/chat-help
 import { formatDate } from "@/shared/lib/format";
 import { UserAvatar } from "@/entities/user";
 import { useMessages } from "../model/use-messages";
-import { useScrollToMessage } from "../model/use-scroll-to-message";
+import { useScrollToMessage, toMessage } from "../model/use-scroll-to-message";
 import { getChatDb, isChatDbReady } from "@/shared/lib/local-db";
 import { useToast } from "@/shared/lib/use-toast";
 import MessageBubble from "./MessageBubble.vue";
@@ -593,41 +593,28 @@ const doPrefetch = (roomId: string, container: HTMLElement) => {
 
 /** Load newer messages (forward pagination in detached mode) */
 const doLoadNewer = async (roomId: string) => {
-  if (!isChatDbReady()) return;
-  const msgs = chatStore.activeMessages;
-  if (msgs.length === 0) return;
+  if (!isChatDbReady() || loadingMore.value) return;
+  loadingMore.value = true;
+  try {
+    const msgs = chatStore.activeMessages;
+    if (msgs.length === 0) return;
 
-  const lastTimestamp = msgs[msgs.length - 1].timestamp;
-  const { messages: msgRepo } = getChatDb();
-  const newer = await msgRepo.getMessagesAfter(roomId, lastTimestamp, 50);
+    const lastTimestamp = msgs[msgs.length - 1].timestamp;
+    const { messages: msgRepo } = getChatDb();
+    const newer = await msgRepo.getMessagesAfter(roomId, lastTimestamp, 50);
 
-  if (newer.length === 0) {
-    await chatStore.exitDetachedMode(roomId);
-    await nextTick();
-    scrollToBottom();
-    return;
+    if (newer.length === 0) {
+      await chatStore.exitDetachedMode(roomId);
+      await nextTick();
+      scrollToBottom();
+      return;
+    }
+
+    const mapped = newer.map(toMessage);
+    chatStore.enterDetachedMode(roomId, [...chatStore.activeMessages, ...mapped]);
+  } finally {
+    loadingMore.value = false;
   }
-
-  const mapped = newer.map(lm => ({
-    id: lm.eventId ?? lm.clientId,
-    roomId: lm.roomId,
-    senderId: lm.senderId,
-    content: lm.content,
-    timestamp: lm.timestamp,
-    type: lm.type,
-    status: lm.status === "read" ? "read" : lm.status === "synced" ? "sent" : "sending",
-    fileInfo: lm.fileInfo,
-    replyTo: lm.replyTo,
-    reactions: lm.reactions,
-    edited: lm.edited,
-    deleted: lm.softDeleted,
-    forwardedFrom: lm.forwardedFrom,
-    callInfo: lm.callInfo,
-    pollInfo: lm.pollInfo,
-    transferInfo: lm.transferInfo,
-  } as import("@/entities/chat").Message));
-
-  chatStore.enterDetachedMode(roomId, [...chatStore.activeMessages, ...mapped]);
 };
 
 let scrollThrottleRaf: number | null = null;
