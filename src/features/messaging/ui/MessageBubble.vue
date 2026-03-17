@@ -32,6 +32,7 @@ interface Props {
   showAvatar: boolean;
   isGroup?: boolean;
   isFirstInGroup?: boolean;
+  myAddress?: string;
 }
 
 const props = withDefaults(defineProps<Props>(), { isGroup: false, isFirstInGroup: false });
@@ -384,7 +385,7 @@ const replyPreviewText = computed(() => {
 
         <!-- Reactions row -->
         <div v-if="message.reactions && Object.keys(message.reactions).length" class="px-2 pb-1">
-          <ReactionRow :reactions="message.reactions" :is-own="props.isOwn" @toggle="handleToggleReaction" @add-reaction="handleAddReaction" />
+          <ReactionRow :reactions="message.reactions" :is-own="props.isOwn" :my-address="props.myAddress" :message-id="message.id" @toggle="handleToggleReaction" @add-reaction="handleAddReaction" />
         </div>
 
       </div>
@@ -406,7 +407,7 @@ const replyPreviewText = computed(() => {
           <MessageStatusIcon v-if="props.isOwn" :status="msgStatus" />
         </div>
         <!-- Reactions row -->
-        <ReactionRow v-if="message.reactions && Object.keys(message.reactions).length" :reactions="message.reactions" :is-own="props.isOwn" @toggle="handleToggleReaction" @add-reaction="handleAddReaction" />
+        <ReactionRow v-if="message.reactions && Object.keys(message.reactions).length" :reactions="message.reactions" :is-own="props.isOwn" :my-address="props.myAddress" :message-id="message.id" @toggle="handleToggleReaction" @add-reaction="handleAddReaction" />
       </div>
 
       <!-- Video message -->
@@ -472,7 +473,7 @@ const replyPreviewText = computed(() => {
         </div>
         <!-- Reactions row -->
         <div v-if="message.reactions && Object.keys(message.reactions).length" class="px-2 pb-1">
-          <ReactionRow :reactions="message.reactions" :is-own="props.isOwn" @toggle="handleToggleReaction" @add-reaction="handleAddReaction" />
+          <ReactionRow :reactions="message.reactions" :is-own="props.isOwn" :my-address="props.myAddress" :message-id="message.id" @toggle="handleToggleReaction" @add-reaction="handleAddReaction" />
         </div>
       </div>
 
@@ -510,7 +511,7 @@ const replyPreviewText = computed(() => {
           <MessageStatusIcon v-if="props.isOwn" :status="msgStatus" />
         </div>
         <!-- Reactions row -->
-        <ReactionRow v-if="message.reactions && Object.keys(message.reactions).length" :reactions="message.reactions" :is-own="props.isOwn" @toggle="handleToggleReaction" @add-reaction="handleAddReaction" />
+        <ReactionRow v-if="message.reactions && Object.keys(message.reactions).length" :reactions="message.reactions" :is-own="props.isOwn" :my-address="props.myAddress" :message-id="message.id" @toggle="handleToggleReaction" @add-reaction="handleAddReaction" />
       </div>
 
       <!-- File message -->
@@ -568,7 +569,7 @@ const replyPreviewText = computed(() => {
           <MessageStatusIcon v-if="props.isOwn" :status="msgStatus" />
         </div>
         <!-- Reactions row -->
-        <ReactionRow v-if="message.reactions && Object.keys(message.reactions).length" :reactions="message.reactions" :is-own="props.isOwn" @toggle="handleToggleReaction" @add-reaction="handleAddReaction" />
+        <ReactionRow v-if="message.reactions && Object.keys(message.reactions).length" :reactions="message.reactions" :is-own="props.isOwn" :my-address="props.myAddress" :message-id="message.id" @toggle="handleToggleReaction" @add-reaction="handleAddReaction" />
       </div>
 
       <!-- Poll message -->
@@ -596,7 +597,7 @@ const replyPreviewText = computed(() => {
           <span class="text-[10px]">{{ time }}</span>
           <MessageStatusIcon v-if="props.isOwn" :status="msgStatus" />
         </div>
-        <ReactionRow v-if="message.reactions && Object.keys(message.reactions).length" :reactions="message.reactions" :is-own="props.isOwn" @toggle="handleToggleReaction" @add-reaction="handleAddReaction" />
+        <ReactionRow v-if="message.reactions && Object.keys(message.reactions).length" :reactions="message.reactions" :is-own="props.isOwn" :my-address="props.myAddress" :message-id="message.id" @toggle="handleToggleReaction" @add-reaction="handleAddReaction" />
       </div>
 
       <!-- Transfer message -->
@@ -618,7 +619,7 @@ const replyPreviewText = computed(() => {
           <span class="text-[10px]">{{ time }}</span>
           <MessageStatusIcon v-if="props.isOwn" :status="msgStatus" />
         </div>
-        <ReactionRow v-if="message.reactions && Object.keys(message.reactions).length" :reactions="message.reactions" :is-own="props.isOwn" @toggle="handleToggleReaction" @add-reaction="handleAddReaction" />
+        <ReactionRow v-if="message.reactions && Object.keys(message.reactions).length" :reactions="message.reactions" :is-own="props.isOwn" :my-address="props.myAddress" :message-id="message.id" @toggle="handleToggleReaction" @add-reaction="handleAddReaction" />
       </div>
 
       <!-- Text message (default) -->
@@ -677,7 +678,7 @@ const replyPreviewText = computed(() => {
         </div>
 
         <!-- Reactions row -->
-        <ReactionRow v-if="message.reactions && Object.keys(message.reactions).length" :reactions="message.reactions" :is-own="props.isOwn" @toggle="handleToggleReaction" @add-reaction="handleAddReaction" />
+        <ReactionRow v-if="message.reactions && Object.keys(message.reactions).length" :reactions="message.reactions" :is-own="props.isOwn" :my-address="props.myAddress" :message-id="message.id" @toggle="handleToggleReaction" @add-reaction="handleAddReaction" />
       </div>
     </div>
   </div>

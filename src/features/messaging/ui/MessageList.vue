@@ -449,7 +449,10 @@ const lastMessageIdentity = computed(() => {
   const msgs = chatStore.activeMessages;
   if (!msgs.length) return null;
   const last = msgs[msgs.length - 1];
-  return `${last.id}:${msgs.length}`;
+  // Use _key (clientId, stable) instead of id (flips clientId→eventId after confirmSent)
+  // to avoid false triggers when message status changes.
+  const stableId = (last as any)._key || last.id;
+  return `${stableId}:${msgs.length}`;
 });
 
 watch(lastMessageIdentity, (newVal, oldVal) => {
@@ -1003,6 +1006,7 @@ defineExpose({ scrollToMessage, setSearchQuery });
               :key="((item.message as any)._key || item.message.id) + (item.message.deleted ? '-del' : '')"
               :message="item.message"
               :is-own="item.message.senderId === authStore.address"
+              :my-address="authStore.address ?? undefined"
               :is-group="isGroup"
               :show-avatar="themeStore.messageGrouping ? !isConsecutiveMessage(item.message, chatStore.activeMessages[(item.index ?? 0) + 1]) : true"
               :is-first-in-group="themeStore.messageGrouping ? !isConsecutiveMessage(chatStore.activeMessages[(item.index ?? 0) - 1], item.message) : true"

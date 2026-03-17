@@ -495,7 +495,7 @@ export function useMessages() {
     const matrixService = getMatrixClientService();
     if (!matrixService.isReady()) return;
 
-    const roomMessages = chatStore.messages[roomId] ?? [];
+    const roomMessages = chatStore.activeMessages;
     const msg = roomMessages.find(m => m.id === messageId);
     if (!msg) return;
 
