@@ -712,7 +712,9 @@ export const useChatStore = defineStore(NAMESPACE, () => {
         updatedAt: r.updatedAt,
         syncedAt: Date.now(),
         hasMoreHistory: true,
-        lastMessagePreview: r.lastMessage?.content?.slice(0, 200),
+        lastMessagePreview: r.lastMessage?.deleted
+          ? "🚫 Message deleted"
+          : r.lastMessage?.content?.slice(0, 200),
         lastMessageTimestamp: r.lastMessage?.timestamp,
         lastMessageSenderId: r.lastMessage?.senderId,
         lastMessageType: r.lastMessage?.type,
@@ -919,7 +921,9 @@ export const useChatStore = defineStore(NAMESPACE, () => {
           updatedAt: r.updatedAt,
           syncedAt: Date.now(),
           hasMoreHistory: true,
-          lastMessagePreview: r.lastMessage?.content?.slice(0, 200),
+          lastMessagePreview: r.lastMessage?.deleted
+            ? "🚫 Message deleted"
+            : r.lastMessage?.content?.slice(0, 200),
           lastMessageTimestamp: r.lastMessage?.timestamp,
           lastMessageSenderId: r.lastMessage?.senderId,
           lastMessageType: r.lastMessage?.type,
@@ -3331,10 +3335,18 @@ export const useChatStore = defineStore(NAMESPACE, () => {
         redactedMsg.pollInfo = undefined;
         redactedMsg.transferInfo = undefined;
         redactedMsg.forwardedFrom = undefined;
-        // Update room lastMessage preview
+        // Update room lastMessage preview — find previous non-deleted message
         const chatRoom = getRoomById(roomId);
         if (chatRoom && chatRoom.lastMessage?.id === redactedEventId) {
-          chatRoom.lastMessage = { ...redactedMsg };
+          // Find the last non-deleted message in room (reverse scan)
+          const prevMsg = [...roomMessages].reverse().find(m => !m.deleted && m.id !== redactedEventId);
+          if (prevMsg) {
+            chatRoom.lastMessage = { ...prevMsg };
+          } else {
+            // All messages deleted — keep the deleted message as lastMessage
+            // so the dual-write sync can detect deleted state
+            chatRoom.lastMessage = { ...redactedMsg };
+          }
           triggerRef(rooms);
         }
         triggerRef(messages);
