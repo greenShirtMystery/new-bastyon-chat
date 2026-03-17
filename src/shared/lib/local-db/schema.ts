@@ -57,6 +57,13 @@ export interface LocalRoom {
   lastMessageTimestamp?: number;
   lastMessageSenderId?: string;
   lastMessageType?: MessageType;
+  lastMessageStatus?: LocalMessageStatus;
+  lastMessageEventId?: string;   // eventId of last message (for reaction cascade)
+  lastMessageReaction?: {        // last reaction on the last message
+    emoji: string;
+    senderAddress: string;
+    timestamp: number;
+  } | null;
 
   // Sync metadata
   syncedAt: number;              // last sync from server

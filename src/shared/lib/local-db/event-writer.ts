@@ -177,6 +177,14 @@ export class EventWriter {
     }
 
     await this.messageRepo.updateReactions(reaction.targetEventId, reactions);
+
+    // Cascade: update room preview if this is the last message (non-blocking)
+    this.cascadeReactionToRoom(msg.roomId, reaction.targetEventId, {
+      emoji: reaction.emoji,
+      senderAddress: reaction.senderAddress,
+      timestamp: Date.now(),
+    }).catch(() => {});
+
     this.onChange?.(msg.roomId);
   }
 
@@ -203,6 +211,11 @@ export class EventWriter {
     }
 
     await this.messageRepo.updateReactions(targetEventId, msg.reactions);
+
+    // Cascade: recalculate room reaction from remaining (non-blocking)
+    const lastReaction = this.pickLastReaction(msg.reactions);
+    this.cascadeReactionToRoom(msg.roomId, targetEventId, lastReaction).catch(() => {});
+
     this.onChange?.(msg.roomId);
   }
 
@@ -224,9 +237,7 @@ export class EventWriter {
   async writeRedaction(redaction: ParsedRedaction): Promise<void> {
     await this.messageRepo.softDelete(redaction.redactedEventId);
 
-    // Always update room preview after deletion — the deleted message
-    // may have been the last one, and timestamp guards are unreliable
-    // due to clock drift between local and server timestamps.
+    // Always update room preview after deletion
     const prevMsg = await this.messageRepo.getLastNonDeleted(redaction.roomId);
     if (prevMsg) {
       await this.updateRoomPreviewFromLocal(prevMsg);
@@ -367,6 +378,7 @@ export class EventWriter {
       parsed.timestamp,
       parsed.senderId,
       parsed.type,
+      parsed.eventId,
     );
   }
 
@@ -383,6 +395,35 @@ export class EventWriter {
       msg.serverTs ?? msg.timestamp,
       msg.senderId,
       msg.type,
+      msg.eventId ?? undefined,
     );
+  }
+
+  /** Cascade reaction change to room preview if target is the last message */
+  private async cascadeReactionToRoom(
+    roomId: string,
+    targetEventId: string,
+    reaction: import("./schema").LocalRoom["lastMessageReaction"],
+  ): Promise<void> {
+    const room = await this.roomRepo.getRoom(roomId);
+    if (!room || room.lastMessageEventId !== targetEventId) return;
+    await this.roomRepo.updateLastMessageReaction(roomId, reaction);
+  }
+
+  /** Pick the most recent reaction from remaining reactions map */
+  private pickLastReaction(
+    reactions: LocalMessage["reactions"],
+  ): import("./schema").LocalRoom["lastMessageReaction"] {
+    if (!reactions) return null;
+    for (const [emoji, data] of Object.entries(reactions)) {
+      if (data.users.length > 0) {
+        return {
+          emoji,
+          senderAddress: data.users[data.users.length - 1],
+          timestamp: Date.now(),
+        };
+      }
+    }
+    return null;
   }
 }

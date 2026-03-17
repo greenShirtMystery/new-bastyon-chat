@@ -65,14 +65,35 @@ export class RoomRepository {
     timestamp: number,
     senderId: string,
     type?: MessageType,
+    eventId?: string,
   ): Promise<void> {
-    await this.db.rooms.update(roomId, {
+    const changes: Partial<import("./schema").LocalRoom> = {
       lastMessagePreview: preview.slice(0, 200),
       lastMessageTimestamp: timestamp,
       lastMessageSenderId: senderId,
       lastMessageType: type,
       updatedAt: timestamp,
-    });
+      // New last message = clear old reaction (no double DB write)
+      lastMessageReaction: null,
+    };
+    if (eventId !== undefined) {
+      changes.lastMessageEventId = eventId;
+    }
+    const updated = await this.db.rooms.update(roomId, changes);
+    if (updated === 0) {
+      const existing = await this.db.rooms.get(roomId);
+      if (existing) {
+        await this.db.rooms.update(roomId, changes);
+      }
+    }
+  }
+
+  /** Update reaction on the last message (does NOT touch updatedAt) */
+  async updateLastMessageReaction(
+    roomId: string,
+    reaction: import("./schema").LocalRoom["lastMessageReaction"],
+  ): Promise<void> {
+    await this.db.rooms.update(roomId, { lastMessageReaction: reaction });
   }
 
   /** Set unread count */

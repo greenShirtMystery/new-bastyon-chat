@@ -492,7 +492,7 @@ const getRoomLongPress = (room: ChatRoom) => {
                 :class="(item as ChatRoom).unreadCount > 0 ? 'text-color-bg-ac' : 'text-text-on-main-bg-color'"
               >
                 <MessageStatusIcon
-                  v-if="(item as ChatRoom).lastMessage!.senderId === authStore.address && (item as ChatRoom).lastMessage!.type !== MessageType.system"
+                  v-if="(item as ChatRoom).lastMessage!.senderId === authStore.address && (item as ChatRoom).lastMessage!.type !== MessageType.system && (item as ChatRoom).lastMessage!.content !== ''"
                   :status="(item as ChatRoom).lastMessage!.status"
                 />
                 {{ formatRelativeTime(new Date((item as ChatRoom).lastMessage!.timestamp)) }}
@@ -533,7 +533,7 @@ const getRoomLongPress = (room: ChatRoom) => {
                 {{ formatPreview((item as ChatRoom).lastMessage, item as ChatRoom) }}
               </span>
               <span v-else class="truncate text-sm text-text-on-main-bg-color">
-                {{ formatPreview((item as ChatRoom).lastMessage, item as ChatRoom) }}
+                <span v-if="(item as ChatRoom).lastMessageReaction" class="mr-0.5">{{ (item as ChatRoom).lastMessageReaction!.emoji }}</span>{{ formatPreview((item as ChatRoom).lastMessage, item as ChatRoom) }}
               </span>
               <transition name="badge-pop">
                 <span
