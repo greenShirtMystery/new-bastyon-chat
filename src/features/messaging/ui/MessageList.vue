@@ -112,8 +112,22 @@ const handlePollEnd = (messageId: string) => {
   endPoll(messageId);
 };
 
+/** After a reaction toggle, keep the bottom edge anchored (Telegram-style). */
+const keepBottomAnchored = () => {
+  if (!isNearBottom.value) return;
+  const el = getScrollContainer();
+  if (!el) return;
+  // Wait for DOM update (reaction row appears/disappears), then pin to bottom
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      el.scrollTop = el.scrollHeight + 9999;
+    });
+  });
+};
+
 const handleToggleReactionWithEffect = (messageId: string, emoji: string) => {
   toggleReaction(messageId, emoji);
+  keepBottomAnchored();
   if (themeStore.animatedReactions) {
     lastReactionEmoji.value = emoji;
     setTimeout(() => { lastReactionEmoji.value = null; }, 100);
@@ -122,6 +136,7 @@ const handleToggleReactionWithEffect = (messageId: string, emoji: string) => {
 
 const handleContextReaction = (emoji: string, message: import("@/entities/chat").Message) => {
   toggleReaction(message.id, emoji);
+  keepBottomAnchored();
   themeStore.addRecentEmoji(emoji);
   if (themeStore.animatedReactions) {
     lastReactionEmoji.value = emoji;
