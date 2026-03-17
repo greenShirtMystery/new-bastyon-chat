@@ -12,7 +12,7 @@ import { defineStore } from "pinia";
 import { computed, ref, shallowRef, triggerRef } from "vue";
 
 import type { ChatDbKit, ParsedMessage, LocalRoom } from "@/shared/lib/local-db";
-import { useLiveQuery, localToMessages, messageStatusToLocal, localStatusToMessageStatus, deriveOutboundStatus } from "@/shared/lib/local-db";
+import { useLiveQuery, localToMessages, localStatusToMessageStatus, deriveOutboundStatus } from "@/shared/lib/local-db";
 import type { ChatRoom, FileInfo, LinkPreview, Message, PollInfo, ReplyTo, TransferInfo } from "./types";
 import { MessageStatus, MessageType } from "./types";
 
@@ -733,6 +733,7 @@ export const useChatStore = defineStore(NAMESPACE, () => {
 
     // Dual-write: persist rooms to Dexie
     if (chatDbKitRef.value) {
+      const dbKit = chatDbKitRef.value;
       const localRooms: LocalRoom[] = newRooms.map(r => ({
         id: r.id,
         name: r.name,
@@ -745,20 +746,35 @@ export const useChatStore = defineStore(NAMESPACE, () => {
         updatedAt: r.updatedAt,
         syncedAt: Date.now(),
         hasMoreHistory: true,
+        lastReadInboundTs: 0,
+        lastReadOutboundTs: 0,
         lastMessagePreview: r.lastMessage?.deleted
           ? "🚫 Message deleted"
           : r.lastMessage?.content?.slice(0, 200),
         lastMessageTimestamp: r.lastMessage?.timestamp,
         lastMessageSenderId: r.lastMessage?.senderId,
         lastMessageType: r.lastMessage?.type,
-        lastMessageStatus: r.lastMessage?.status
-          ? messageStatusToLocal(r.lastMessage.status)
-          : undefined,
         lastMessageEventId: r.lastMessage?.id || undefined,
       }));
-      chatDbKitRef.value.rooms.bulkUpsertRooms(localRooms).catch(e => {
-        console.warn("[chat-store] Dexie room sync failed:", e);
-      });
+
+      // Preserve existing watermarks (bulkPut overwrites entire rows)
+      (async () => {
+        try {
+          const existingRooms = await dbKit.rooms.getJoinedRooms();
+          const existingMap = new Map(existingRooms.map(r => [r.id, r]));
+          for (const lr of localRooms) {
+            const existing = existingMap.get(lr.id);
+            if (existing) {
+              lr.lastReadInboundTs = existing.lastReadInboundTs ?? 0;
+              lr.lastReadOutboundTs = existing.lastReadOutboundTs ?? 0;
+              lr.unreadCount = existing.unreadCount;
+            }
+          }
+          await dbKit.rooms.bulkUpsertRooms(localRooms);
+        } catch (e) {
+          console.warn("[chat-store] Dexie room sync failed:", e);
+        }
+      })();
     }
 
     // Build user display name cache from room members (sync — no API calls)
@@ -942,6 +958,7 @@ export const useChatStore = defineStore(NAMESPACE, () => {
 
     // Dual-write: persist changed rooms to Dexie
     if (chatDbKitRef.value && changed.size > 0) {
+      const dbKit = chatDbKitRef.value;
       const changedLocalRooms: LocalRoom[] = [];
       for (const roomId of changed) {
         const r = roomsMap.get(roomId);
@@ -958,22 +975,36 @@ export const useChatStore = defineStore(NAMESPACE, () => {
           updatedAt: r.updatedAt,
           syncedAt: Date.now(),
           hasMoreHistory: true,
+          lastReadInboundTs: 0,
+          lastReadOutboundTs: 0,
           lastMessagePreview: r.lastMessage?.deleted
             ? "🚫 Message deleted"
             : r.lastMessage?.content?.slice(0, 200),
           lastMessageTimestamp: r.lastMessage?.timestamp,
           lastMessageSenderId: r.lastMessage?.senderId,
           lastMessageType: r.lastMessage?.type,
-          lastMessageStatus: r.lastMessage?.status
-            ? messageStatusToLocal(r.lastMessage.status)
-            : undefined,
           lastMessageEventId: r.lastMessage?.id || undefined,
         });
       }
       if (changedLocalRooms.length > 0) {
-        chatDbKitRef.value.rooms.bulkUpsertRooms(changedLocalRooms).catch(e => {
-          console.warn("[chat-store] Dexie incremental room sync failed:", e);
-        });
+        // Preserve existing watermarks (bulkPut overwrites entire rows)
+        (async () => {
+          try {
+            const existingRooms = await dbKit.rooms.getJoinedRooms();
+            const existingMap = new Map(existingRooms.map(r => [r.id, r]));
+            for (const lr of changedLocalRooms) {
+              const existing = existingMap.get(lr.id);
+              if (existing) {
+                lr.lastReadInboundTs = existing.lastReadInboundTs ?? 0;
+                lr.lastReadOutboundTs = existing.lastReadOutboundTs ?? 0;
+                lr.unreadCount = existing.unreadCount;
+              }
+            }
+            await dbKit.rooms.bulkUpsertRooms(changedLocalRooms);
+          } catch (e) {
+            console.warn("[chat-store] Dexie incremental room sync failed:", e);
+          }
+        })();
       }
     }
 

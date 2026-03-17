@@ -17,7 +17,7 @@ export type {
 } from "./schema";
 export { DecryptionWorker } from "./decryption-worker";
 
-export { localToMessage, localToMessages, messageStatusToLocal, localStatusToMessageStatus, deriveOutboundStatus } from "./mappers";
+export { localToMessage, localToMessages, localStatusToMessageStatus, deriveOutboundStatus } from "./mappers";
 export { MessageRepository } from "./message-repository";
 export { RoomRepository } from "./room-repository";
 export { UserRepository } from "./user-repository";
