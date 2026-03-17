@@ -59,7 +59,7 @@ const MAX_ATTEMPTS = 3;
 
 export function useScrollToMessage(
   virtualItems: Ref<Array<VirtualItem>>,
-  scrollerRef: Ref<{ scrollToItem: (idx: number) => void; $el: HTMLElement } | undefined>,
+  scrollerRef: Ref<{ scrollToIndex: (idx: number) => void; $el?: HTMLElement } | undefined>,
   getScrollContainer: () => HTMLElement | null,
 ) {
   const scrollTarget = ref<ScrollTarget | null>(null);
@@ -251,7 +251,7 @@ export function useScrollToMessage(
       return;
     }
 
-    scroller.scrollToItem(idx);
+    scroller.scrollToIndex(idx);
 
     const el = await waitForElement(messageId);
     if (el) {

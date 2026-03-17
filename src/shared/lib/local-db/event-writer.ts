@@ -35,6 +35,8 @@ export interface ParsedMessage {
   systemMeta?: { template: string; senderAddr: string; targetAddr?: string };
   /** Raw encrypted event JSON — stored for decryption retry when content is "[encrypted]" */
   encryptedRaw?: Record<string, unknown>;
+  /** Reactions parsed from timeline — written to Dexie during bulk load */
+  reactions?: Record<string, { count: number; users: string[]; myEventId?: string }>;
 }
 
 /** A parsed reaction event */
@@ -344,6 +346,7 @@ export class EventWriter {
       linkPreview: parsed.linkPreview,
       deleted: parsed.deleted,
       systemMeta: parsed.systemMeta,
+      reactions: parsed.reactions,
       // Decryption retry metadata
       encryptedBody: isEncrypted ? JSON.stringify(parsed.encryptedRaw) : undefined,
       decryptionStatus: isEncrypted ? "pending" : "ok",
@@ -356,12 +359,12 @@ export class EventWriter {
     content: string,
     transferAmount?: number,
   ): string {
-    if (type === MessageType.image) return "📷 Photo";
-    if (type === MessageType.video) return "🎬 Video";
-    if (type === MessageType.audio) return "🎵 Audio";
-    if (type === MessageType.file) return "📎 File";
-    if (type === MessageType.poll) return "📊 Poll";
-    if (type === MessageType.transfer) return `💰 ${transferAmount ?? 0} PKOIN`;
+    if (type === MessageType.image) return "[photo]";
+    if (type === MessageType.video) return "[video]";
+    if (type === MessageType.audio) return "[voice message]";
+    if (type === MessageType.file) return "[file]";
+    if (type === MessageType.poll) return "[poll]";
+    if (type === MessageType.transfer) return `[transfer] ${transferAmount ?? 0} PKOIN`;
     return content;
   }
 

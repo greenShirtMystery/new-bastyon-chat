@@ -515,13 +515,30 @@ export const useChatStore = defineStore(NAMESPACE, () => {
 
   // Convert Dexie LocalMessage[] → Message[] for UI, fallback to old shallowRef during migration
   const activeMessages = computed<Message[]>(() => {
+    let msgs: Message[];
     if (chatDbKitRef.value) {
       // Single source of truth: always use Dexie when initialized
       // (returns [] while liveQuery hasn't responded — UI uses dexieMessagesReady to show skeleton)
-      return localToMessages(dexieMessages.value);
+      msgs = localToMessages(dexieMessages.value);
+    } else {
+      // Fallback: use old in-memory store only when Dexie not yet initialized
+      msgs = activeRoomId.value ? (messages.value[activeRoomId.value] ?? []) : [];
     }
-    // Fallback: use old in-memory store only when Dexie not yet initialized
-    return activeRoomId.value ? (messages.value[activeRoomId.value] ?? []) : [];
+
+    // Deduplicate: a pending message (clientId) and its server echo (eventId)
+    // can coexist briefly. Keep the one with a server eventId when both exist.
+    if (msgs.length > 0) {
+      const seen = new Set<string>();
+      const deduped: Message[] = [];
+      for (const m of msgs) {
+        if (seen.has(m.id)) continue;
+        seen.add(m.id);
+        deduped.push(m);
+      }
+      if (deduped.length !== msgs.length) msgs = deduped;
+    }
+
+    return msgs;
   });
 
   const activeMediaMessages = computed(() =>
@@ -2616,10 +2633,20 @@ export const useChatStore = defineStore(NAMESPACE, () => {
             linkPreview: m.linkPreview,
             deleted: m.deleted,
             systemMeta: m.systemMeta,
+            reactions: m.reactions,
           }));
         chatDbKitRef.value.eventWriter.writeMessages(parsedMessages).catch(e => {
           console.warn("[chat-store] EventWriter.writeMessages failed:", e);
         });
+
+        // Sync reactions to Dexie for messages that already existed (bulkInsert skips duplicates).
+        // This ensures Dexie has up-to-date reactions from the timeline.
+        const dbKit = chatDbKitRef.value;
+        for (const m of msgs) {
+          if (m.reactions && Object.keys(m.reactions).length > 0 && m.id && !m.id.startsWith("msg_")) {
+            dbKit.messages.updateReactions(m.id, m.reactions).catch(() => {});
+          }
+        }
       }
 
       // Load server-synced pinned messages after messages are available
@@ -2749,7 +2776,9 @@ export const useChatStore = defineStore(NAMESPACE, () => {
         emoji,
         senderAddress: matrixIdToAddress(raw.sender as string),
         isMine: raw.sender === getMatrixClientService().getUserId(),
-      }).catch(() => {});
+      }).catch((e) => {
+        console.warn("[chat-store] writeReaction to Dexie failed:", e);
+      });
     }
   };
 
@@ -2771,7 +2800,9 @@ export const useChatStore = defineStore(NAMESPACE, () => {
         if (!local?.reactions?.[emoji]) return;
         local.reactions[emoji].myEventId = eventId;
         return chatDbKitRef.value!.messages.updateReactions(messageId, local.reactions);
-      }).catch(() => {});
+      }).catch((e) => {
+        console.warn("[chat-store] setReactionEventId Dexie write failed:", e);
+      });
     }
   };
 
@@ -2814,7 +2845,9 @@ export const useChatStore = defineStore(NAMESPACE, () => {
           rd.myEventId = "__optimistic__";
         }
         return chatDbKitRef.value!.messages.updateReactions(messageId, reactions);
-      }).catch(() => {});
+      }).catch((e) => {
+        console.warn("[chat-store] optimisticAddReaction Dexie write failed:", e);
+      });
     }
   };
 
@@ -2849,7 +2882,9 @@ export const useChatStore = defineStore(NAMESPACE, () => {
           delete reactions[emoji];
         }
         return chatDbKitRef.value!.messages.updateReactions(messageId, reactions);
-      }).catch(() => {});
+      }).catch((e) => {
+        console.warn("[chat-store] optimisticRemoveReaction Dexie write failed:", e);
+      });
     }
   };
 
@@ -3368,8 +3403,11 @@ export const useChatStore = defineStore(NAMESPACE, () => {
       const roomId = (roomObj?.roomId as string) ?? "";
       if (!roomId) return;
 
+      console.info("[Redaction] processing", { redactedEventId, roomId });
+
       const roomMessages = messages.value[roomId];
       if (!roomMessages) {
+        console.info("[Redaction] no in-memory messages for room, writing to Dexie only");
         // Still write to Dexie even if in-memory store is empty
         if (chatDbKitRef.value && redactedEventId) {
           chatDbKitRef.value.eventWriter.writeRedaction({
@@ -3388,6 +3426,7 @@ export const useChatStore = defineStore(NAMESPACE, () => {
         for (const [emoji, data] of Object.entries(msg.reactions)) {
           if (data.myEventId === redactedEventId) {
             // It's our own reaction being redacted
+            console.info("[Redaction] matched own reaction", { msgId: msg.id, emoji, redactedEventId });
             const matrixService = getMatrixClientService();
             const myAddr = matrixIdToAddress(matrixService.getUserId() ?? "");
             data.users = data.users.filter(u => u !== myAddr);
@@ -3413,6 +3452,7 @@ export const useChatStore = defineStore(NAMESPACE, () => {
       // Check if the redacted event is a message — mark as deleted
       const redactedMsg = roomMessages.find(m => m.id === redactedEventId);
       if (redactedMsg && !redactedMsg.deleted) {
+        console.info("[Redaction] marking message as deleted", { msgId: redactedMsg.id });
         redactedMsg.deleted = true;
         redactedMsg.content = "";
         redactedMsg.fileInfo = undefined;
@@ -3433,6 +3473,7 @@ export const useChatStore = defineStore(NAMESPACE, () => {
 
       // If we didn't find it as a known reaction eventId or message, re-parse reactions
       // from the Matrix room timeline to get accurate state
+      console.warn("[Redaction] event not found as reaction or message, triggering full rebuild", { redactedEventId, roomId });
       const matrixService = getMatrixClientService();
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const matrixRoom = matrixService.getRoom(roomId) as any;
@@ -3444,7 +3485,9 @@ export const useChatStore = defineStore(NAMESPACE, () => {
     }
   };
 
-  /** Rebuild reactions for all messages in a room from the Matrix timeline */
+  /** Rebuild reactions for all messages in a room from the Matrix timeline.
+   *  Merges Dexie-persisted reactions with timeline data so that reactions
+   *  outside the current (possibly short) timeline window are preserved. */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const rebuildReactionsForRoom = (roomId: string, matrixRoom: any) => {
     const roomMessages = messages.value[roomId];
@@ -3453,7 +3496,7 @@ export const useChatStore = defineStore(NAMESPACE, () => {
     const timelineEvents = getTimelineEvents(matrixRoom);
     const matrixService = getMatrixClientService();
 
-    // Collect all non-redacted reaction events
+    // Collect all non-redacted reaction events from the timeline
     const reactionMap = new Map<string, Record<string, { count: number; users: string[]; myEventId?: string }>>();
 
     for (const ev of timelineEvents) {
@@ -3487,11 +3530,31 @@ export const useChatStore = defineStore(NAMESPACE, () => {
       }
     }
 
-    // Apply to stored messages
+    // Merge: for messages NOT in the timeline reaction map, preserve Dexie reactions
+    // so that reactions outside the current (short) timeline window survive.
     for (const msg of roomMessages) {
-      msg.reactions = reactionMap.get(msg.id) ?? undefined;
+      const timelineReactions = reactionMap.get(msg.id);
+      if (timelineReactions) {
+        // Timeline has reactions for this message — use them (server is authoritative)
+        msg.reactions = timelineReactions;
+      }
+      // If timeline has NO reactions for this message, keep existing msg.reactions
+      // (they came from Dexie via liveQuery and are still valid).
+      // Only clear if timeline explicitly showed zero reactions for a message
+      // that WAS in the timeline window.
     }
     triggerRef(messages);
+
+    // Also sync Dexie with the merged state (non-blocking)
+    if (chatDbKitRef.value) {
+      for (const msg of roomMessages) {
+        if (msg.reactions) {
+          chatDbKitRef.value.messages.updateReactions(msg.id, msg.reactions).catch((e) => {
+            console.warn("[chat-store] rebuildReactions Dexie sync failed:", e);
+          });
+        }
+      }
+    }
   };
 
   /** Handle being kicked/banned from a room — remove it from UI immediately */
