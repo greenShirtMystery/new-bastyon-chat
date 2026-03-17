@@ -25,8 +25,7 @@ export class MessageRepository {
       .limit(limit)
       .toArray();
 
-    // Exclude soft-deleted messages, return in chronological order
-    return msgs.filter((m) => !m.softDeleted).reverse();
+    return msgs.reverse();
   }
 
   /** Get a single message by server eventId */
@@ -50,6 +49,18 @@ export class MessageRepository {
       ])
       .toArray();
     return pending.sort((a, b) => a.timestamp - b.timestamp);
+  }
+
+  /** Get the last non-deleted message in a room (for preview after deletion) */
+  async getLastNonDeleted(roomId: string): Promise<LocalMessage | undefined> {
+    const msgs = await this.db.messages
+      .where("[roomId+timestamp]")
+      .between([roomId, Dexie.minKey], [roomId, Dexie.maxKey])
+      .reverse()
+      .filter((m) => !m.softDeleted && !m.deleted)
+      .limit(1)
+      .toArray();
+    return msgs[0];
   }
 
   // ---------------------------------------------------------------------------
@@ -127,21 +138,52 @@ export class MessageRepository {
       .map((m) => m.eventId)
       .filter((id): id is string => id !== null);
 
-    // Dedup: skip messages whose eventId already exists in DB
+    // Collect existing eventIds
+    const existingEventIds = new Set<string>();
     if (eventIds.length > 0) {
       const existingEvents = await this.db.messages
         .where("eventId")
         .anyOf(eventIds)
         .toArray();
-      const existingEventIds = new Set(existingEvents.map((e) => e.eventId));
-      const filtered = messages.filter(
-        (m) => !m.eventId || !existingEventIds.has(m.eventId),
-      );
-      if (filtered.length > 0) {
-        await this.db.messages.bulkAdd(filtered);
+      for (const e of existingEvents) {
+        if (e.eventId) existingEventIds.add(e.eventId);
       }
-    } else {
-      await this.db.messages.bulkAdd(messages);
+    }
+
+    // Collect clientIds to check against pending messages
+    const clientIds = messages
+      .map((m) => m.clientId)
+      .filter((id): id is string => !!id);
+    const existingClientIds = new Set<string>();
+    if (clientIds.length > 0) {
+      const existingByClient = await this.db.messages
+        .where("clientId")
+        .anyOf(clientIds)
+        .toArray();
+      for (const e of existingByClient) {
+        if (e.clientId) existingClientIds.add(e.clientId);
+        // Also update pending messages with server eventId
+        if (e.status === "pending" || e.status === "syncing") {
+          const incoming = messages.find((m) => m.clientId === e.clientId);
+          if (incoming?.eventId && e.localId) {
+            await this.db.messages.update(e.localId, {
+              eventId: incoming.eventId,
+              status: "synced" as LocalMessageStatus,
+              serverTs: incoming.serverTs ?? incoming.timestamp,
+            });
+          }
+        }
+      }
+    }
+
+    const filtered = messages.filter(
+      (m) =>
+        (!m.eventId || !existingEventIds.has(m.eventId)) &&
+        (!m.clientId || !existingClientIds.has(m.clientId)),
+    );
+
+    if (filtered.length > 0) {
+      await this.db.messages.bulkAdd(filtered);
     }
   }
 
@@ -239,7 +281,7 @@ export class MessageRepository {
     contextSize = 25,
   ): Promise<{ messages: LocalMessage[]; targetIndex: number } | null> {
     const target = await this.getByEventId(targetEventId);
-    if (!target || target.softDeleted || target.roomId !== roomId) return null;
+    if (!target || target.roomId !== roomId) return null;
 
     const [before, after] = await Promise.all([
       this.db.messages
@@ -255,7 +297,7 @@ export class MessageRepository {
         .toArray(),
     ]);
 
-    const all = [...before.reverse(), target, ...after].filter(m => !m.softDeleted);
+    const all = [...before.reverse(), target, ...after];
     const targetIndex = all.findIndex(m => m.eventId === targetEventId);
 
     return { messages: all, targetIndex };
@@ -272,6 +314,6 @@ export class MessageRepository {
       .between([roomId, afterTimestamp], [roomId, Dexie.maxKey], false, true)
       .limit(limit)
       .toArray();
-    return msgs.filter(m => !m.softDeleted);
+    return msgs;
   }
 }

@@ -3261,12 +3261,14 @@ export const useChatStore = defineStore(NAMESPACE, () => {
         }
       }
 
-      // Dual-write: persist redaction to Dexie
+      // Persist redaction to Dexie (handles room preview update internally)
       if (chatDbKitRef.value && redactedEventId) {
         chatDbKitRef.value.eventWriter.writeRedaction({
           redactedEventId,
           roomId,
-        }).catch(() => {});
+        }).catch((e) => {
+          console.warn("[chat-store] writeRedaction failed:", e);
+        });
       }
 
       // Check if the redacted event is a message — mark as deleted

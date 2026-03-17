@@ -220,9 +220,35 @@ export class EventWriter {
   // Redactions (deletions)
   // ---------------------------------------------------------------------------
 
-  /** Mark a message as soft-deleted */
+  /** Mark a message as soft-deleted and update room preview if needed */
   async writeRedaction(redaction: ParsedRedaction): Promise<void> {
+    // Get the message before soft-deleting to check if it affects room preview
+    const deletedMsg = await this.messageRepo.getByEventId(redaction.redactedEventId);
     await this.messageRepo.softDelete(redaction.redactedEventId);
+
+    // Update room preview if the deleted message might have been the latest
+    if (deletedMsg) {
+      const room = await this.roomRepo.getRoom(redaction.roomId);
+      const wasLastMessage = room?.lastMessageTimestamp != null
+        && deletedMsg.timestamp >= room.lastMessageTimestamp;
+
+      if (wasLastMessage || !room?.lastMessageTimestamp) {
+        const prevMsg = await this.messageRepo.getLastNonDeleted(redaction.roomId);
+        if (prevMsg) {
+          await this.updateRoomPreviewFromLocal(prevMsg);
+        } else {
+          // All messages deleted — show tombstone preview
+          await this.roomRepo.updateLastMessage(
+            redaction.roomId,
+            "🚫 Message deleted",
+            deletedMsg.timestamp,
+            deletedMsg.senderId,
+            deletedMsg.type,
+          );
+        }
+      }
+    }
+
     this.onChange?.(redaction.roomId);
   }
 
@@ -317,24 +343,50 @@ export class EventWriter {
     };
   }
 
+  /** Generate preview text from message type and content */
+  private getPreviewText(
+    type: MessageType,
+    content: string,
+    transferAmount?: number,
+  ): string {
+    if (type === MessageType.image) return "📷 Photo";
+    if (type === MessageType.video) return "🎬 Video";
+    if (type === MessageType.audio) return "🎵 Audio";
+    if (type === MessageType.file) return "📎 File";
+    if (type === MessageType.poll) return "📊 Poll";
+    if (type === MessageType.transfer) return `💰 ${transferAmount ?? 0} PKOIN`;
+    return content;
+  }
+
   /** Update room metadata after a new message */
   private async updateRoomPreview(parsed: ParsedMessage): Promise<void> {
-    let preview = parsed.content;
-    if (parsed.type === MessageType.image) preview = "📷 Photo";
-    else if (parsed.type === MessageType.video) preview = "🎬 Video";
-    else if (parsed.type === MessageType.audio) preview = "🎵 Audio";
-    else if (parsed.type === MessageType.file) preview = "📎 File";
-    else if (parsed.type === MessageType.poll) preview = "📊 Poll";
-    else if (parsed.type === MessageType.transfer) {
-      preview = `💰 ${parsed.transferInfo?.amount ?? 0} PKOIN`;
-    }
-
+    const preview = this.getPreviewText(
+      parsed.type,
+      parsed.content,
+      parsed.transferInfo?.amount,
+    );
     await this.roomRepo.updateLastMessage(
       parsed.roomId,
       preview,
       parsed.timestamp,
       parsed.senderId,
       parsed.type,
+    );
+  }
+
+  /** Update room preview from an existing LocalMessage (used after deletion) */
+  private async updateRoomPreviewFromLocal(msg: LocalMessage): Promise<void> {
+    const preview = this.getPreviewText(
+      msg.type,
+      msg.content,
+      msg.transferInfo?.amount,
+    );
+    await this.roomRepo.updateLastMessage(
+      msg.roomId,
+      preview,
+      msg.serverTs ?? msg.timestamp,
+      msg.senderId,
+      msg.type,
     );
   }
 }

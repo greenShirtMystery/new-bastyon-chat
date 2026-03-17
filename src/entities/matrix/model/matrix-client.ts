@@ -364,9 +364,9 @@ export class MatrixClientService {
   }
 
   /** Send encrypted text message. Returns server event_id. */
-  async sendEncryptedText(roomId: string, content: Record<string, unknown>): Promise<string> {
+  async sendEncryptedText(roomId: string, content: Record<string, unknown>, txnId?: string): Promise<string> {
     if (!this.client) throw new Error("Client not initialized");
-    const res = await this.client.sendEvent(roomId, "m.room.message", content);
+    const res = await this.client.sendEvent(roomId, "m.room.message", content, txnId);
     return (res as { event_id: string }).event_id;
   }
 

@@ -7,24 +7,25 @@ import { MessageStatus } from "@/entities/chat/model/types";
  * Used by liveQuery consumers so components don't know about LocalMessage.
  */
 export function localToMessage(local: LocalMessage): Message {
+  const isDeleted = local.deleted || local.softDeleted;
   return {
     id: local.eventId ?? local.clientId,
     roomId: local.roomId,
     senderId: local.senderId,
-    content: local.content,
+    content: isDeleted ? "" : local.content,
     timestamp: local.timestamp,
     status: localStatusToMessageStatus(local.status),
     type: local.type,
-    fileInfo: local.fileInfo,
-    replyTo: local.replyTo,
-    reactions: local.reactions,
+    fileInfo: isDeleted ? undefined : local.fileInfo,
+    replyTo: isDeleted ? undefined : local.replyTo,
+    reactions: isDeleted ? undefined : local.reactions,
     edited: local.edited,
-    forwardedFrom: local.forwardedFrom,
+    forwardedFrom: isDeleted ? undefined : local.forwardedFrom,
     callInfo: local.callInfo,
-    pollInfo: local.pollInfo,
-    transferInfo: local.transferInfo,
-    linkPreview: local.linkPreview,
-    deleted: local.deleted ?? local.softDeleted,
+    pollInfo: isDeleted ? undefined : local.pollInfo,
+    transferInfo: isDeleted ? undefined : local.transferInfo,
+    linkPreview: isDeleted ? undefined : local.linkPreview,
+    deleted: isDeleted,
     systemMeta: local.systemMeta,
   };
 }
