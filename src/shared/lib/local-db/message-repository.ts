@@ -33,6 +33,12 @@ export class MessageRepository {
     return this.db.messages.where("eventId").equals(eventId).first();
   }
 
+  /** Get multiple messages by server eventIds (single query) */
+  async getByEventIds(eventIds: string[]): Promise<LocalMessage[]> {
+    if (eventIds.length === 0) return [];
+    return this.db.messages.where("eventId").anyOf(eventIds).toArray();
+  }
+
   /** Get a single message by clientId */
   async getByClientId(clientId: string): Promise<LocalMessage | undefined> {
     return this.db.messages.where("clientId").equals(clientId).first();
@@ -216,17 +222,17 @@ export class MessageRepository {
 
   /** Mark replyTo.deleted on all messages referencing a given eventId */
   async markReplyDeleted(deletedEventId: string): Promise<void> {
-    // Dexie doesn't index nested fields, so we scan messages that have replyTo
-    const referring = await this.db.messages
+    // No index on nested replyTo.id — full table filter is unavoidable without schema migration.
+    // Uses modify() to avoid read-modify-write race with concurrent reaction/edit updates.
+    await this.db.messages
       .filter((m) => m.replyTo?.id === deletedEventId)
-      .toArray();
-    if (referring.length === 0) return;
-    await this.db.messages.bulkPut(
-      referring.map((m) => ({
-        ...m,
-        replyTo: { ...m.replyTo!, deleted: true, senderId: "", content: "" },
-      })),
-    );
+      .modify((m: LocalMessage) => {
+        if (m.replyTo) {
+          m.replyTo.deleted = true;
+          m.replyTo.senderId = "";
+          m.replyTo.content = "";
+        }
+      });
   }
 
   /** Update reactions on a message */
