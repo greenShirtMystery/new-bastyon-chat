@@ -409,6 +409,7 @@ watch(
 
     // ═══ PHASE 2: DETERMINE ANCHOR ═══
     let anchorItemIndex = -1;
+    let scrollToBanner = false;
 
     if (isChatDbReady()) {
       const dbKit = getChatDb();
@@ -418,27 +419,38 @@ watch(
       const watermarkTs = room?.lastReadInboundTs ?? 0;
       const myAddr = authStore.address ?? "";
 
+      if (import.meta.env.DEV) {
+        console.log("[unread-banner] roomId=%s watermarkTs=%d myAddr=%s", roomId, watermarkTs, myAddr);
+      }
+
       if (watermarkTs > 0) {
         const unreadCount = await dbKit.messages.countInboundAfter(roomId, watermarkTs, myAddr);
         if (isStale()) return;
+
+        if (import.meta.env.DEV) {
+          console.log("[unread-banner] unreadCount=%d", unreadCount);
+        }
 
         if (unreadCount > 0) {
           const lastReadMsg = await dbKit.messages.getLastMessageAtOrBefore(roomId, watermarkTs);
           if (isStale()) return;
 
           const lastReadId = lastReadMsg?.eventId ?? lastReadMsg?.clientId ?? null;
+
+          if (import.meta.env.DEV) {
+            console.log("[unread-banner] lastReadId=%s lastReadMsg.ts=%d", lastReadId, lastReadMsg?.timestamp);
+          }
+
           freezeBanner(lastReadId, unreadCount);
 
-          const { messages: localMsgs, anchorIndex } = await dbKit.messages.getMessagesAroundTimestamp(
-            roomId, watermarkTs, 15, 35
-          );
-          if (isStale()) return;
-
-          if (localMsgs.length > 0) {
-            const mapped = localMsgs.map(toMessage);
-            chatStore.enterDetachedMode(roomId, mapped);
-            anchorItemIndex = anchorIndex;
+          // Ensure the Dexie liveQuery window is large enough to include the
+          // last-read message so the banner can match it in virtualItems.
+          const neededWindow = unreadCount + 20;
+          if (neededWindow > chatStore.messageWindowSize) {
+            chatStore.expandMessageWindow(neededWindow - chatStore.messageWindowSize);
           }
+
+          scrollToBanner = true;
         }
       } else {
         // Bootstrap watermark for legacy rooms (first visit after feature was added).
@@ -507,12 +519,15 @@ watch(
       if (isStale()) return;
 
       const el = getScrollContainer();
-      if (anchorItemIndex >= 0 && hasBanner()) {
+      if (scrollToBanner && hasBanner()) {
         const bannerIdx = virtualItems.value.findIndex(item => item.type === "unread-banner");
+        if (import.meta.env.DEV) {
+          console.log("[unread-banner] PHASE3 bannerIdx=%d items=%d", bannerIdx, virtualItems.value.length);
+        }
         if (bannerIdx >= 0) {
           scrollerRef.value?.scrollToIndex(bannerIdx, { align: "start" });
-        } else {
-          scrollerRef.value?.scrollToIndex(anchorItemIndex, { align: "start" });
+        } else if (el) {
+          el.scrollTop = el.scrollHeight + 9999;
         }
       } else if (el) {
         el.scrollTop = el.scrollHeight + 9999;
