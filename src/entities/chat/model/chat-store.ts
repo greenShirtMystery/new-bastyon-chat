@@ -2561,12 +2561,15 @@ export const useChatStore = defineStore(NAMESPACE, () => {
       }
     }
 
-    // Fallback: resolve unresolved reply references from Dexie
+    // Fallback: resolve unresolved reply references from Dexie (single batched query)
     if (unresolvedReplyMsgs.length > 0 && chatDbKitRef.value) {
       const db = chatDbKitRef.value;
-      await Promise.all(unresolvedReplyMsgs.map(async (msg) => {
+      const unresolvedIds = unresolvedReplyMsgs.map(m => m.replyTo!.id);
+      const storedMsgs = await db.messages.getByEventIds(unresolvedIds);
+      const storedMap = new Map(storedMsgs.map(m => [m.eventId!, m]));
+      for (const msg of unresolvedReplyMsgs) {
         const replyTo = msg.replyTo!;
-        const stored = await db.messages.getByEventId(replyTo.id);
+        const stored = storedMap.get(replyTo.id);
         if (stored) {
           if (stored.deleted || stored.softDeleted) {
             replyTo.deleted = true;
@@ -2576,7 +2579,7 @@ export const useChatStore = defineStore(NAMESPACE, () => {
             replyTo.type = stored.type;
           }
         }
-      }));
+      }
     }
 
     return msgs;

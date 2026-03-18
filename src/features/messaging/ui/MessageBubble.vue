@@ -246,8 +246,7 @@ const replyPreviewText = computed(() => {
 
 const replyPreviewSender = computed(() => {
   const reply = props.message.replyTo;
-  if (!reply) return "";
-  if (reply.deleted) return t("message.deleted");
+  if (!reply || reply.deleted) return "";
   if (!reply.senderId) return "...";
   return chatStore.getDisplayName(reply.senderId);
 });
@@ -363,9 +362,9 @@ const replyPreviewSender = computed(() => {
         <!-- Reply preview -->
         <div
           v-if="message.replyTo"
-          class="mx-2 mt-1.5 flex cursor-pointer items-start gap-1.5 overflow-hidden rounded-lg px-2 py-1"
-          :class="props.isOwn ? 'bg-white/10' : 'bg-black/5'"
-          @click.stop="emit('scrollToReply', message.replyTo.id)"
+          class="mx-2 mt-1.5 flex items-start gap-1.5 overflow-hidden rounded-lg px-2 py-1"
+          :class="[props.isOwn ? 'bg-white/10' : 'bg-black/5', message.replyTo?.deleted ? 'cursor-default' : 'cursor-pointer']"
+          @click.stop="!message.replyTo?.deleted && emit('scrollToReply', message.replyTo.id)"
         >
           <div class="w-0.5 shrink-0 self-stretch rounded-full"
             :class="props.isOwn ? 'bg-white/70' : 'bg-color-bg-ac'" />
@@ -462,9 +461,9 @@ const replyPreviewSender = computed(() => {
         <!-- Reply preview -->
         <div
           v-if="message.replyTo"
-          class="mx-2 mt-1.5 flex cursor-pointer items-start gap-1.5 overflow-hidden rounded-lg px-2 py-1"
-          :class="props.isOwn ? 'bg-white/10' : 'bg-black/5'"
-          @click.stop="emit('scrollToReply', message.replyTo.id)"
+          class="mx-2 mt-1.5 flex items-start gap-1.5 overflow-hidden rounded-lg px-2 py-1"
+          :class="[props.isOwn ? 'bg-white/10' : 'bg-black/5', message.replyTo?.deleted ? 'cursor-default' : 'cursor-pointer']"
+          @click.stop="!message.replyTo?.deleted && emit('scrollToReply', message.replyTo.id)"
         >
           <div class="w-0.5 shrink-0 self-stretch rounded-full"
             :class="props.isOwn ? 'bg-white/70' : 'bg-color-bg-ac'" />
@@ -528,9 +527,9 @@ const replyPreviewSender = computed(() => {
         <!-- Reply preview -->
         <div
           v-if="message.replyTo"
-          class="mb-1 flex cursor-pointer items-start gap-1.5 overflow-hidden rounded-lg px-2 py-1"
-          :class="props.isOwn ? 'bg-white/10' : 'bg-black/5'"
-          @click.stop="emit('scrollToReply', message.replyTo.id)"
+          class="mb-1 flex items-start gap-1.5 overflow-hidden rounded-lg px-2 py-1"
+          :class="[props.isOwn ? 'bg-white/10' : 'bg-black/5', message.replyTo?.deleted ? 'cursor-default' : 'cursor-pointer']"
+          @click.stop="!message.replyTo?.deleted && emit('scrollToReply', message.replyTo.id)"
         >
           <div class="w-0.5 shrink-0 self-stretch rounded-full"
             :class="props.isOwn ? 'bg-white/70' : 'bg-color-bg-ac'" />
@@ -565,9 +564,9 @@ const replyPreviewSender = computed(() => {
         <!-- Reply preview -->
         <div
           v-if="message.replyTo"
-          class="mb-1 flex cursor-pointer items-start gap-1.5 overflow-hidden rounded-lg px-2 py-1"
-          :class="props.isOwn ? 'bg-white/10' : 'bg-black/5'"
-          @click.stop="emit('scrollToReply', message.replyTo.id)"
+          class="mb-1 flex items-start gap-1.5 overflow-hidden rounded-lg px-2 py-1"
+          :class="[props.isOwn ? 'bg-white/10' : 'bg-black/5', message.replyTo?.deleted ? 'cursor-default' : 'cursor-pointer']"
+          @click.stop="!message.replyTo?.deleted && emit('scrollToReply', message.replyTo.id)"
         >
           <div class="w-0.5 shrink-0 self-stretch rounded-full"
             :class="props.isOwn ? 'bg-white/70' : 'bg-color-bg-ac'" />
@@ -684,9 +683,9 @@ const replyPreviewSender = computed(() => {
         <!-- Reply preview -->
         <div
           v-if="message.replyTo"
-          class="mb-1 flex cursor-pointer items-start gap-1.5 overflow-hidden rounded-lg px-2 py-1"
-          :class="props.isOwn ? 'bg-white/10' : 'bg-black/5'"
-          @click.stop="emit('scrollToReply', message.replyTo.id)"
+          class="mb-1 flex items-start gap-1.5 overflow-hidden rounded-lg px-2 py-1"
+          :class="[props.isOwn ? 'bg-white/10' : 'bg-black/5', message.replyTo?.deleted ? 'cursor-default' : 'cursor-pointer']"
+          @click.stop="!message.replyTo?.deleted && emit('scrollToReply', message.replyTo.id)"
         >
           <div class="w-0.5 shrink-0 self-stretch rounded-full"
             :class="props.isOwn ? 'bg-white/70' : 'bg-color-bg-ac'" />
