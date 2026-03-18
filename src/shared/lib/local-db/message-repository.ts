@@ -33,6 +33,12 @@ export class MessageRepository {
     return this.db.messages.where("eventId").equals(eventId).first();
   }
 
+  /** Get multiple messages by server eventIds (single query) */
+  async getByEventIds(eventIds: string[]): Promise<LocalMessage[]> {
+    if (eventIds.length === 0) return [];
+    return this.db.messages.where("eventId").anyOf(eventIds).toArray();
+  }
+
   /** Get a single message by clientId */
   async getByClientId(clientId: string): Promise<LocalMessage | undefined> {
     return this.db.messages.where("clientId").equals(clientId).first();
@@ -211,6 +217,21 @@ export class MessageRepository {
       .modify({
         softDeleted: true,
         deletedAt: Date.now(),
+      });
+  }
+
+  /** Mark replyTo.deleted on all messages referencing a given eventId */
+  async markReplyDeleted(deletedEventId: string): Promise<void> {
+    // No index on nested replyTo.id — full table filter is unavoidable without schema migration.
+    // Uses modify() to avoid read-modify-write race with concurrent reaction/edit updates.
+    await this.db.messages
+      .filter((m) => m.replyTo?.id === deletedEventId)
+      .modify((m: LocalMessage) => {
+        if (m.replyTo) {
+          m.replyTo.deleted = true;
+          m.replyTo.senderId = "";
+          m.replyTo.content = "";
+        }
       });
   }
 

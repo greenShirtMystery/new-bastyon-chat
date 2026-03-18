@@ -2546,6 +2546,7 @@ export const useChatStore = defineStore(NAMESPACE, () => {
     }
 
     // Resolve reply references (fill in sender/content/type from parsed messages)
+    const unresolvedReplyMsgs: Message[] = [];
     for (const msg of msgs) {
       if (msg.replyTo?.id) {
         const referenced = msgMap.get(msg.replyTo.id);
@@ -2553,6 +2554,30 @@ export const useChatStore = defineStore(NAMESPACE, () => {
           msg.replyTo.senderId = referenced.senderId;
           msg.replyTo.content = stripBastyonLinks(stripMentionAddresses(referenced.content)).slice(0, 100);
           msg.replyTo.type = referenced.type;
+          if (referenced.deleted) msg.replyTo.deleted = true;
+        } else {
+          unresolvedReplyMsgs.push(msg);
+        }
+      }
+    }
+
+    // Fallback: resolve unresolved reply references from Dexie (single batched query)
+    if (unresolvedReplyMsgs.length > 0 && chatDbKitRef.value) {
+      const db = chatDbKitRef.value;
+      const unresolvedIds = unresolvedReplyMsgs.map(m => m.replyTo!.id);
+      const storedMsgs = await db.messages.getByEventIds(unresolvedIds);
+      const storedMap = new Map(storedMsgs.map(m => [m.eventId!, m]));
+      for (const msg of unresolvedReplyMsgs) {
+        const replyTo = msg.replyTo!;
+        const stored = storedMap.get(replyTo.id);
+        if (stored) {
+          if (stored.deleted || stored.softDeleted) {
+            replyTo.deleted = true;
+          } else {
+            replyTo.senderId = stored.senderId;
+            replyTo.content = stripBastyonLinks(stripMentionAddresses(stored.content)).slice(0, 100);
+            replyTo.type = stored.type;
+          }
         }
       }
     }
@@ -3349,12 +3374,38 @@ export const useChatStore = defineStore(NAMESPACE, () => {
       if (replyEventId) {
         // Try to find the referenced message in already loaded messages
         const referenced = messages.value[roomId]?.find(m => m.id === replyEventId);
-        replyTo = {
-          id: replyEventId,
-          senderId: referenced?.senderId ?? "",
-          content: referenced ? stripBastyonLinks(stripMentionAddresses(referenced.content)).slice(0, 100) : "",
-          type: referenced?.type,
-        };
+        if (referenced) {
+          replyTo = {
+            id: replyEventId,
+            senderId: referenced.senderId,
+            content: stripBastyonLinks(stripMentionAddresses(referenced.content)).slice(0, 100),
+            type: referenced.type,
+            deleted: referenced.deleted || undefined,
+          };
+        } else {
+          // Fallback: try Dexie for messages outside the current viewport
+          let stored: import("@/shared/lib/local-db/schema").LocalMessage | undefined;
+          if (chatDbKitRef.value) {
+            stored = await chatDbKitRef.value.messages.getByEventId(replyEventId);
+          }
+          if (stored) {
+            const isDeleted = stored.deleted || stored.softDeleted;
+            replyTo = {
+              id: replyEventId,
+              senderId: isDeleted ? "" : stored.senderId,
+              content: isDeleted ? "" : stripBastyonLinks(stripMentionAddresses(stored.content)).slice(0, 100),
+              type: isDeleted ? undefined : stored.type,
+              deleted: isDeleted || undefined,
+            };
+          } else {
+            // Original message not available — leave empty (UI shows "..." not "Deleted")
+            replyTo = {
+              id: replyEventId,
+              senderId: "",
+              content: "",
+            };
+          }
+        }
       }
 
       // Parse forwarded_from metadata
@@ -3509,6 +3560,16 @@ export const useChatStore = defineStore(NAMESPACE, () => {
         redactedMsg.pollInfo = undefined;
         redactedMsg.transferInfo = undefined;
         redactedMsg.forwardedFrom = undefined;
+
+        // Mark replyTo.deleted on any in-memory message that references the redacted one
+        for (const msg of roomMessages) {
+          if (msg.replyTo?.id === redactedEventId) {
+            msg.replyTo.deleted = true;
+            msg.replyTo.senderId = "";
+            msg.replyTo.content = "";
+          }
+        }
+
         // Update room lastMessage preview — show deleted placeholder
         const chatRoom = getRoomById(roomId);
         if (chatRoom && chatRoom.lastMessage?.id === redactedEventId) {

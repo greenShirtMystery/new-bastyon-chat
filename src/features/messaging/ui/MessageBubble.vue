@@ -233,7 +233,8 @@ const handleReply = () => {
 const replyPreviewText = computed(() => {
   const reply = props.message.replyTo;
   if (!reply) return "";
-  if (!reply.senderId && !reply.content) return "Deleted message";
+  if (reply.deleted) return t("message.deleted");
+  if (!reply.senderId && !reply.content) return "...";
   if (reply.type === MessageType.image) return "Photo";
   if (reply.type === MessageType.video) return "Video";
   if (reply.type === MessageType.videoCircle) return "Video message";
@@ -241,6 +242,13 @@ const replyPreviewText = computed(() => {
   if (reply.type === MessageType.file) return reply.content || "File";
   const text = stripBastyonLinks(stripMentionAddresses(reply.content));
   return (text.length > 100 ? text.slice(0, 100) + "\u2026" : text) || "...";
+});
+
+const replyPreviewSender = computed(() => {
+  const reply = props.message.replyTo;
+  if (!reply || reply.deleted) return "";
+  if (!reply.senderId) return "...";
+  return chatStore.getDisplayName(reply.senderId);
 });
 </script>
 
@@ -354,16 +362,16 @@ const replyPreviewText = computed(() => {
         <!-- Reply preview -->
         <div
           v-if="message.replyTo"
-          class="mx-2 mt-1.5 flex cursor-pointer items-start gap-1.5 overflow-hidden rounded-lg px-2 py-1"
-          :class="props.isOwn ? 'bg-white/10' : 'bg-black/5'"
-          @click.stop="emit('scrollToReply', message.replyTo.id)"
+          class="mx-2 mt-1.5 flex items-start gap-1.5 overflow-hidden rounded-lg px-2 py-1"
+          :class="[props.isOwn ? 'bg-white/10' : 'bg-black/5', message.replyTo?.deleted ? 'cursor-default' : 'cursor-pointer']"
+          @click.stop="!message.replyTo?.deleted && emit('scrollToReply', message.replyTo.id)"
         >
           <div class="w-0.5 shrink-0 self-stretch rounded-full"
             :class="props.isOwn ? 'bg-white/70' : 'bg-color-bg-ac'" />
           <div class="min-w-0 flex-1">
             <div class="truncate text-[11px] font-medium"
               :class="props.isOwn ? 'text-white/70' : 'text-color-bg-ac'">
-              {{ message.replyTo.senderId ? chatStore.getDisplayName(message.replyTo.senderId) : 'Deleted message' }}
+              {{ replyPreviewSender }}
             </div>
             <div class="truncate text-[11px] opacity-70">{{ replyPreviewText }}</div>
           </div>
@@ -453,16 +461,16 @@ const replyPreviewText = computed(() => {
         <!-- Reply preview -->
         <div
           v-if="message.replyTo"
-          class="mx-2 mt-1.5 flex cursor-pointer items-start gap-1.5 overflow-hidden rounded-lg px-2 py-1"
-          :class="props.isOwn ? 'bg-white/10' : 'bg-black/5'"
-          @click.stop="emit('scrollToReply', message.replyTo.id)"
+          class="mx-2 mt-1.5 flex items-start gap-1.5 overflow-hidden rounded-lg px-2 py-1"
+          :class="[props.isOwn ? 'bg-white/10' : 'bg-black/5', message.replyTo?.deleted ? 'cursor-default' : 'cursor-pointer']"
+          @click.stop="!message.replyTo?.deleted && emit('scrollToReply', message.replyTo.id)"
         >
           <div class="w-0.5 shrink-0 self-stretch rounded-full"
             :class="props.isOwn ? 'bg-white/70' : 'bg-color-bg-ac'" />
           <div class="min-w-0 flex-1">
             <div class="truncate text-[11px] font-medium"
               :class="props.isOwn ? 'text-white/70' : 'text-color-bg-ac'">
-              {{ message.replyTo.senderId ? chatStore.getDisplayName(message.replyTo.senderId) : 'Deleted message' }}
+              {{ replyPreviewSender }}
             </div>
             <div class="truncate text-[11px] opacity-70">{{ replyPreviewText }}</div>
           </div>
@@ -519,16 +527,16 @@ const replyPreviewText = computed(() => {
         <!-- Reply preview -->
         <div
           v-if="message.replyTo"
-          class="mb-1 flex cursor-pointer items-start gap-1.5 overflow-hidden rounded-lg px-2 py-1"
-          :class="props.isOwn ? 'bg-white/10' : 'bg-black/5'"
-          @click.stop="emit('scrollToReply', message.replyTo.id)"
+          class="mb-1 flex items-start gap-1.5 overflow-hidden rounded-lg px-2 py-1"
+          :class="[props.isOwn ? 'bg-white/10' : 'bg-black/5', message.replyTo?.deleted ? 'cursor-default' : 'cursor-pointer']"
+          @click.stop="!message.replyTo?.deleted && emit('scrollToReply', message.replyTo.id)"
         >
           <div class="w-0.5 shrink-0 self-stretch rounded-full"
             :class="props.isOwn ? 'bg-white/70' : 'bg-color-bg-ac'" />
           <div class="min-w-0 flex-1">
             <div class="truncate text-[11px] font-medium"
               :class="props.isOwn ? 'text-white/70' : 'text-color-bg-ac'">
-              {{ message.replyTo.senderId ? chatStore.getDisplayName(message.replyTo.senderId) : 'Deleted message' }}
+              {{ replyPreviewSender }}
             </div>
             <div class="truncate text-[11px] opacity-70">{{ replyPreviewText }}</div>
           </div>
@@ -556,16 +564,16 @@ const replyPreviewText = computed(() => {
         <!-- Reply preview -->
         <div
           v-if="message.replyTo"
-          class="mb-1 flex cursor-pointer items-start gap-1.5 overflow-hidden rounded-lg px-2 py-1"
-          :class="props.isOwn ? 'bg-white/10' : 'bg-black/5'"
-          @click.stop="emit('scrollToReply', message.replyTo.id)"
+          class="mb-1 flex items-start gap-1.5 overflow-hidden rounded-lg px-2 py-1"
+          :class="[props.isOwn ? 'bg-white/10' : 'bg-black/5', message.replyTo?.deleted ? 'cursor-default' : 'cursor-pointer']"
+          @click.stop="!message.replyTo?.deleted && emit('scrollToReply', message.replyTo.id)"
         >
           <div class="w-0.5 shrink-0 self-stretch rounded-full"
             :class="props.isOwn ? 'bg-white/70' : 'bg-color-bg-ac'" />
           <div class="min-w-0 flex-1">
             <div class="truncate text-[11px] font-medium"
               :class="props.isOwn ? 'text-white/70' : 'text-color-bg-ac'">
-              {{ message.replyTo.senderId ? chatStore.getDisplayName(message.replyTo.senderId) : 'Deleted message' }}
+              {{ replyPreviewSender }}
             </div>
             <div class="truncate text-[11px] opacity-70">{{ replyPreviewText }}</div>
           </div>
@@ -675,16 +683,16 @@ const replyPreviewText = computed(() => {
         <!-- Reply preview -->
         <div
           v-if="message.replyTo"
-          class="mb-1 flex cursor-pointer items-start gap-1.5 overflow-hidden rounded-lg px-2 py-1"
-          :class="props.isOwn ? 'bg-white/10' : 'bg-black/5'"
-          @click.stop="emit('scrollToReply', message.replyTo.id)"
+          class="mb-1 flex items-start gap-1.5 overflow-hidden rounded-lg px-2 py-1"
+          :class="[props.isOwn ? 'bg-white/10' : 'bg-black/5', message.replyTo?.deleted ? 'cursor-default' : 'cursor-pointer']"
+          @click.stop="!message.replyTo?.deleted && emit('scrollToReply', message.replyTo.id)"
         >
           <div class="w-0.5 shrink-0 self-stretch rounded-full"
             :class="props.isOwn ? 'bg-white/70' : 'bg-color-bg-ac'" />
           <div class="min-w-0 flex-1">
             <div class="truncate text-[11px] font-medium"
               :class="props.isOwn ? 'text-white/70' : 'text-color-bg-ac'">
-              {{ message.replyTo.senderId ? chatStore.getDisplayName(message.replyTo.senderId) : 'Deleted message' }}
+              {{ replyPreviewSender }}
             </div>
             <div class="truncate text-[11px] opacity-70">{{ replyPreviewText }}</div>
           </div>
