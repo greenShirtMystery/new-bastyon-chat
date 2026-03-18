@@ -233,7 +233,8 @@ const handleReply = () => {
 const replyPreviewText = computed(() => {
   const reply = props.message.replyTo;
   if (!reply) return "";
-  if (!reply.senderId && !reply.content) return "Deleted message";
+  if (reply.deleted) return t("message.deleted");
+  if (!reply.senderId && !reply.content) return "...";
   if (reply.type === MessageType.image) return "Photo";
   if (reply.type === MessageType.video) return "Video";
   if (reply.type === MessageType.videoCircle) return "Video message";
@@ -241,6 +242,14 @@ const replyPreviewText = computed(() => {
   if (reply.type === MessageType.file) return reply.content || "File";
   const text = stripBastyonLinks(stripMentionAddresses(reply.content));
   return (text.length > 100 ? text.slice(0, 100) + "\u2026" : text) || "...";
+});
+
+const replyPreviewSender = computed(() => {
+  const reply = props.message.replyTo;
+  if (!reply) return "";
+  if (reply.deleted) return t("message.deleted");
+  if (!reply.senderId) return "...";
+  return chatStore.getDisplayName(reply.senderId);
 });
 </script>
 
@@ -363,7 +372,7 @@ const replyPreviewText = computed(() => {
           <div class="min-w-0 flex-1">
             <div class="truncate text-[11px] font-medium"
               :class="props.isOwn ? 'text-white/70' : 'text-color-bg-ac'">
-              {{ message.replyTo.senderId ? chatStore.getDisplayName(message.replyTo.senderId) : 'Deleted message' }}
+              {{ replyPreviewSender }}
             </div>
             <div class="truncate text-[11px] opacity-70">{{ replyPreviewText }}</div>
           </div>
@@ -462,7 +471,7 @@ const replyPreviewText = computed(() => {
           <div class="min-w-0 flex-1">
             <div class="truncate text-[11px] font-medium"
               :class="props.isOwn ? 'text-white/70' : 'text-color-bg-ac'">
-              {{ message.replyTo.senderId ? chatStore.getDisplayName(message.replyTo.senderId) : 'Deleted message' }}
+              {{ replyPreviewSender }}
             </div>
             <div class="truncate text-[11px] opacity-70">{{ replyPreviewText }}</div>
           </div>
@@ -528,7 +537,7 @@ const replyPreviewText = computed(() => {
           <div class="min-w-0 flex-1">
             <div class="truncate text-[11px] font-medium"
               :class="props.isOwn ? 'text-white/70' : 'text-color-bg-ac'">
-              {{ message.replyTo.senderId ? chatStore.getDisplayName(message.replyTo.senderId) : 'Deleted message' }}
+              {{ replyPreviewSender }}
             </div>
             <div class="truncate text-[11px] opacity-70">{{ replyPreviewText }}</div>
           </div>
@@ -565,7 +574,7 @@ const replyPreviewText = computed(() => {
           <div class="min-w-0 flex-1">
             <div class="truncate text-[11px] font-medium"
               :class="props.isOwn ? 'text-white/70' : 'text-color-bg-ac'">
-              {{ message.replyTo.senderId ? chatStore.getDisplayName(message.replyTo.senderId) : 'Deleted message' }}
+              {{ replyPreviewSender }}
             </div>
             <div class="truncate text-[11px] opacity-70">{{ replyPreviewText }}</div>
           </div>
@@ -684,7 +693,7 @@ const replyPreviewText = computed(() => {
           <div class="min-w-0 flex-1">
             <div class="truncate text-[11px] font-medium"
               :class="props.isOwn ? 'text-white/70' : 'text-color-bg-ac'">
-              {{ message.replyTo.senderId ? chatStore.getDisplayName(message.replyTo.senderId) : 'Deleted message' }}
+              {{ replyPreviewSender }}
             </div>
             <div class="truncate text-[11px] opacity-70">{{ replyPreviewText }}</div>
           </div>

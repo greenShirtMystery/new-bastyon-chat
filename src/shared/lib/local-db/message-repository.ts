@@ -214,6 +214,21 @@ export class MessageRepository {
       });
   }
 
+  /** Mark replyTo.deleted on all messages referencing a given eventId */
+  async markReplyDeleted(deletedEventId: string): Promise<void> {
+    // Dexie doesn't index nested fields, so we scan messages that have replyTo
+    const referring = await this.db.messages
+      .filter((m) => m.replyTo?.id === deletedEventId)
+      .toArray();
+    if (referring.length === 0) return;
+    await this.db.messages.bulkPut(
+      referring.map((m) => ({
+        ...m,
+        replyTo: { ...m.replyTo!, deleted: true, senderId: "", content: "" },
+      })),
+    );
+  }
+
   /** Update reactions on a message */
   async updateReactions(
     eventId: string,

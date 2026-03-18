@@ -241,6 +241,9 @@ export class EventWriter {
   async writeRedaction(redaction: ParsedRedaction): Promise<void> {
     await this.messageRepo.softDelete(redaction.redactedEventId);
 
+    // Mark replyTo.deleted on messages referencing the redacted one in Dexie
+    await this.messageRepo.markReplyDeleted(redaction.redactedEventId);
+
     // Always update room preview after deletion
     const prevMsg = await this.messageRepo.getLastNonDeleted(redaction.roomId);
     if (prevMsg) {

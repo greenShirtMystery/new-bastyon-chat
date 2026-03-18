@@ -52,6 +52,8 @@ export interface ReplyTo {
   senderId: string;
   content: string;
   type?: MessageType;
+  /** true only when the original message was confirmed deleted/redacted */
+  deleted?: boolean;
 }
 
 /** Open Graph metadata for URL link previews */
