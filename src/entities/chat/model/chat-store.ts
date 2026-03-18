@@ -2662,6 +2662,43 @@ export const useChatStore = defineStore(NAMESPACE, () => {
     }
   };
 
+  /**
+   * Enrich unresolved reply previews for in-memory messages.
+   * Finds messages with empty replyTo (senderId="", not deleted) and tries
+   * to fill them from Dexie. If found, updates in-memory state + triggers reactivity.
+   * Called after initial load and loadMore to handle cross-batch references.
+   */
+  const enrichUnresolvedReplies = async (roomId: string): Promise<void> => {
+    const roomMsgs = messages.value[roomId];
+    if (!roomMsgs || !chatDbKitRef.value) return;
+
+    const unresolved = roomMsgs.filter(
+      m => m.replyTo && !m.replyTo.deleted && !m.replyTo.senderId && !m.replyTo.content,
+    );
+    if (unresolved.length === 0) return;
+
+    const ids = unresolved.map(m => m.replyTo!.id);
+    const stored = await chatDbKitRef.value.messages.getByEventIds(ids);
+    const storedMap = new Map(stored.map(m => [m.eventId!, m]));
+
+    let changed = false;
+    for (const msg of unresolved) {
+      const replyTo = msg.replyTo!;
+      const original = storedMap.get(replyTo.id);
+      if (original) {
+        if (original.deleted || original.softDeleted) {
+          replyTo.deleted = true;
+        } else {
+          replyTo.senderId = original.senderId;
+          replyTo.content = stripBastyonLinks(stripMentionAddresses(original.content)).slice(0, 100);
+          replyTo.type = original.type;
+        }
+        changed = true;
+      }
+    }
+    if (changed) triggerRef(messages);
+  };
+
   /** Load timeline events for a room and convert to Messages */
   const loadRoomMessages = async (roomId: string) => {
     try {
@@ -2744,9 +2781,11 @@ export const useChatStore = defineStore(NAMESPACE, () => {
             systemMeta: m.systemMeta,
             reactions: m.reactions,
           }));
-        chatDbKitRef.value.eventWriter.writeMessages(parsedMessages).catch(e => {
-          console.warn("[chat-store] EventWriter.writeMessages failed:", e);
-        });
+        chatDbKitRef.value.eventWriter.writeMessages(parsedMessages)
+          .then(() => enrichUnresolvedReplies(roomId))
+          .catch(e => {
+            console.warn("[chat-store] EventWriter.writeMessages failed:", e);
+          });
 
         // Sync reactions to Dexie for messages that already existed (bulkInsert skips duplicates).
         // This ensures Dexie has up-to-date reactions from the timeline.
@@ -2794,6 +2833,9 @@ export const useChatStore = defineStore(NAMESPACE, () => {
       const msgs = await parseTimelineEvents(timelineEvents, roomId);
       applyExistingReceipts(matrixRoom, timelineEvents, msgs, matrixService.getUserId());
       setMessages(roomId, msgs);
+
+      // Enrich any still-unresolved reply previews from Dexie (non-blocking)
+      enrichUnresolvedReplies(roomId).catch(() => {});
 
       return true;
     } catch (e) {
