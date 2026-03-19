@@ -9,6 +9,7 @@ import { setupInitialTheme } from "./theme";
 import { initTransport } from "@/shared/lib/transport/init-transport";
 import { useTorStore } from "@/entities/tor";
 import { useLocaleStore } from "@/entities/locale";
+import { isElectron, isNative } from "@/shared/lib/platform";
 
 export const setupProviders = async (app: App) => {
   setupAssets();
@@ -21,9 +22,13 @@ export const setupProviders = async (app: App) => {
   useLocaleStore(); // sets document.documentElement.lang from persisted locale
 
   // Register Service Worker transport proxy in Electron
-  if (window.electronAPI?.isElectron) {
+  if (isElectron) {
     initTransport();
     useTorStore().init();
+  }
+
+  if (isNative) {
+    // Capacitor-specific initialization (Tor, Push, etc.) — wired in Task 16
   }
 
   // Scripts must finish before router mounts the app — components
