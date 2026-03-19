@@ -18,7 +18,11 @@ class CallPlugin : Plugin() {
     }
 
     override fun load() {
-        CallConnectionService.registerPhoneAccount(context)
+        try {
+            CallConnectionService.registerPhoneAccount(context)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to register phone account", e)
+        }
 
         CallConnection.onAnswered = { callId ->
             notifyListeners("callAnswered", JSObject().apply {
@@ -73,9 +77,46 @@ class CallPlugin : Plugin() {
     }
 
     @PluginMethod
+    fun reportOutgoingCall(call: PluginCall) {
+        val callId = call.getString("callId") ?: ""
+        val callerName = call.getString("callerName") ?: ""
+        val hasVideo = call.getBoolean("hasVideo", false) ?: false
+
+        Log.d(TAG, "reportOutgoingCall: $callerName ($callId)")
+
+        // For self-managed ConnectionService, create connection directly
+        val connection = CallConnection(context, callId)
+        connection.setCallerDisplayName(callerName, TelecomManager.PRESENTATION_ALLOWED)
+        connection.setAddress(
+            android.net.Uri.fromParts("sip", callerName, null),
+            TelecomManager.PRESENTATION_ALLOWED
+        )
+        connection.setDialing()
+        CallConnectionService.currentConnection = connection
+        call.resolve()
+    }
+
+    @PluginMethod
     fun reportCallEnded(call: PluginCall) {
         CallConnectionService.currentConnection?.onDisconnect()
         CallConnectionService.currentConnection = null
         call.resolve()
+    }
+
+    @PluginMethod
+    fun reportCallConnected(call: PluginCall) {
+        CallConnectionService.currentConnection?.setActive()
+        call.resolve()
+    }
+
+    @PluginMethod
+    fun requestAudioPermission(call: PluginCall) {
+        if (activity.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)
+            == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            call.resolve(JSObject().apply { put("granted", true) })
+            return
+        }
+        activity.requestPermissions(arrayOf(android.Manifest.permission.RECORD_AUDIO), 1001)
+        call.resolve(JSObject().apply { put("granted", false) })
     }
 }

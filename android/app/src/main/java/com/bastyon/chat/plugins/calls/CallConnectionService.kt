@@ -21,7 +21,7 @@ class CallConnectionService : ConnectionService() {
         fun registerPhoneAccount(context: Context) {
             val handle = getPhoneAccountHandle(context)
             val account = PhoneAccount.builder(handle, "Bastyon Chat")
-                .setCapabilities(PhoneAccount.CAPABILITY_CALL_PROVIDER)
+                .setCapabilities(PhoneAccount.CAPABILITY_SELF_MANAGED)
                 .build()
             val telecomManager = context.getSystemService(Context.TELECOM_SERVICE) as TelecomManager
             telecomManager.registerPhoneAccount(account)
@@ -51,11 +51,40 @@ class CallConnectionService : ConnectionService() {
         return connection
     }
 
+    override fun onCreateOutgoingConnection(
+        connectionManagerPhoneAccount: PhoneAccountHandle?,
+        request: ConnectionRequest?
+    ): Connection {
+        val extras = request?.extras ?: Bundle()
+        val callId = extras.getString("callId", "")
+        val callerName = extras.getString("callerName", "")
+
+        Log.d(TAG, "onCreateOutgoingConnection: callId=$callId, callee=$callerName")
+
+        val connection = CallConnection(applicationContext, callId)
+        connection.setCallerDisplayName(callerName, TelecomManager.PRESENTATION_ALLOWED)
+        connection.setAddress(
+            request?.address ?: Uri.fromParts("tel", callerName, null),
+            TelecomManager.PRESENTATION_ALLOWED
+        )
+        connection.setDialing()
+
+        currentConnection = connection
+        return connection
+    }
+
     override fun onCreateIncomingConnectionFailed(
         connectionManagerPhoneAccount: PhoneAccountHandle?,
         request: ConnectionRequest?
     ) {
         Log.e(TAG, "onCreateIncomingConnectionFailed")
+    }
+
+    override fun onCreateOutgoingConnectionFailed(
+        connectionManagerPhoneAccount: PhoneAccountHandle?,
+        request: ConnectionRequest?
+    ) {
+        Log.e(TAG, "onCreateOutgoingConnectionFailed")
     }
 }
 

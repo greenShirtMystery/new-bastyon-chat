@@ -53,26 +53,30 @@ class TorManager(private val config: ConfigurationManager) {
         File(config.torPath).setExecutable(true)
 
         torThread = Thread({
-            val exitCode = torRunner.start(
-                binaryPath = config.torPath,
-                args = listOf("-f", config.torConfPath, "--pidfile", config.torPidPath),
-                env = mapOf("LD_LIBRARY_PATH" to config.nativeLibPath),
-                listener = object : ProcessRunner.OutputListener {
-                    override fun onStdOutput(line: String) {
-                        val pct = ProcessRunner.parseBootstrapPercent(line)
-                        if (pct != null) {
-                            bootstrapPercent.set(pct)
-                            onBootstrapProgress?.invoke(pct)
-                            if (pct >= 100) {
-                                startReverseProxy()
-                                setState(TorState.RUNNING)
+            try {
+                val exitCode = torRunner.start(
+                    binaryPath = config.torPath,
+                    args = listOf("-f", config.torConfPath, "--pidfile", config.torPidPath),
+                    env = mapOf("LD_LIBRARY_PATH" to config.nativeLibPath),
+                    listener = object : ProcessRunner.OutputListener {
+                        override fun onStdOutput(line: String) {
+                            val pct = ProcessRunner.parseBootstrapPercent(line)
+                            if (pct != null) {
+                                bootstrapPercent.set(pct)
+                                onBootstrapProgress?.invoke(pct)
+                                if (pct >= 100) {
+                                    startReverseProxy()
+                                    setState(TorState.RUNNING)
+                                }
                             }
                         }
+                        override fun onErrOutput(line: String) {}
                     }
-                    override fun onErrOutput(line: String) {}
-                }
-            )
-            Log.d(TAG, "Tor process exited with code $exitCode")
+                )
+                Log.d(TAG, "Tor process exited with code $exitCode")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to start Tor process", e)
+            }
             if (state.get() != TorState.STOPPING) {
                 setState(TorState.STOPPED)
             }
