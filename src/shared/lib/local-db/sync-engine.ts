@@ -196,6 +196,12 @@ export class SyncEngine {
 
     // Update local message: pending → synced
     await this.messageRepo.confirmSent(op.clientId, serverEventId);
+
+    // Update room preview status: pending → synced
+    await this.roomRepo.updateRoom(op.roomId, {
+      lastMessageLocalStatus: "synced" as import("./schema").LocalMessageStatus,
+      lastMessageEventId: serverEventId,
+    });
   }
 
   private async syncSendFile(op: PendingOperation): Promise<void> {
@@ -249,6 +255,11 @@ export class SyncEngine {
 
     const serverEventId = await matrixService.sendEncryptedText(op.roomId, content);
     await this.messageRepo.confirmSent(op.clientId, serverEventId);
+
+    await this.roomRepo.updateRoom(op.roomId, {
+      lastMessageLocalStatus: "synced" as import("./schema").LocalMessageStatus,
+      lastMessageEventId: serverEventId,
+    });
   }
 
   private async syncEditMessage(op: PendingOperation): Promise<void> {
@@ -332,6 +343,10 @@ export class SyncEngine {
     });
 
     await this.messageRepo.confirmSent(op.clientId, `poll_${Date.now()}`);
+
+    await this.roomRepo.updateRoom(op.roomId, {
+      lastMessageLocalStatus: "synced" as import("./schema").LocalMessageStatus,
+    });
   }
 
   private async syncVotePoll(op: PendingOperation): Promise<void> {
@@ -379,6 +394,11 @@ export class SyncEngine {
     }
 
     await this.messageRepo.confirmSent(op.clientId, serverEventId);
+
+    await this.roomRepo.updateRoom(op.roomId, {
+      lastMessageLocalStatus: "synced" as import("./schema").LocalMessageStatus,
+      lastMessageEventId: serverEventId,
+    });
   }
 
   // ---------------------------------------------------------------------------
