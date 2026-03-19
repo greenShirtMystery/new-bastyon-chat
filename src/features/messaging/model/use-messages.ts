@@ -208,8 +208,9 @@ export function useMessages() {
             size: file.size,
             url: localBlobUrl,
           },
+          localBlobUrl,
+          uploadProgress: 0,
         });
-        await dbKit.db.messages.update(localMsg.localId!, { localBlobUrl, uploadProgress: 0 });
 
         // Async upload pipeline
         (async () => {
@@ -367,8 +368,9 @@ export function useMessages() {
             caption: options.caption,
             captionAbove: options.captionAbove,
           },
+          localBlobUrl,
+          uploadProgress: 0,
         });
-        await dbKit.db.messages.update(localMsg.localId!, { localBlobUrl, uploadProgress: 0 });
 
         // Async upload pipeline
         (async () => {
@@ -538,8 +540,9 @@ export function useMessages() {
             duration: options.duration,
             waveform: options.waveform,
           },
+          localBlobUrl,
+          uploadProgress: 0,
         });
-        await dbKit.db.messages.update(localMsg.localId!, { localBlobUrl, uploadProgress: 0 });
 
         // Async upload pipeline
         (async () => {
@@ -706,8 +709,9 @@ export function useMessages() {
             duration: options.duration,
             videoNote: true,
           },
+          localBlobUrl,
+          uploadProgress: 0,
         });
-        await dbKit.db.messages.update(localMsg.localId!, { localBlobUrl, uploadProgress: 0 });
 
         // Async upload pipeline
         (async () => {
@@ -1503,8 +1507,9 @@ export function useMessages() {
             w,
             h,
           },
+          localBlobUrl,
+          uploadProgress: 0,
         });
-        await dbKit.db.messages.update(localMsg.localId!, { localBlobUrl, uploadProgress: 0 });
 
         // Async upload pipeline
         (async () => {

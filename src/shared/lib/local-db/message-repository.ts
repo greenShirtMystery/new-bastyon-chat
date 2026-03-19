@@ -85,6 +85,8 @@ export class MessageRepository {
     transferInfo?: LocalMessage["transferInfo"];
     pollInfo?: LocalMessage["pollInfo"];
     fileInfo?: LocalMessage["fileInfo"];
+    localBlobUrl?: string;
+    uploadProgress?: number;
   }): Promise<LocalMessage> {
     const clientId = crypto.randomUUID();
     const now = Date.now();
@@ -106,6 +108,8 @@ export class MessageRepository {
       transferInfo: params.transferInfo,
       pollInfo: params.pollInfo,
       fileInfo: params.fileInfo,
+      localBlobUrl: params.localBlobUrl,
+      uploadProgress: params.uploadProgress,
     };
 
     await this.db.transaction("rw", [this.db.messages, this.db.rooms], async () => {
@@ -146,11 +150,20 @@ export class MessageRepository {
     if (msg.clientId) {
       const existing = await this.getByClientId(msg.clientId);
       if (existing) {
-        await this.db.messages.update(existing.localId!, {
-          eventId: msg.eventId,
-          status: "synced",
-          serverTs: msg.serverTs ?? msg.timestamp,
-        });
+        // If upload is still in-flight (has localBlobUrl), only store eventId
+        // — let confirmMediaSent handle the final status transition
+        if (existing.localBlobUrl) {
+          await this.db.messages.update(existing.localId!, {
+            eventId: msg.eventId,
+            serverTs: msg.serverTs ?? msg.timestamp,
+          });
+        } else {
+          await this.db.messages.update(existing.localId!, {
+            eventId: msg.eventId,
+            status: "synced" as LocalMessageStatus,
+            serverTs: msg.serverTs ?? msg.timestamp,
+          });
+        }
         return "updated";
       }
     }
