@@ -17,9 +17,18 @@
     "electron:build": "vite build && electron-builder --config electron-builder.json",
     "electron:build:win": "vite build && electron-builder --config electron-builder.json --win",
     "electron:build:mac": "vite build && electron-builder --config electron-builder.json --mac",
-    "electron:build:linux": "vite build && electron-builder --config electron-builder.json --linux"
+    "electron:build:linux": "vite build && electron-builder --config electron-builder.json --linux",
+    "cap:build": "vite build && cap sync android",
+    "cap:open": "cap open android",
+    "cap:run": "cap run android"
   },
   "dependencies": {
+    "@capacitor/android": "^8.2.0",
+    "@capacitor/app": "^8.0.1",
+    "@capacitor/cli": "^8.2.0",
+    "@capacitor/core": "^8.2.0",
+    "@capacitor/haptics": "^8.0.1",
+    "@capacitor/status-bar": "^8.0.1",
     "@vee-validate/zod": "^4.13.2",
     "audio-recorder-polyfill": "^0.4.1",
     "axios": "^0.21.4",
