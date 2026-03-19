@@ -170,6 +170,7 @@ export const ru: Record<TranslationKey, string> = {
   "message.voiceMessage": "Голосовое сообщение",
   "message.file": "Файл",
   "message.deleted": "Сообщение удалено",
+  "message.retry": "Повторить",
 
   // ── Message context menu ──
   "contextMenu.reply": "Ответить",
