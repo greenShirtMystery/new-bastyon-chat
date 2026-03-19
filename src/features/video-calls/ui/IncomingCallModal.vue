@@ -2,6 +2,7 @@
 import { useCallStore, CallStatus } from "@/entities/call";
 import { UserAvatar } from "@/entities/user";
 import { useCallService } from "../model/call-service";
+import { isNative } from "@/shared/lib/platform";
 
 const INCOMING_TIMEOUT_SECONDS = 30;
 
@@ -10,7 +11,8 @@ const callService = useCallService();
 const { t } = useI18n();
 
 const show = computed(
-  () => callStore.activeCall?.status === CallStatus.incoming,
+  // On native, incoming call UI is handled by IncomingCallActivity (ConnectionService)
+  () => !isNative && callStore.activeCall?.status === CallStatus.incoming,
 );
 
 const countdown = ref(INCOMING_TIMEOUT_SECONDS);
