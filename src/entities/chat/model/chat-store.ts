@@ -2820,7 +2820,8 @@ export const useChatStore = defineStore(NAMESPACE, () => {
 
       setMessages(roomId, msgs);
 
-      // Dual-write: persist all parsed messages to Dexie
+      // Dual-write: persist all parsed messages to Dexie.
+      // Awaited (not fire-and-forget) so data reaches IndexedDB before a potential F5.
       if (chatDbKitRef.value && msgs.length > 0) {
         const parsedMessages: ParsedMessage[] = msgs
           .filter(m => m.id && !m.id.startsWith("msg_")) // Skip optimistic temp messages
@@ -2842,11 +2843,12 @@ export const useChatStore = defineStore(NAMESPACE, () => {
             systemMeta: m.systemMeta,
             reactions: m.reactions,
           }));
-        chatDbKitRef.value.eventWriter.writeMessages(parsedMessages)
-          .then(() => enrichUnresolvedReplies(roomId))
-          .catch(e => {
-            console.warn("[chat-store] EventWriter.writeMessages failed:", e);
-          });
+        try {
+          await chatDbKitRef.value.eventWriter.writeMessages(parsedMessages);
+          await enrichUnresolvedReplies(roomId);
+        } catch (e) {
+          console.warn("[chat-store] EventWriter.writeMessages failed:", e);
+        }
 
         // Sync reactions to Dexie for messages that already existed (bulkInsert skips duplicates).
         // This ensures Dexie has up-to-date reactions from the timeline.

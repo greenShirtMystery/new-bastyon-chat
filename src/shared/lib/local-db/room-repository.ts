@@ -62,7 +62,9 @@ export class RoomRepository {
     await this.db.rooms.update(roomId, changes);
   }
 
-  /** Update the last message preview for a room */
+  /** Update the last message preview for a room.
+   *  Monotonic: skips the update if the existing preview is already newer,
+   *  preventing stale server data from overwriting fresher local-first writes. */
   async updateLastMessage(
     roomId: string,
     preview: string,
@@ -71,12 +73,18 @@ export class RoomRepository {
     type?: MessageType,
     eventId?: string,
   ): Promise<void> {
+    // Monotonic guard — never roll back to an older preview
+    const existing = await this.db.rooms.get(roomId);
+    if (existing?.lastMessageTimestamp && timestamp < existing.lastMessageTimestamp) {
+      return;
+    }
+
     const changes: Partial<import("./schema").LocalRoom> = {
       lastMessagePreview: preview.slice(0, 200),
       lastMessageTimestamp: timestamp,
       lastMessageSenderId: senderId,
       lastMessageType: type,
-      updatedAt: timestamp,
+      updatedAt: Math.max(timestamp, existing?.updatedAt ?? 0),
       // New last message = clear old reaction (no double DB write)
       lastMessageReaction: null,
     };
@@ -84,11 +92,8 @@ export class RoomRepository {
       changes.lastMessageEventId = eventId;
     }
     const updated = await this.db.rooms.update(roomId, changes);
-    if (updated === 0) {
-      const existing = await this.db.rooms.get(roomId);
-      if (existing) {
-        await this.db.rooms.update(roomId, changes);
-      }
+    if (updated === 0 && existing) {
+      await this.db.rooms.update(roomId, changes);
     }
   }
 
