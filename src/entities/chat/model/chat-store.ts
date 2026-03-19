@@ -610,6 +610,7 @@ export const useChatStore = defineStore(NAMESPACE, () => {
     const prevLastMessageMap = new Map(rooms.value.map(r => [r.id, r.lastMessage]));
     const prevMembersMap = new Map(rooms.value.map(r => [r.id, r.members]));
     const prevAvatarMap = new Map(rooms.value.map(r => [r.id, r.avatar]));
+    const prevUpdatedAtMap = new Map(rooms.value.map(r => [r.id, r.updatedAt]));
     const prevActiveRoom = activeRoomId.value ? getRoomById(activeRoomId.value) : undefined;
 
     const interactiveRooms = filterInteractiveRooms(matrixRooms);
@@ -623,6 +624,13 @@ export const useChatStore = defineStore(NAMESPACE, () => {
           room.members = prevMembers;
           const prevAvatar = prevAvatarMap.get(room.id);
           if (prevAvatar) room.avatar = prevAvatar;
+        }
+        // Prevent list "jump": keep the higher updatedAt from cache so rooms
+        // that were sorted to a position don't suddenly drop down when Matrix
+        // SDK returns a stale or incomplete timeline on first sync.
+        const prevTs = prevUpdatedAtMap.get(room.id);
+        if (prevTs && prevTs > room.updatedAt) {
+          room.updatedAt = prevTs;
         }
         return room;
       });
@@ -787,6 +795,10 @@ export const useChatStore = defineStore(NAMESPACE, () => {
         if (existing.members.length > chatRoom.members.length) {
           chatRoom.members = existing.members;
           chatRoom.avatar = existing.avatar;
+        }
+        // Keep the higher updatedAt so rooms don't jump down in the list
+        if (existing.updatedAt > chatRoom.updatedAt) {
+          chatRoom.updatedAt = existing.updatedAt;
         }
         // Update in-place to preserve Vue reactivity references
         Object.assign(existing, chatRoom);
