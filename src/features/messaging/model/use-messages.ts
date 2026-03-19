@@ -191,9 +191,98 @@ export function useMessages() {
     else if (file.type.startsWith("video/")) msgType = MessageType.video;
     else if (file.type.startsWith("audio/")) msgType = MessageType.audio;
 
-    // Optimistic message
-    const tempId = `msg_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
     const localBlobUrl = URL.createObjectURL(file);
+
+    // Dexie-first path: insert into Dexie immediately, upload async
+    if (isChatDbReady()) {
+      try {
+        const dbKit = getChatDb();
+        const localMsg = await dbKit.messages.createLocal({
+          roomId,
+          senderId: authStore.address ?? "",
+          content: file.name,
+          type: msgType,
+          fileInfo: {
+            name: file.name,
+            type: file.type,
+            size: file.size,
+            url: localBlobUrl,
+          },
+          localBlobUrl,
+          uploadProgress: 0,
+        });
+
+        // Async upload pipeline
+        (async () => {
+          try {
+            const roomCrypto = authStore.pcrypto?.rooms[roomId] as PcryptoRoomInstance | undefined;
+
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const fileInfo: Record<string, any> = {
+              name: file.name,
+              type: file.type,
+              size: file.size,
+            };
+
+            let fileToUpload: Blob = file;
+
+            if (roomCrypto?.canBeEncrypt()) {
+              const encrypted = await roomCrypto.encryptFile(file);
+              fileInfo.secrets = encrypted.secrets;
+              fileToUpload = encrypted.file;
+            }
+
+            const url = await matrixService.uploadContent(fileToUpload, (progress) => {
+              const percent = progress.total > 0 ? Math.round((progress.loaded / progress.total) * 100) : 0;
+              dbKit.messages.updateUploadProgress(localMsg.clientId, percent);
+            });
+            fileInfo.url = url;
+
+            const body = JSON.stringify(fileInfo);
+            const serverEventId = await matrixService.sendEncryptedText(roomId, {
+              body,
+              msgtype: "m.file",
+            }, localMsg.clientId);
+
+            const serverFileInfo: FileInfo = {
+              name: file.name,
+              type: file.type,
+              size: file.size,
+              url,
+              ...(fileInfo.secrets ? { secrets: fileInfo.secrets } : {}),
+            };
+            await dbKit.messages.confirmMediaSent(localMsg.clientId, serverEventId, serverFileInfo);
+
+            // Revoke blob URL after a short delay (UI may still reference it)
+            setTimeout(() => URL.revokeObjectURL(localBlobUrl), 5000);
+          } catch (e) {
+            console.error("Failed to send file (Dexie path):", e);
+            await dbKit.db.messages.where("clientId").equals(localMsg.clientId).modify({
+              status: "failed" as import("@/shared/lib/local-db/schema").LocalMessageStatus,
+              uploadProgress: undefined,
+            });
+          }
+        })();
+
+        return;
+      } catch (e) {
+        console.warn("[use-messages] Dexie sendFile failed, falling back to legacy:", e);
+      }
+    }
+
+    // Legacy path
+    sendFileLegacy(file, roomId, msgType, localBlobUrl, matrixService);
+  };
+
+  /** Legacy sendFile — fallback when Dexie is not ready */
+  const sendFileLegacy = async (
+    file: File,
+    roomId: string,
+    msgType: MessageType,
+    localBlobUrl: string,
+    matrixService: ReturnType<typeof getMatrixClientService>,
+  ) => {
+    const tempId = `msg_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
     const message: Message = {
       id: tempId,
       roomId,
@@ -223,19 +312,15 @@ export function useMessages() {
 
       let fileToUpload: Blob = file;
 
-      // Encrypt the file if room has encryption
       if (roomCrypto?.canBeEncrypt()) {
         const encrypted = await roomCrypto.encryptFile(file);
         fileInfo.secrets = encrypted.secrets;
         fileToUpload = encrypted.file;
       }
 
-      // Upload to Matrix server
       const url = await matrixService.uploadContent(fileToUpload);
       fileInfo.url = url;
 
-      // Send as m.file event with body = JSON of fileInfo
-      // (This is the bastyon-chat format for all file types)
       const body = JSON.stringify(fileInfo);
       const serverEventId = await matrixService.sendEncryptedText(roomId, {
         body,
@@ -262,9 +347,110 @@ export function useMessages() {
     if (!matrixService.isReady()) return;
 
     const dimensions = await getImageDimensions(file);
-
-    const tempId = `msg_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
     const localBlobUrl = URL.createObjectURL(file);
+
+    // Dexie-first path
+    if (isChatDbReady()) {
+      try {
+        const dbKit = getChatDb();
+        const localMsg = await dbKit.messages.createLocal({
+          roomId,
+          senderId: authStore.address ?? "",
+          content: options.caption || file.name,
+          type: MessageType.image,
+          fileInfo: {
+            name: file.name,
+            type: file.type,
+            size: file.size,
+            url: localBlobUrl,
+            w: dimensions.w,
+            h: dimensions.h,
+            caption: options.caption,
+            captionAbove: options.captionAbove,
+          },
+          localBlobUrl,
+          uploadProgress: 0,
+        });
+
+        // Async upload pipeline
+        (async () => {
+          try {
+            const roomCrypto = authStore.pcrypto?.rooms[roomId] as PcryptoRoomInstance | undefined;
+
+            let fileToUpload: Blob = file;
+            let secrets: Record<string, unknown> | undefined;
+
+            if (roomCrypto?.canBeEncrypt()) {
+              const encrypted = await roomCrypto.encryptFile(file);
+              secrets = encrypted.secrets;
+              fileToUpload = encrypted.file;
+            }
+
+            const url = await matrixService.uploadContent(fileToUpload, (progress) => {
+              const percent = progress.total > 0 ? Math.round((progress.loaded / progress.total) * 100) : 0;
+              dbKit.messages.updateUploadProgress(localMsg.clientId, percent);
+            });
+
+            const content: Record<string, unknown> = {
+              body: options.caption || "Image",
+              msgtype: "m.image",
+              url,
+              info: {
+                w: dimensions.w,
+                h: dimensions.h,
+                mimetype: file.type,
+                size: file.size,
+                ...(secrets ? { secrets } : {}),
+                ...(options.caption ? { caption: options.caption } : {}),
+                ...(options.captionAbove != null ? { captionAbove: options.captionAbove } : {}),
+              },
+            };
+
+            const serverEventId = await matrixService.sendEncryptedText(roomId, content, localMsg.clientId);
+
+            const serverFileInfo: FileInfo = {
+              name: file.name,
+              type: file.type,
+              size: file.size,
+              url,
+              w: dimensions.w,
+              h: dimensions.h,
+              caption: options.caption,
+              captionAbove: options.captionAbove,
+              ...(secrets ? { secrets: secrets as FileInfo["secrets"] } : {}),
+            };
+            await dbKit.messages.confirmMediaSent(localMsg.clientId, serverEventId, serverFileInfo);
+
+            setTimeout(() => URL.revokeObjectURL(localBlobUrl), 5000);
+          } catch (e) {
+            console.error("Failed to send image (Dexie path):", e);
+            await dbKit.db.messages.where("clientId").equals(localMsg.clientId).modify({
+              status: "failed" as import("@/shared/lib/local-db/schema").LocalMessageStatus,
+              uploadProgress: undefined,
+            });
+          }
+        })();
+
+        return;
+      } catch (e) {
+        console.warn("[use-messages] Dexie sendImage failed, falling back to legacy:", e);
+      }
+    }
+
+    // Legacy path
+    sendImageLegacy(file, roomId, dimensions, localBlobUrl, options, matrixService);
+  };
+
+  /** Legacy sendImage — fallback when Dexie is not ready */
+  const sendImageLegacy = async (
+    file: File,
+    roomId: string,
+    dimensions: { w: number; h: number },
+    localBlobUrl: string,
+    options: { caption?: string; captionAbove?: boolean },
+    matrixService: ReturnType<typeof getMatrixClientService>,
+  ) => {
+    const tempId = `msg_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
     const message: Message = {
       id: tempId,
       roomId,
@@ -335,9 +521,105 @@ export function useMessages() {
     const matrixService = getMatrixClientService();
     if (!matrixService.isReady()) return;
 
-    const tempId = `msg_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
-    // Create a local blob URL so VoiceMessage can play immediately (before upload completes)
     const localBlobUrl = URL.createObjectURL(file);
+
+    // Dexie-first path
+    if (isChatDbReady()) {
+      try {
+        const dbKit = getChatDb();
+        const localMsg = await dbKit.messages.createLocal({
+          roomId,
+          senderId: authStore.address ?? "",
+          content: "Audio",
+          type: MessageType.audio,
+          fileInfo: {
+            name: file.name,
+            type: file.type,
+            size: file.size,
+            url: localBlobUrl,
+            duration: options.duration,
+            waveform: options.waveform,
+          },
+          localBlobUrl,
+          uploadProgress: 0,
+        });
+
+        // Async upload pipeline
+        (async () => {
+          try {
+            const roomCrypto = authStore.pcrypto?.rooms[roomId] as PcryptoRoomInstance | undefined;
+
+            let fileToUpload: Blob = file;
+            let secrets: Record<string, unknown> | undefined;
+
+            if (roomCrypto?.canBeEncrypt()) {
+              const encrypted = await roomCrypto.encryptFile(file);
+              secrets = encrypted.secrets;
+              fileToUpload = encrypted.file;
+            }
+
+            const url = await matrixService.uploadContent(fileToUpload, (progress) => {
+              const percent = progress.total > 0 ? Math.round((progress.loaded / progress.total) * 100) : 0;
+              dbKit.messages.updateUploadProgress(localMsg.clientId, percent);
+            });
+
+            const intWaveform = options.waveform?.map((v: number) => Math.round(v * 1024));
+
+            const content: Record<string, unknown> = {
+              body: "Audio",
+              msgtype: "m.audio",
+              url,
+              info: {
+                mimetype: file.type,
+                size: Math.round(file.size),
+                duration: options.duration ? Math.round(options.duration * 1000) : undefined,
+                waveform: intWaveform,
+                ...(secrets ? { secrets } : {}),
+              },
+            };
+
+            const serverEventId = await matrixService.sendEncryptedText(roomId, content, localMsg.clientId);
+
+            const serverFileInfo: FileInfo = {
+              name: file.name,
+              type: file.type,
+              size: file.size,
+              url,
+              duration: options.duration,
+              waveform: options.waveform,
+              ...(secrets ? { secrets: secrets as FileInfo["secrets"] } : {}),
+            };
+            await dbKit.messages.confirmMediaSent(localMsg.clientId, serverEventId, serverFileInfo);
+
+            setTimeout(() => URL.revokeObjectURL(localBlobUrl), 5000);
+          } catch (e) {
+            console.error("Failed to send audio (Dexie path):", e);
+            await dbKit.db.messages.where("clientId").equals(localMsg.clientId).modify({
+              status: "failed" as import("@/shared/lib/local-db/schema").LocalMessageStatus,
+              uploadProgress: undefined,
+            });
+          }
+        })();
+
+        return;
+      } catch (e) {
+        console.warn("[use-messages] Dexie sendAudio failed, falling back to legacy:", e);
+      }
+    }
+
+    // Legacy path
+    sendAudioLegacy(file, roomId, localBlobUrl, options, matrixService);
+  };
+
+  /** Legacy sendAudio — fallback when Dexie is not ready */
+  const sendAudioLegacy = async (
+    file: File,
+    roomId: string,
+    localBlobUrl: string,
+    options: { duration?: number; waveform?: number[] },
+    matrixService: ReturnType<typeof getMatrixClientService>,
+  ) => {
+    const tempId = `msg_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
     const message: Message = {
       id: tempId,
       roomId,
@@ -371,8 +653,6 @@ export function useMessages() {
 
       const url = await matrixService.uploadContent(fileToUpload);
 
-      // Matrix server rejects float values — ensure all numbers are integers.
-      // Waveform: convert 0..1 floats to 0..1024 integers (Matrix spec range).
       const intWaveform = options.waveform?.map((v: number) => Math.round(v * 1024));
 
       const content: Record<string, unknown> = {
@@ -408,8 +688,109 @@ export function useMessages() {
     const matrixService = getMatrixClientService();
     if (!matrixService.isReady()) return;
 
-    const tempId = `msg_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
     const localBlobUrl = URL.createObjectURL(file);
+
+    // Dexie-first path
+    if (isChatDbReady()) {
+      try {
+        const dbKit = getChatDb();
+        const localMsg = await dbKit.messages.createLocal({
+          roomId,
+          senderId: authStore.address ?? "",
+          content: "Video message",
+          type: MessageType.videoCircle,
+          fileInfo: {
+            name: file.name,
+            type: file.type,
+            size: file.size,
+            url: localBlobUrl,
+            w: 480,
+            h: 480,
+            duration: options.duration,
+            videoNote: true,
+          },
+          localBlobUrl,
+          uploadProgress: 0,
+        });
+
+        // Async upload pipeline
+        (async () => {
+          try {
+            const roomCrypto = authStore.pcrypto?.rooms[roomId] as PcryptoRoomInstance | undefined;
+
+            let fileToUpload: Blob = file;
+            let secrets: Record<string, unknown> | undefined;
+
+            if (roomCrypto?.canBeEncrypt()) {
+              const encrypted = await roomCrypto.encryptFile(file);
+              secrets = encrypted.secrets;
+              fileToUpload = encrypted.file;
+            }
+
+            const url = await matrixService.uploadContent(fileToUpload, (progress) => {
+              const percent = progress.total > 0 ? Math.round((progress.loaded / progress.total) * 100) : 0;
+              dbKit.messages.updateUploadProgress(localMsg.clientId, percent);
+            });
+
+            const content: Record<string, unknown> = {
+              body: "Video message",
+              msgtype: "m.video",
+              url,
+              info: {
+                mimetype: file.type,
+                size: Math.round(file.size),
+                w: 480,
+                h: 480,
+                duration: options.duration ? Math.round(options.duration * 1000) : undefined,
+                videoNote: true,
+                ...(secrets ? { secrets } : {}),
+              },
+            };
+
+            const serverEventId = await matrixService.sendEncryptedText(roomId, content, localMsg.clientId);
+
+            const serverFileInfo: FileInfo = {
+              name: file.name,
+              type: file.type,
+              size: file.size,
+              url,
+              w: 480,
+              h: 480,
+              duration: options.duration,
+              videoNote: true,
+              ...(secrets ? { secrets: secrets as FileInfo["secrets"] } : {}),
+            };
+            await dbKit.messages.confirmMediaSent(localMsg.clientId, serverEventId, serverFileInfo);
+
+            setTimeout(() => URL.revokeObjectURL(localBlobUrl), 5000);
+          } catch (e) {
+            console.error("Failed to send video circle (Dexie path):", e);
+            await dbKit.db.messages.where("clientId").equals(localMsg.clientId).modify({
+              status: "failed" as import("@/shared/lib/local-db/schema").LocalMessageStatus,
+              uploadProgress: undefined,
+            });
+          }
+        })();
+
+        return;
+      } catch (e) {
+        console.warn("[use-messages] Dexie sendVideoCircle failed, falling back to legacy:", e);
+      }
+    }
+
+    // Legacy path
+    sendVideoCircleLegacy(file, roomId, localBlobUrl, options, matrixService);
+  };
+
+  /** Legacy sendVideoCircle — fallback when Dexie is not ready */
+  const sendVideoCircleLegacy = async (
+    file: File,
+    roomId: string,
+    localBlobUrl: string,
+    options: { duration?: number },
+    matrixService: ReturnType<typeof getMatrixClientService>,
+  ) => {
+    const tempId = `msg_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
     const message: Message = {
       id: tempId,
       roomId,
@@ -1099,7 +1480,7 @@ export function useMessages() {
     const w = info?.w ?? 300;
     const h = info?.h ?? 300;
 
-    // Fetch the GIF as blob
+    // Fetch the GIF as blob (before Dexie insert — we need the file)
     const response = await fetch(gifUrl);
     if (!response.ok) {
       console.error("Failed to fetch GIF:", response.status);
@@ -1107,10 +1488,105 @@ export function useMessages() {
     }
     const blob = await response.blob();
     const file = new File([blob], "animation.gif", { type: "image/gif" });
-
-    // Optimistic message
-    const tempId = `msg_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
     const localBlobUrl = URL.createObjectURL(file);
+
+    // Dexie-first path
+    if (isChatDbReady()) {
+      try {
+        const dbKit = getChatDb();
+        const localMsg = await dbKit.messages.createLocal({
+          roomId,
+          senderId: authStore.address ?? "",
+          content: info?.title || "GIF",
+          type: MessageType.image,
+          fileInfo: {
+            name: file.name,
+            type: file.type,
+            size: file.size,
+            url: localBlobUrl,
+            w,
+            h,
+          },
+          localBlobUrl,
+          uploadProgress: 0,
+        });
+
+        // Async upload pipeline
+        (async () => {
+          try {
+            const roomCrypto = authStore.pcrypto?.rooms[roomId] as PcryptoRoomInstance | undefined;
+
+            let fileToUpload: Blob = file;
+            let secrets: Record<string, unknown> | undefined;
+
+            if (roomCrypto?.canBeEncrypt()) {
+              const encrypted = await roomCrypto.encryptFile(file);
+              secrets = encrypted.secrets;
+              fileToUpload = encrypted.file;
+            }
+
+            const url = await matrixService.uploadContent(fileToUpload, (progress) => {
+              const percent = progress.total > 0 ? Math.round((progress.loaded / progress.total) * 100) : 0;
+              dbKit.messages.updateUploadProgress(localMsg.clientId, percent);
+            });
+
+            const content: Record<string, unknown> = {
+              body: info?.title || "GIF",
+              msgtype: "m.image",
+              url,
+              info: {
+                w,
+                h,
+                mimetype: file.type,
+                size: file.size,
+                ...(secrets ? { secrets } : {}),
+              },
+            };
+
+            const serverEventId = await matrixService.sendEncryptedText(roomId, content, localMsg.clientId);
+
+            const serverFileInfo: FileInfo = {
+              name: file.name,
+              type: file.type,
+              size: file.size,
+              url,
+              w,
+              h,
+              ...(secrets ? { secrets: secrets as FileInfo["secrets"] } : {}),
+            };
+            await dbKit.messages.confirmMediaSent(localMsg.clientId, serverEventId, serverFileInfo);
+
+            setTimeout(() => URL.revokeObjectURL(localBlobUrl), 5000);
+          } catch (e) {
+            console.error("Failed to send GIF (Dexie path):", e);
+            await dbKit.db.messages.where("clientId").equals(localMsg.clientId).modify({
+              status: "failed" as import("@/shared/lib/local-db/schema").LocalMessageStatus,
+              uploadProgress: undefined,
+            });
+          }
+        })();
+
+        return;
+      } catch (e) {
+        console.warn("[use-messages] Dexie sendGif failed, falling back to legacy:", e);
+      }
+    }
+
+    // Legacy path
+    sendGifLegacy(file, roomId, localBlobUrl, w, h, info, matrixService);
+  };
+
+  /** Legacy sendGif — fallback when Dexie is not ready */
+  const sendGifLegacy = async (
+    file: File,
+    roomId: string,
+    localBlobUrl: string,
+    w: number,
+    h: number,
+    info: { w?: number; h?: number; title?: string } | undefined,
+    matrixService: ReturnType<typeof getMatrixClientService>,
+  ) => {
+    const tempId = `msg_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
     const message: Message = {
       id: tempId,
       roomId,
@@ -1169,6 +1645,132 @@ export function useMessages() {
     }
   };
 
+  /** Retry a failed media upload. Only works if the blob URL is still valid (same session). */
+  const retryMediaUpload = async (message: Message) => {
+    if (message.status !== MessageStatus.failed || !message.fileInfo) return;
+
+    const roomId = message.roomId;
+    const matrixService = getMatrixClientService();
+    if (!matrixService.isReady()) return;
+    if (!isChatDbReady()) return;
+
+    const dbKit = getChatDb();
+
+    // Find the local message by clientId (_key is the stable clientId)
+    const mKey = (message as Message & { _key?: string })._key;
+    if (!mKey) return;
+
+    const localMsg = await dbKit.messages.getByClientId(mKey);
+    if (!localMsg) return;
+
+    // Try to recover the blob from the still-alive blob URL
+    const blobUrl = localMsg.localBlobUrl || localMsg.fileInfo?.url;
+    if (!blobUrl) return;
+
+    let file: File;
+    try {
+      const resp = await fetch(blobUrl);
+      if (!resp.ok) throw new Error("Blob URL expired");
+      const blob = await resp.blob();
+      file = new File([blob], localMsg.fileInfo?.name || "file", {
+        type: localMsg.fileInfo?.type || "application/octet-stream",
+      });
+    } catch {
+      console.error("[retry] Blob URL no longer valid — user must re-send the file");
+      return;
+    }
+
+    // Reset status to pending with progress
+    await dbKit.db.messages.update(localMsg.localId!, {
+      status: "pending" as import("@/shared/lib/local-db/schema").LocalMessageStatus,
+      uploadProgress: 0,
+    });
+
+    // Re-run upload pipeline
+    try {
+      const roomCrypto = authStore.pcrypto?.rooms[roomId] as PcryptoRoomInstance | undefined;
+      let fileToUpload: Blob = file;
+      let secrets: Record<string, unknown> | undefined;
+
+      if (roomCrypto?.canBeEncrypt()) {
+        const encrypted = await roomCrypto.encryptFile(file);
+        secrets = encrypted.secrets;
+        fileToUpload = encrypted.file;
+      }
+
+      const url = await matrixService.uploadContent(fileToUpload, (progress) => {
+        const percent = progress.total > 0 ? Math.round((progress.loaded / progress.total) * 100) : 0;
+        dbKit.messages.updateUploadProgress(localMsg.clientId, percent);
+      });
+
+      // Build event content based on message type
+      const fi = localMsg.fileInfo!;
+      let content: Record<string, unknown>;
+
+      if (localMsg.type === "image") {
+        content = {
+          body: fi.caption || "Image",
+          msgtype: "m.image",
+          url,
+          info: {
+            w: fi.w, h: fi.h, mimetype: fi.type, size: fi.size,
+            ...(secrets ? { secrets } : {}),
+            ...(fi.caption ? { caption: fi.caption } : {}),
+            ...(fi.captionAbove != null ? { captionAbove: fi.captionAbove } : {}),
+          },
+        };
+      } else if (localMsg.type === "audio") {
+        const intWaveform = fi.waveform?.map((v: number) => Math.round(v * 1024));
+        content = {
+          body: "Audio",
+          msgtype: "m.audio",
+          url,
+          info: {
+            mimetype: fi.type, size: Math.round(fi.size),
+            duration: fi.duration ? Math.round(fi.duration * 1000) : undefined,
+            waveform: intWaveform,
+            ...(secrets ? { secrets } : {}),
+          },
+        };
+      } else if (localMsg.type === "videoCircle") {
+        content = {
+          body: "Video message",
+          msgtype: "m.video",
+          url,
+          info: {
+            mimetype: fi.type, size: Math.round(fi.size), w: 480, h: 480,
+            duration: fi.duration ? Math.round(fi.duration * 1000) : undefined,
+            videoNote: true,
+            ...(secrets ? { secrets } : {}),
+          },
+        };
+      } else {
+        // Generic file (m.file)
+        const fileBody: Record<string, unknown> = {
+          name: fi.name, type: fi.type, size: fi.size, url,
+        };
+        if (secrets) fileBody.secrets = secrets;
+        content = { body: JSON.stringify(fileBody), msgtype: "m.file" };
+      }
+
+      const serverEventId = await matrixService.sendEncryptedText(roomId, content, localMsg.clientId);
+      await dbKit.messages.confirmMediaSent(localMsg.clientId, serverEventId, {
+        ...fi,
+        url,
+        secrets: secrets as FileInfo["secrets"],
+      });
+
+      const blobToRevoke = localMsg.localBlobUrl;
+      if (blobToRevoke) setTimeout(() => URL.revokeObjectURL(blobToRevoke), 5000);
+    } catch (e) {
+      console.error("[retry] Upload failed again:", e);
+      await dbKit.db.messages.where("clientId").equals(localMsg.clientId).modify({
+        status: "failed" as import("@/shared/lib/local-db/schema").LocalMessageStatus,
+        uploadProgress: undefined,
+      });
+    }
+  };
+
   return {
     deleteMessage,
     drainOfflineQueue,
@@ -1176,6 +1778,7 @@ export function useMessages() {
     endPoll,
     forwardMessage,
     loadMessages,
+    retryMediaUpload,
     sendAudio,
     sendFile,
     sendGif,

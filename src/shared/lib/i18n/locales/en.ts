@@ -168,6 +168,7 @@ export const en = {
   "message.voiceMessage": "Voice message",
   "message.file": "File",
   "message.deleted": "This message was deleted",
+  "message.retry": "Retry",
 
   // ── Message context menu ──
   "contextMenu.reply": "Reply",
