@@ -113,6 +113,9 @@ export class EventWriter {
    * Write a single incoming message to local DB.
    * Handles dedup (own echo via clientId, duplicate eventId).
    * Only increments unread for messages from OTHER users in NON-ACTIVE rooms.
+   *
+   * All writes (message upsert + room preview + unread increment) are wrapped
+   * in a single Dexie transaction to prevent races with refreshRoomsImmediate.
    */
   async writeMessage(
     parsed: ParsedMessage,
@@ -120,21 +123,31 @@ export class EventWriter {
     activeRoomId: string | null,
   ): Promise<"inserted" | "updated" | "duplicate"> {
     const localMsg = this.toLocalMessage(parsed);
-    const result = await this.messageRepo.upsertFromServer(localMsg);
+    const out = { result: "duplicate" as "inserted" | "updated" | "duplicate" };
 
-    if (result === "inserted" || result === "updated") {
-      await this.updateRoomPreview(parsed);
-    }
+    await this.db.transaction("rw", [this.db.messages, this.db.rooms], async () => {
+      out.result = await this.messageRepo.upsertFromServer(localMsg);
 
-    if (result === "inserted") {
-      // Only increment unread for OTHER people's messages in NON-ACTIVE rooms
-      if (parsed.senderId !== myAddress && parsed.roomId !== activeRoomId) {
-        await this.incrementUnread(parsed.roomId);
+      if (out.result === "inserted" || out.result === "updated") {
+        await this.updateRoomPreview(parsed);
       }
+
+      if (out.result === "inserted") {
+        // Only increment unread for OTHER people's messages in NON-ACTIVE rooms
+        if (parsed.senderId !== myAddress && parsed.roomId !== activeRoomId) {
+          const room = await this.roomRepo.getRoom(parsed.roomId);
+          if (room) {
+            await this.roomRepo.setUnreadCount(parsed.roomId, room.unreadCount + 1);
+          }
+        }
+      }
+    });
+
+    if (out.result === "inserted") {
       this.onChange?.(parsed.roomId);
     }
 
-    return result;
+    return out.result;
   }
 
   /**
