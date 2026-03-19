@@ -9,6 +9,7 @@ import IncomingCallModal from "@/features/video-calls/ui/IncomingCallModal.vue";
 import CallWindow from "@/features/video-calls/ui/CallWindow.vue";
 import CallStatusBar from "@/features/video-calls/ui/CallStatusBar.vue";
 import QuickSearchModal from "@/features/search/ui/QuickSearchModal.vue";
+import { SyncBanner, handleSdkSync } from "@/features/sync-status";
 import { useRouter } from "vue-router";
 
 import { AppPages, AppRoutes, EAppProviders } from "./providers";
@@ -21,6 +22,7 @@ provide(EAppProviders.AppRoutes, AppRoutes);
 provide(EAppProviders.AppPages, AppPages);
 
 const authStore = useAuthStore();
+authStore.setSyncStatusCallback(handleSdkSync);
 const chatStore = useChatStore();
 const router = useRouter();
 
@@ -142,6 +144,7 @@ onUnmounted(() => {
 <template>
   <div class="relative flex flex-col bg-background-total-theme text-text-color" style="height: 100vh; height: 100dvh; padding-top: env(safe-area-inset-top, 0px)">
     <TitleBar v-if="isElectron" />
+    <SyncBanner />
     <div class="relative min-h-0 flex-1 overflow-hidden">
       <transition :name="isMobile ? '' : 'fade'" mode="out-in">
         <router-view class="h-full" />
