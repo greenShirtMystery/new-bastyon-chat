@@ -4,7 +4,10 @@ import { MessageType } from "@/entities/chat/model/types";
 import type { ReplyTo } from "@/entities/chat/model/types";
 
 export class MessageRepository {
-  constructor(private db: ChatDatabase) {}
+  constructor(
+    private db: ChatDatabase,
+    private roomRepo?: import("./room-repository").RoomRepository,
+  ) {}
 
   // ---------------------------------------------------------------------------
   // Reads
@@ -106,9 +109,35 @@ export class MessageRepository {
       fileInfo: params.fileInfo,
     };
 
-    const localId = await this.db.messages.add(message);
-    message.localId = localId as number;
+    await this.db.transaction("rw", [this.db.messages, this.db.rooms], async () => {
+      const localId = await this.db.messages.add(message);
+      message.localId = localId as number;
+
+      // Atomically update room preview so sidebar reflects sent message instantly
+      const preview = this.getPreviewText(message);
+      await this.db.rooms.update(params.roomId, {
+        lastMessagePreview: preview.slice(0, 200),
+        lastMessageTimestamp: now,
+        lastMessageSenderId: params.senderId,
+        lastMessageType: params.type ?? MessageType.text,
+        lastMessageLocalStatus: "pending" as import("./schema").LocalMessageStatus,
+        lastMessageReaction: null,
+        updatedAt: now,
+      });
+    });
+
     return message;
+  }
+
+  /** Generate preview text for sidebar display */
+  private getPreviewText(msg: LocalMessage): string {
+    if (msg.type === MessageType.image) return "[photo]";
+    if (msg.type === MessageType.video) return "[video]";
+    if (msg.type === MessageType.audio) return "[voice message]";
+    if (msg.type === MessageType.file) return "[file]";
+    if (msg.type === MessageType.poll) return "[poll]";
+    if (msg.type === MessageType.transfer) return `[transfer] ${msg.transferInfo?.amount ?? 0} PKOIN`;
+    return msg.content;
   }
 
   /** Insert or update a message from the server (incoming sync).

@@ -85,8 +85,8 @@ export function initChatDb(
   }
 
   const db = new ChatDatabase(userId);
-  const messages = new MessageRepository(db);
   const rooms = new RoomRepository(db);
+  const messages = new MessageRepository(db, rooms);
   const users = new UserRepository(db);
   const syncEngine = new SyncEngine(db, messages, rooms, getRoomCrypto, onChange);
   const eventWriter = new EventWriter(db, messages, rooms, users, onChange);
