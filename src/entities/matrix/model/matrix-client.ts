@@ -38,6 +38,11 @@ export class MatrixClientService {
   private sdk = sdk;
   store: Record<string, unknown> | null = null;
   private typingTimers = new Map<string, number>();
+  private torProxyUrl: string = '';
+
+  setTorProxyUrl(url: string) {
+    this.torProxyUrl = url;
+  }
 
   // Event callbacks
   private onSync: SyncCallback | null = null;
@@ -94,6 +99,15 @@ export class MatrixClientService {
       cancelToken: cancelTokenSource.token,
       paramsSerializer: (params: unknown) => qs.stringify(params as Record<string, unknown>, opts.qsStringifyOptions)
     };
+
+    // When Tor proxy is active, route through local reverse proxy
+    if (this.torProxyUrl) {
+      axiosOpts.proxy = {
+        host: '127.0.0.1',
+        port: 8181,
+        protocol: 'http'
+      };
+    }
 
     const req = axios(axiosOpts)
       .then((response) => response)
