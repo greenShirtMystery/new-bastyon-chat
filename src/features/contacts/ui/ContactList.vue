@@ -462,9 +462,18 @@ const getRoomLongPress = (room: ChatRoom) => {
               size="md"
             />
             <Avatar v-else :src="(item as ChatRoom).avatar" :name="resolveRoomName(item as ChatRoom)" size="md" />
+            <!-- Invite badge -->
+            <div
+              v-if="(item as ChatRoom).membership === 'invite'"
+              class="absolute -bottom-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-color-bg-ac"
+            >
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" class="text-white">
+                <path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4-8 5-8-5V6l8 5 8-5v2z" />
+              </svg>
+            </div>
             <!-- Group indicator -->
             <div
-              v-if="(item as ChatRoom).isGroup"
+              v-else-if="(item as ChatRoom).isGroup"
               class="absolute -bottom-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-background-total-theme"
             >
               <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" class="text-text-on-main-bg-color">
@@ -517,7 +526,7 @@ const getRoomLongPress = (room: ChatRoom) => {
                 class="truncate text-sm"
               ><span class="font-medium text-color-bad">{{ t("contactList.draft") }}:</span> <span class="text-text-on-main-bg-color">{{ getRoomDraft((item as ChatRoom).id) }}</span></span>
               <span v-else-if="(item as ChatRoom).membership === 'invite'" class="truncate text-sm italic text-color-bg-ac">
-                Invitation to chat
+                {{ t("contactList.inviteToChat") }}
               </span>
               <span
                 v-else-if="(item as ChatRoom).lastMessage?.callInfo"

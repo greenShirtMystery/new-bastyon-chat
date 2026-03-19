@@ -228,7 +228,7 @@ function matrixRoomToChatRoom(room: any, kit: MatrixKit, myUserId: string, nameH
     unreadCount,
     members: memberIds,
     isGroup,
-    updatedAt: lastTs || 0,
+    updatedAt: lastTs || (membership === "invite" ? Date.now() : 0),
     membership: membership === "invite" ? "invite" : "join",
     topic,
   };
@@ -768,30 +768,37 @@ export const useChatStore = defineStore(NAMESPACE, () => {
               // Existing room: update metadata only, preserve preview/unread/watermarks
               await dbKit.rooms.updateRoom(r.id, metadataFields);
             } else {
-              // New room: insert with full initial state including preview from Matrix SDK
-              await dbKit.rooms.upsertRoom({
-                id: r.id,
-                ...metadataFields,
-                unreadCount: r.unreadCount,
-                updatedAt: r.updatedAt,
-                hasMoreHistory: true,
-                lastReadInboundTs: 0,
-                lastReadOutboundTs: 0,
-                lastMessagePreview: r.lastMessage?.deleted
-                  ? "🚫 Message deleted"
-                  : r.lastMessage?.content?.slice(0, 200),
-                lastMessageTimestamp: r.lastMessage?.timestamp,
-                lastMessageSenderId: r.lastMessage?.senderId,
-                lastMessageType: r.lastMessage?.type,
-                lastMessageEventId: r.lastMessage?.id || undefined,
-                lastMessageLocalStatus: r.lastMessage?.status === MessageStatus.sending ? "pending"
-                  : r.lastMessage?.status === MessageStatus.failed ? "failed"
-                  : "synced" as import("@/shared/lib/local-db").LocalMessageStatus,
-                lastMessageReaction: null,
-                isDeleted: false,
-                deletedAt: null,
-                deleteReason: null,
-              });
+              // Room not in active set — may be tombstoned. Revive if so.
+              const maybeTombstoned = await dbKit.rooms.getRoom(r.id);
+              if (maybeTombstoned?.isDeleted) {
+                await dbKit.rooms.reviveRoom(r.id);
+                await dbKit.rooms.updateRoom(r.id, { ...metadataFields, updatedAt: r.updatedAt });
+              } else {
+                // Genuinely new room: insert with full initial state
+                await dbKit.rooms.upsertRoom({
+                  id: r.id,
+                  ...metadataFields,
+                  unreadCount: r.unreadCount,
+                  updatedAt: r.updatedAt,
+                  hasMoreHistory: true,
+                  lastReadInboundTs: 0,
+                  lastReadOutboundTs: 0,
+                  lastMessagePreview: r.lastMessage?.deleted
+                    ? "🚫 Message deleted"
+                    : r.lastMessage?.content?.slice(0, 200),
+                  lastMessageTimestamp: r.lastMessage?.timestamp,
+                  lastMessageSenderId: r.lastMessage?.senderId,
+                  lastMessageType: r.lastMessage?.type,
+                  lastMessageEventId: r.lastMessage?.id || undefined,
+                  lastMessageLocalStatus: r.lastMessage?.status === MessageStatus.sending ? "pending"
+                    : r.lastMessage?.status === MessageStatus.failed ? "failed"
+                    : "synced" as import("@/shared/lib/local-db").LocalMessageStatus,
+                  lastMessageReaction: null,
+                  isDeleted: false,
+                  deletedAt: null,
+                  deleteReason: null,
+                });
+              }
             }
           }
         } catch (e) {
@@ -1006,30 +1013,37 @@ export const useChatStore = defineStore(NAMESPACE, () => {
             if (existingIds.has(roomId)) {
               await dbKit.rooms.updateRoom(roomId, metadataFields);
             } else {
-              // New room discovered during incremental refresh
-              await dbKit.rooms.upsertRoom({
-                id: r.id,
-                ...metadataFields,
-                unreadCount: r.unreadCount,
-                updatedAt: r.updatedAt,
-                hasMoreHistory: true,
-                lastReadInboundTs: 0,
-                lastReadOutboundTs: 0,
-                lastMessagePreview: r.lastMessage?.deleted
-                  ? "🚫 Message deleted"
-                  : r.lastMessage?.content?.slice(0, 200),
-                lastMessageTimestamp: r.lastMessage?.timestamp,
-                lastMessageSenderId: r.lastMessage?.senderId,
-                lastMessageType: r.lastMessage?.type,
-                lastMessageEventId: r.lastMessage?.id || undefined,
-                lastMessageLocalStatus: r.lastMessage?.status === MessageStatus.sending ? "pending"
-                  : r.lastMessage?.status === MessageStatus.failed ? "failed"
-                  : "synced" as import("@/shared/lib/local-db").LocalMessageStatus,
-                lastMessageReaction: null,
-                isDeleted: false,
-                deletedAt: null,
-                deleteReason: null,
-              });
+              // Room not in active set — may be tombstoned. Revive if so.
+              const maybeTombstoned = await dbKit.rooms.getRoom(roomId);
+              if (maybeTombstoned?.isDeleted) {
+                await dbKit.rooms.reviveRoom(roomId);
+                await dbKit.rooms.updateRoom(roomId, { ...metadataFields, updatedAt: r.updatedAt });
+              } else {
+                // Genuinely new room discovered during incremental refresh
+                await dbKit.rooms.upsertRoom({
+                  id: r.id,
+                  ...metadataFields,
+                  unreadCount: r.unreadCount,
+                  updatedAt: r.updatedAt,
+                  hasMoreHistory: true,
+                  lastReadInboundTs: 0,
+                  lastReadOutboundTs: 0,
+                  lastMessagePreview: r.lastMessage?.deleted
+                    ? "🚫 Message deleted"
+                    : r.lastMessage?.content?.slice(0, 200),
+                  lastMessageTimestamp: r.lastMessage?.timestamp,
+                  lastMessageSenderId: r.lastMessage?.senderId,
+                  lastMessageType: r.lastMessage?.type,
+                  lastMessageEventId: r.lastMessage?.id || undefined,
+                  lastMessageLocalStatus: r.lastMessage?.status === MessageStatus.sending ? "pending"
+                    : r.lastMessage?.status === MessageStatus.failed ? "failed"
+                    : "synced" as import("@/shared/lib/local-db").LocalMessageStatus,
+                  lastMessageReaction: null,
+                  isDeleted: false,
+                  deletedAt: null,
+                  deleteReason: null,
+                });
+              }
             }
           }
         } catch (e) {
@@ -1527,9 +1541,10 @@ export const useChatStore = defineStore(NAMESPACE, () => {
     }
   };
 
-  /** Count of rooms with pending invitations */
+  /** Count of rooms with pending invitations.
+   *  Reads from sortedRooms (Dexie-backed) to stay in sync with the displayed list. */
   const inviteCount = computed(() =>
-    rooms.value.filter((r) => r.membership === "invite").length
+    sortedRooms.value.filter((r) => r.membership === "invite").length
   );
 
   const addRoom = (room: ChatRoom) => {
