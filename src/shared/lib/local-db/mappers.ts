@@ -27,7 +27,11 @@ export function localToMessage(
     timestamp: local.timestamp,
     status,
     type: local.type,
-    fileInfo: isDeleted ? undefined : local.fileInfo,
+    fileInfo: isDeleted ? undefined : (local.fileInfo ? {
+      ...local.fileInfo,
+      // Use local blob URL for instant preview during upload, fall back to server URL
+      url: local.localBlobUrl || local.fileInfo.url,
+    } : undefined),
     replyTo: isDeleted ? undefined : local.replyTo,
     reactions: isDeleted ? undefined : local.reactions,
     edited: local.edited,
@@ -38,6 +42,7 @@ export function localToMessage(
     linkPreview: isDeleted ? undefined : local.linkPreview,
     deleted: isDeleted,
     systemMeta: local.systemMeta,
+    uploadProgress: local.uploadProgress,
   };
 }
 
