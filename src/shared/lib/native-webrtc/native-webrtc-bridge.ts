@@ -41,6 +41,15 @@ export interface NativeWebRTCPlugin {
   closePeerConnection(): Promise<void>;
   getConnectionState(): Promise<{ state: string }>;
 
+  // Native Call UI
+  launchCallUI(options: {
+    callerName: string;
+    callType: string;
+    callId: string;
+    direction: string;
+  }): Promise<void>;
+  dismissCallUI(): Promise<void>;
+
   // Events from native → JS
   addListener(
     event: "onIceCandidate",

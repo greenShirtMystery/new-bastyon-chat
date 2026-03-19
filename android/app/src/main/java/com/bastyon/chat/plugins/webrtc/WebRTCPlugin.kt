@@ -255,6 +255,29 @@ class WebRTCPlugin : Plugin() {
     }
 
     // -----------------------------------------------------------------------
+    // Native Call UI
+    // -----------------------------------------------------------------------
+
+    @PluginMethod
+    fun launchCallUI(call: PluginCall) {
+        val callerName = call.getString("callerName") ?: "Unknown"
+        val callType = call.getString("callType") ?: "video"
+        val callId = call.getString("callId") ?: ""
+        val direction = call.getString("direction") ?: "outgoing"
+
+        com.bastyon.chat.plugins.calls.CallActivity.launch(
+            context, callerName, callType, callId, direction
+        )
+        call.resolve()
+    }
+
+    @PluginMethod
+    fun dismissCallUI(call: PluginCall) {
+        com.bastyon.chat.plugins.calls.CallActivity.onCallEnded?.invoke()
+        call.resolve()
+    }
+
+    // -----------------------------------------------------------------------
     // Cleanup
     // -----------------------------------------------------------------------
 

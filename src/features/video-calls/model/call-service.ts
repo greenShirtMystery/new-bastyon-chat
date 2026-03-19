@@ -9,7 +9,7 @@ import type { CallFeed } from "matrix-js-sdk-bastyon/lib/webrtc/callFeed";
 import { playRingtone, playDialtone, playEndTone, stopAllSounds } from "./call-sounds";
 import { checkOtherTabHasCall } from "./call-tab-lock";
 import { isNative } from "@/shared/lib/platform";
-import { installNativeWebRTCProxy } from "@/shared/lib/native-webrtc";
+import { installNativeWebRTCProxy, NativeWebRTC } from "@/shared/lib/native-webrtc";
 
 // Install native WebRTC proxy on mobile — must run before any call is placed.
 // This replaces window.RTCPeerConnection so that the Matrix SDK transparently
@@ -177,11 +177,12 @@ function wireCallEvents(call: MatrixCall, direction: "outgoing" | "incoming") {
       playEndTone();
       callStore.stopTimer();
       unwireCallEvents(call);
-      // Notify native ConnectionService that call ended
+      // Notify native ConnectionService that call ended + dismiss native UI
       if (isNative) {
         import('@/shared/lib/native-calls').then(({ nativeCallBridge }) => {
           nativeCallBridge.reportCallEnded(call.callId);
         }).catch(() => {});
+        NativeWebRTC.dismissCallUI().catch(() => {});
       }
       const activeCall = callStore.activeCall;
       if (activeCall) {
@@ -227,6 +228,7 @@ function wireCallEvents(call: MatrixCall, direction: "outgoing" | "incoming") {
       import('@/shared/lib/native-calls').then(({ nativeCallBridge }) => {
         nativeCallBridge.reportCallEnded(call.callId);
       }).catch(() => {});
+      NativeWebRTC.dismissCallUI().catch(() => {});
     }
     callStore.updateStatus(CallStatus.failed);
     const activeCall = callStore.activeCall;
@@ -445,7 +447,7 @@ export function useCallService() {
 
     playDialtone();
 
-    // Register outgoing call with Android ConnectionService
+    // Register outgoing call with Android ConnectionService + launch native UI
     if (isNative) {
       import('@/shared/lib/native-calls').then(({ nativeCallBridge }) => {
         nativeCallBridge.reportOutgoingCall({
@@ -453,6 +455,12 @@ export function useCallService() {
           callerName: peerName,
           hasVideo: type === 'video',
         });
+      }).catch(() => {});
+      NativeWebRTC.launchCallUI({
+        callerName: peerName,
+        callType: type,
+        callId: call.callId,
+        direction: "outgoing",
       }).catch(() => {});
     }
 
@@ -552,6 +560,17 @@ export function useCallService() {
     hintStoredDevices(client);
 
     const isVideo = callStore.activeCall?.type === "video";
+
+    // Launch native call UI when answering incoming call
+    if (isNative && callStore.activeCall) {
+      NativeWebRTC.launchCallUI({
+        callerName: callStore.activeCall.peerName,
+        callType: callStore.activeCall.type,
+        callId: call.callId,
+        direction: "incoming",
+      }).catch(() => {});
+    }
+
     try {
       await call.answer(true, isVideo);
     } catch (e) {
@@ -559,6 +578,7 @@ export function useCallService() {
       unwireCallEvents(call);
       callStore.updateStatus(CallStatus.failed);
       callStore.scheduleClearCall(2000);
+      if (isNative) NativeWebRTC.dismissCallUI().catch(() => {});
     }
   }
 

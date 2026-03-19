@@ -30,7 +30,7 @@ const ICE_STATE_MAP: Record<string, RTCIceConnectionState> = {
  * A proxy RTCPeerConnection that routes all WebRTC operations to the
  * native Android layer via Capacitor bridge.
  */
-class NativeRTCPeerConnection extends EventTarget implements Partial<RTCPeerConnection> {
+class NativeRTCPeerConnection extends EventTarget {
   // State
   private _iceConnectionState: RTCIceConnectionState = "new";
   private _connectionState: RTCPeerConnectionState = "new";

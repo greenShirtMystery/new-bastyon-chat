@@ -51,6 +51,16 @@
             android:exported="false"
             android:launchMode="singleTop"
             android:theme="@android:style/Theme.DeviceDefault.Light.NoActionBar" />
+
+        <activity
+            android:name="com.bastyon.chat.plugins.calls.CallActivity"
+            android:showOnLockScreen="true"
+            android:turnScreenOn="true"
+            android:exported="false"
+            android:launchMode="singleTop"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout"
+            android:supportsPictureInPicture="true"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
     </application>
 
     <!-- Permissions -->
