@@ -8,6 +8,7 @@ import { useUserStore } from "@/entities/user";
 import type { CallFeed } from "matrix-js-sdk-bastyon/lib/webrtc/callFeed";
 import { playRingtone, playDialtone, playEndTone, stopAllSounds } from "./call-sounds";
 import { checkOtherTabHasCall } from "./call-tab-lock";
+import { isNative } from "@/shared/lib/platform";
 
 // ---------------------------------------------------------------------------
 // SDK state → store status mapping
@@ -154,6 +155,12 @@ function wireCallEvents(call: MatrixCall, direction: "outgoing" | "incoming") {
       updateFeeds(call);
       // Apply saved device preferences with {exact} constraint
       applySavedDevicesExact(call);
+      // Notify native ConnectionService that call is now active
+      if (isNative) {
+        import('@/shared/lib/native-calls').then(({ nativeCallBridge }) => {
+          nativeCallBridge.reportCallConnected(call.callId);
+        }).catch(() => {});
+      }
     }
 
     if (status === CallStatus.ended) {
@@ -162,6 +169,12 @@ function wireCallEvents(call: MatrixCall, direction: "outgoing" | "incoming") {
       playEndTone();
       callStore.stopTimer();
       unwireCallEvents(call);
+      // Notify native ConnectionService that call ended
+      if (isNative) {
+        import('@/shared/lib/native-calls').then(({ nativeCallBridge }) => {
+          nativeCallBridge.reportCallEnded(call.callId);
+        }).catch(() => {});
+      }
       const activeCall = callStore.activeCall;
       if (activeCall) {
         const entry: CallHistoryEntry = {
@@ -202,6 +215,11 @@ function wireCallEvents(call: MatrixCall, direction: "outgoing" | "incoming") {
     stopAllSounds();
     clearIncomingTimeout();
     unwireCallEvents(call);
+    if (isNative) {
+      import('@/shared/lib/native-calls').then(({ nativeCallBridge }) => {
+        nativeCallBridge.reportCallEnded(call.callId);
+      }).catch(() => {});
+    }
     callStore.updateStatus(CallStatus.failed);
     const activeCall = callStore.activeCall;
     if (activeCall) {
@@ -419,6 +437,17 @@ export function useCallService() {
 
     playDialtone();
 
+    // Register outgoing call with Android ConnectionService
+    if (isNative) {
+      import('@/shared/lib/native-calls').then(({ nativeCallBridge }) => {
+        nativeCallBridge.reportOutgoingCall({
+          callId: call.callId,
+          callerName: peerName,
+          hasVideo: type === 'video',
+        });
+      }).catch(() => {});
+    }
+
     hintStoredDevices(client);
 
     try {
@@ -433,6 +462,11 @@ export function useCallService() {
       unwireCallEvents(call);
       callStore.updateStatus(CallStatus.failed);
       callStore.scheduleClearCall(2000);
+      if (isNative) {
+        import('@/shared/lib/native-calls').then(({ nativeCallBridge }) => {
+          nativeCallBridge.reportCallEnded(call.callId);
+        }).catch(() => {});
+      }
     }
   }
 
@@ -473,7 +507,19 @@ export function useCallService() {
     callStore.videoMuted = !isVideo;
     wireCallEvents(matrixCall, "incoming");
 
-    playRingtone();
+    // On native: show system call UI via ConnectionService
+    if (isNative) {
+      import('@/shared/lib/native-calls').then(({ nativeCallBridge }) => {
+        nativeCallBridge.reportIncomingCall({
+          callId: matrixCall.callId,
+          callerName: peerName,
+          roomId: matrixCall.roomId,
+          hasVideo: isVideo,
+        });
+      }).catch((e) => console.error('[call-service] native call bridge error:', e));
+    } else {
+      playRingtone();
+    }
 
     // Auto-reject after 30s if still incoming (#10)
     clearIncomingTimeout();

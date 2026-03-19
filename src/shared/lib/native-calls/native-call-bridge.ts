@@ -8,7 +8,14 @@ interface NativeCallNativePlugin {
     roomId: string;
     hasVideo: boolean;
   }): Promise<void>;
+  reportOutgoingCall(options: {
+    callId: string;
+    callerName: string;
+    hasVideo: boolean;
+  }): Promise<void>;
+  reportCallConnected(options: { callId: string }): Promise<void>;
   reportCallEnded(options: { callId: string }): Promise<void>;
+  requestAudioPermission(): Promise<{ granted: boolean }>;
   addListener(event: 'callAnswered', cb: (data: { callId: string }) => void): Promise<{ remove: () => void }>;
   addListener(event: 'callDeclined', cb: (data: { callId: string }) => void): Promise<{ remove: () => void }>;
   addListener(event: 'callEnded', cb: (data: { callId: string }) => void): Promise<{ remove: () => void }>;
@@ -19,9 +26,16 @@ const NativeCall = registerPlugin<NativeCallNativePlugin>('NativeCall');
 class NativeCallBridge {
   private callService: any = null;
 
-  async wire(callService: { answerCall: () => void; rejectCall: () => void }): Promise<void> {
+  async wire(callService: { answerCall: () => void; rejectCall: () => void; hangup: () => void }): Promise<void> {
     if (!isNative) return;
     this.callService = callService;
+
+    // Request audio permission early so WebRTC can access microphone
+    try {
+      await NativeCall.requestAudioPermission();
+    } catch (e) {
+      console.warn('[NativeCallBridge] requestAudioPermission failed:', e);
+    }
 
     await NativeCall.addListener('callAnswered', ({ callId }) => {
       console.log('[NativeCallBridge] Call answered:', callId);
@@ -35,6 +49,7 @@ class NativeCallBridge {
 
     await NativeCall.addListener('callEnded', ({ callId }) => {
       console.log('[NativeCallBridge] Call ended natively:', callId);
+      this.callService?.hangup();
     });
   }
 
@@ -46,6 +61,28 @@ class NativeCallBridge {
   }): Promise<void> {
     if (!isNative) return;
     await NativeCall.reportIncomingCall(options);
+  }
+
+  async reportOutgoingCall(options: {
+    callId: string;
+    callerName: string;
+    hasVideo: boolean;
+  }): Promise<void> {
+    if (!isNative) return;
+    try {
+      await NativeCall.reportOutgoingCall(options);
+    } catch (e) {
+      console.warn('[NativeCallBridge] reportOutgoingCall failed:', e);
+    }
+  }
+
+  async reportCallConnected(callId: string): Promise<void> {
+    if (!isNative) return;
+    try {
+      await NativeCall.reportCallConnected({ callId });
+    } catch (e) {
+      console.warn('[NativeCallBridge] reportCallConnected failed:', e);
+    }
   }
 
   async reportCallEnded(callId: string): Promise<void> {
