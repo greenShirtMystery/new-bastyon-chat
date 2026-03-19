@@ -1,0 +1,23 @@
+{
+  "project_info": {
+    "project_number": "REPLACE_ME",
+    "project_id": "bastyon-chat",
+    "storage_bucket": "bastyon-chat.appspot.com"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:000000000000:android:0000000000000000",
+        "android_client_info": {
+          "package_name": "com.bastyon.chat"
+        }
+      },
+      "api_key": [
+        {
+          "current_key": "REPLACE_WITH_REAL_API_KEY"
+        }
+      ]
+    }
+  ],
+  "configuration_version": "1"
+}
