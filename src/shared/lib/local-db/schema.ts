@@ -118,6 +118,11 @@ export interface LocalMessage {
   version: number;               // Incremented on each local edit
   softDeleted: boolean;          // true = marked for deletion, pending sync
   deletedAt?: number;            // When soft-delete happened
+
+  /** Upload progress 0-100 (only during media upload) */
+  uploadProgress?: number;
+  /** Local blob: URL for instant media preview before upload completes */
+  localBlobUrl?: string;
 }
 
 /** Cached user profile */
@@ -453,6 +458,17 @@ export class ChatDatabase extends Dexie {
       }
 
       console.log("[ChatDB] Tombstone migration v6 complete");
+    });
+
+    // Version 7: add uploadProgress and localBlobUrl to LocalMessage (no index changes)
+    this.version(7).stores({
+      rooms: "id, updatedAt, membership, isDeleted",
+      messages: "++localId, eventId, clientId, [roomId+timestamp], [roomId+status], senderId",
+      users: "address, updatedAt",
+      pendingOps: "++id, [roomId+createdAt], status",
+      syncState: "key",
+      attachments: "++id, messageLocalId, status",
+      decryptionQueue: "++id, eventId, roomId, status, [status+nextAttemptAt]",
     });
   }
 }
