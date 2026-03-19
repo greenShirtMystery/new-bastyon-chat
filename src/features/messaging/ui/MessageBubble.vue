@@ -53,6 +53,7 @@ const emit = defineEmits<{
   pollEnd: [messageId: string];
   delete: [message: Message];
   forward: [message: Message];
+  resize: [];
 }>();
 
 const handleToggleReaction = (emoji: string) => {
@@ -391,7 +392,7 @@ const replyPreviewSender = computed(() => {
           >
             Failed to load image
           </div>
-          <img v-else-if="fileState.objectUrl" :src="fileState.objectUrl" :alt="message.fileInfo?.name" class="block max-h-[460px] max-w-full object-cover" :style="imageStyle" />
+          <img v-else-if="fileState.objectUrl" :src="fileState.objectUrl" :alt="message.fileInfo?.name" class="block max-h-[460px] max-w-full object-cover" :style="imageStyle" @load="emit('resize')" />
           <!-- Sending overlay -->
           <div v-if="isSending" class="absolute inset-0 flex items-center justify-center bg-black/30">
             <div class="h-8 w-8 animate-spin rounded-full border-3 border-white border-t-transparent" />

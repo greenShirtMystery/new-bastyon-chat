@@ -317,33 +317,69 @@ const checkScroll = () => {
 
 let scrollBottomTimer: ReturnType<typeof setTimeout> | undefined;
 let scrollRafId1: number | undefined;
-let scrollRafId2: number | undefined;
-const scrollToBottom = (smooth = false, onSettled?: () => void) => {
+let pendingScrollToBottom = false;
+let pendingOnSettled: (() => void) | undefined;
+let scrollStableTimer: ReturnType<typeof setTimeout> | undefined;
+let scrollStableRaf: number | undefined;
+const scrollToBottom = (_smooth = false, onSettled?: () => void) => {
   newMessageCount.value = 0;
-  // Cancel ALL pending scroll operations from previous call to avoid competing scrolls
+
+  // Cancel any pending operations from a previous call
   clearTimeout(scrollBottomTimer);
+  clearTimeout(scrollStableTimer);
   if (scrollRafId1 != null) cancelAnimationFrame(scrollRafId1);
-  if (scrollRafId2 != null) cancelAnimationFrame(scrollRafId2);
+  if (scrollStableRaf != null) cancelAnimationFrame(scrollStableRaf);
+
   const doScroll = () => {
-    // Direct scrollTop assignment for reliable scroll-to-bottom.
     const el = getScrollContainer();
     if (el) {
       el.scrollTop = el.scrollHeight + 9999;
     }
   };
+
+  // Activate event-driven mode: contentResizeObserver will keep
+  // scrolling to bottom on every resize until content stabilises.
+  pendingScrollToBottom = true;
+  pendingOnSettled = onSettled;
+
+  // Immediate scroll on next tick (handles fast/static content)
   nextTick(() => {
     doScroll();
+    // One rAF pass for layout that settles within a single frame
     scrollRafId1 = requestAnimationFrame(() => {
       doScroll();
-      scrollRafId2 = requestAnimationFrame(() => {
-        doScroll();
-        // Final pass after images/avatars settle, then signal done
-        scrollBottomTimer = setTimeout(() => {
-          doScroll();
-          onSettled?.();
-        }, 250);
-      });
+      // Start the stability window — if no resize fires within 300ms,
+      // content has stabilised and we can stop.
+      resetStableTimer(onSettled);
     });
+  });
+};
+
+/** Reset the stability timer. Called after every content resize while
+ *  pendingScrollToBottom is true. When 300ms pass without a resize,
+ *  we consider the content stable and stop auto-scrolling. */
+const resetStableTimer = (onSettled?: () => void) => {
+  if (onSettled) pendingOnSettled = onSettled;
+  clearTimeout(scrollStableTimer);
+  scrollStableTimer = setTimeout(() => {
+    pendingScrollToBottom = false;
+    pendingOnSettled?.();
+    pendingOnSettled = undefined;
+  }, 300);
+};
+
+/** Micro-nudge scrollTop to force virtua to recalculate item offsets.
+ *  Used when an individual item's height changes (image load, etc.)
+ *  and we're NOT in a pendingScrollToBottom flow. */
+const nudgeVirtua = () => {
+  if (pendingScrollToBottom) return; // already handled by stable scroll
+  const el = getScrollContainer();
+  if (!el) return;
+  // A 0.5px scroll jitter is invisible but forces layout recalc.
+  const before = el.scrollTop;
+  el.scrollTop = before + 0.5;
+  requestAnimationFrame(() => {
+    if (el) el.scrollTop = before;
   });
 };
 
@@ -838,18 +874,30 @@ const attachScrollListener = () => {
       contentResizeObserver = new ResizeObserver(() => {
         const el = scrollListenEl;
         if (!el || switching.value) return;
-        // Skip auto-scroll while loading older messages — doLoadMore/doPrefetch
-        // will handle scroll position restoration themselves.
+
+        // Skip auto-scroll while loading older messages
         if (loadingMore.value || prefetching.value) {
           prevScrollHeight = el.scrollHeight;
           return;
         }
+
         const newHeight = el.scrollHeight;
-        if (newHeight !== prevScrollHeight) {
-          prevScrollHeight = newHeight;
-          // If we were near bottom, keep us at bottom (compensate for image loads, reactions etc.)
-          if (isNearBottom.value) {
+        if (newHeight === prevScrollHeight) return;
+        prevScrollHeight = newHeight;
+
+        // Event-driven scroll: content just resized (image loaded, reply
+        // preview rendered, reaction added). If we're in a pending scroll
+        // or simply near the bottom, scroll down and reset the stability timer.
+        if (pendingScrollToBottom || isNearBottom.value) {
+          if (scrollStableRaf != null) cancelAnimationFrame(scrollStableRaf);
+          scrollStableRaf = requestAnimationFrame(() => {
             el.scrollTop = el.scrollHeight + 9999;
+            scrollStableRaf = undefined;
+          });
+
+          // If in pending mode, extend the stability window
+          if (pendingScrollToBottom) {
+            resetStableTimer();
           }
         }
       });
@@ -932,6 +980,12 @@ onUnmounted(() => {
     cancelAnimationFrame(scrollThrottleRaf);
   }
   clearTimeout(dateHideTimer);
+  clearTimeout(scrollBottomTimer);
+  clearTimeout(scrollStableTimer);
+  if (scrollRafId1 != null) cancelAnimationFrame(scrollRafId1);
+  if (scrollStableRaf != null) cancelAnimationFrame(scrollStableRaf);
+  pendingScrollToBottom = false;
+  pendingOnSettled = undefined;
 });
 
 const getDateLabel = (
@@ -1040,7 +1094,7 @@ defineExpose({ scrollToMessage, setSearchQuery });
       v-if="!loading"
       ref="scrollerRef"
       :data="virtualItems"
-      :item-size="72"
+      :item-size="100"
       shift
       class="h-full overscroll-contain px-4 py-3"
       :style="{ opacity: settled ? 1 : 0, transition: settled ? 'opacity 0.1s ease-out' : 'none' }"
@@ -1135,6 +1189,7 @@ defineExpose({ scrollToMessage, setSearchQuery });
             @add-reaction="handleOpenEmojiPicker"
             @poll-vote="handlePollVote"
             @poll-end="handlePollEnd"
+            @resize="nudgeVirtua"
           >
             <template #avatar>
               <UserAvatar :address="item.message.senderId" size="sm" />
