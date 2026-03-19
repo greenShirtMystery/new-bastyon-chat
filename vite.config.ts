@@ -32,6 +32,7 @@ export default defineConfig({
         "vue",
         "vue-router",
         { "@/shared/lib/i18n": ["useI18n"] },
+        { "@/shared/lib/emotion": ["css", "cx", "keyframes", "injectGlobal"] },
       ],
       include: [
         /\.[tj]sx?$/,

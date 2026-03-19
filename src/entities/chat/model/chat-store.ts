@@ -717,6 +717,7 @@ export const useChatStore = defineStore(NAMESPACE, () => {
     const prevLastMessageMap = new Map(rooms.value.map(r => [r.id, r.lastMessage]));
     const prevMembersMap = new Map(rooms.value.map(r => [r.id, r.members]));
     const prevAvatarMap = new Map(rooms.value.map(r => [r.id, r.avatar]));
+    const prevUpdatedAtMap = new Map(rooms.value.map(r => [r.id, r.updatedAt]));
     const prevActiveRoom = activeRoomId.value ? getRoomById(activeRoomId.value) : undefined;
 
     const interactiveRooms = filterInteractiveRooms(matrixRooms);
@@ -730,6 +731,13 @@ export const useChatStore = defineStore(NAMESPACE, () => {
           room.members = prevMembers;
           const prevAvatar = prevAvatarMap.get(room.id);
           if (prevAvatar) room.avatar = prevAvatar;
+        }
+        // Prevent list "jump": keep the higher updatedAt from cache so rooms
+        // that were sorted to a position don't suddenly drop down when Matrix
+        // SDK returns a stale or incomplete timeline on first sync.
+        const prevTs = prevUpdatedAtMap.get(room.id);
+        if (prevTs && prevTs > room.updatedAt) {
+          room.updatedAt = prevTs;
         }
         return room;
       });
@@ -956,6 +964,10 @@ export const useChatStore = defineStore(NAMESPACE, () => {
         if (existing.members.length > chatRoom.members.length) {
           chatRoom.members = existing.members;
           chatRoom.avatar = existing.avatar;
+        }
+        // Keep the higher updatedAt so rooms don't jump down in the list
+        if (existing.updatedAt > chatRoom.updatedAt) {
+          chatRoom.updatedAt = existing.updatedAt;
         }
         // Update in-place to preserve Vue reactivity references
         Object.assign(existing, chatRoom);
@@ -1341,6 +1353,9 @@ export const useChatStore = defineStore(NAMESPACE, () => {
     }
   };
 
+  // Track initial unread count at the moment a room is opened (for scroll-to-unread positioning)
+  const roomOpenUnreadCounts: Record<string, number> = {};
+
   // Pending read receipt: sent when tab becomes visible
   let pendingReadReceipt: { roomId: string; event: unknown } | null = null;
 
@@ -1377,28 +1392,59 @@ export const useChatStore = defineStore(NAMESPACE, () => {
     activeRoomId.value = roomId;
     messageWindowSize.value = 50; // Reset pagination window
     if (roomId) {
+      const room = getRoomById(roomId);
+      // Save unread count before clearing — MessageList uses it for scroll-to-unread
+      if (room) {
+        roomOpenUnreadCounts[roomId] = room.unreadCount;
+        room.unreadCount = 0;
+      }
+
       // Ensure member profiles are loaded for the active room
       profilesRequestedForRooms.delete(roomId);
       loadProfilesForRoomIds([roomId]);
 
       // Don't auto-join invited rooms — let the user preview first
-      const room = getRoomById(roomId);
       if (room?.membership === "invite") return;
 
-      // NOTE: Do NOT mark as read here. Reading happens incrementally
-      // via IntersectionObserver in MessageList as user scrolls.
+      // Read receipt is now sent by the viewport tracker in MessageList
+      // (only for messages that actually enter the visible area)
     }
   };
 
-  /** Advance the inbound read watermark (called by read tracker on batch flush).
-   *  Also sends a Matrix read receipt for the corresponding event. */
+  /** Return the unread count that was stored when the room was last opened.
+   *  Used by MessageList to position the initial scroll target. */
+  const getRoomOpenUnreadCount = (roomId: string): number =>
+    roomOpenUnreadCounts[roomId] ?? 0;
+
+  /** Send a read receipt for a specific message (called by the viewport tracker).
+   *  Finds the Matrix event by ID and delegates to sendReadReceiptIfVisible. */
+  const sendReadReceiptForMessage = (roomId: string, messageId: string) => {
+    try {
+      const matrixService = getMatrixClientService();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const matrixRoom = matrixService.getRoom(roomId) as any;
+      if (!matrixRoom) return;
+      const event = matrixRoom.findEventById?.(messageId);
+      if (event) sendReadReceiptIfVisible(roomId, event);
+    } catch (e) {
+      console.warn("[chat-store] sendReadReceiptForMessage error:", e);
+    }
+  };
+
   const advanceInboundWatermark = async (roomId: string, timestamp: number) => {
     // 1. Update Dexie watermark (monotonic — only moves forward)
     if (chatDbKitRef.value) {
       await chatDbKitRef.value.rooms.markAsRead(roomId, timestamp);
     }
 
-    // 2. Send Matrix read receipt for the event at this timestamp
+    // 2. Update in-memory room unread count
+    const room = getRoomById(roomId);
+    if (room) {
+      room.unreadCount = 0;
+      triggerRef(rooms);
+    }
+
+    // 3. Send Matrix read receipt for the event at this timestamp
     try {
       const matrixService = getMatrixClientService();
       const matrixRoom = matrixService.getRoom(roomId) as any;
@@ -2663,45 +2709,23 @@ export const useChatStore = defineStore(NAMESPACE, () => {
     }
   };
 
-  /**
-   * Enrich unresolved reply previews for in-memory messages.
-   * Finds messages with empty replyTo (senderId="", not deleted) and tries
-   * to fill them from Dexie. If found, updates in-memory state + triggers reactivity.
-   * Called after initial load and loadMore to handle cross-batch references.
-   */
-  const enrichUnresolvedReplies = async (roomId: string): Promise<void> => {
-    const roomMsgs = messages.value[roomId];
-    if (!roomMsgs || !chatDbKitRef.value) return;
-
-    const unresolved = roomMsgs.filter(
-      m => m.replyTo && !m.replyTo.deleted && !m.replyTo.senderId && !m.replyTo.content,
-    );
-    if (unresolved.length === 0) return;
-
-    const ids = unresolved.map(m => m.replyTo!.id);
-    const stored = await chatDbKitRef.value.messages.getByEventIds(ids);
-    const storedMap = new Map(stored.map(m => [m.eventId!, m]));
-
-    let changed = false;
-    for (const msg of unresolved) {
-      const replyTo = msg.replyTo!;
-      const original = storedMap.get(replyTo.id);
-      if (original) {
-        if (original.deleted || original.softDeleted) {
-          replyTo.deleted = true;
-        } else {
-          replyTo.senderId = original.senderId;
-          replyTo.content = stripBastyonLinks(stripMentionAddresses(original.content)).slice(0, 100);
-          replyTo.type = original.type;
-        }
-        changed = true;
-      }
-    }
-    if (changed) triggerRef(messages);
-  };
+  /** In-flight loadRoomMessages promises keyed by roomId.
+   *  Prevents concurrent duplicate loads (e.g. background preload + UI open) that
+   *  would call setMessages twice and cause visible incremental scroll steps. */
+  const loadingRoomsMap = new Map<string, Promise<void>>();
 
   /** Load timeline events for a room and convert to Messages */
-  const loadRoomMessages = async (roomId: string) => {
+  const loadRoomMessages = (roomId: string): Promise<void> => {
+    const inflight = loadingRoomsMap.get(roomId);
+    if (inflight) return inflight;
+    const promise = loadRoomMessagesImpl(roomId).finally(() => {
+      loadingRoomsMap.delete(roomId);
+    });
+    loadingRoomsMap.set(roomId, promise);
+    return promise;
+  };
+
+  const loadRoomMessagesImpl = async (roomId: string) => {
     try {
       const matrixService = getMatrixClientService();
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -3819,6 +3843,11 @@ export const useChatStore = defineStore(NAMESPACE, () => {
           m => m.status !== MessageStatus.sending && m.status !== MessageStatus.failed,
         );
         backfillCallInfo(cleaned);
+        // Sort by timestamp: IndexedDB getAll() returns records ordered by primary
+        // key (event ID), not by insertion order or timestamp, so cached messages
+        // arrive in wrong order and must be re-sorted before display.
+        cleaned.sort((a, b) => a.timestamp - b.timestamp);
+        // Sanitize cached messages that may contain raw Matrix IDs
         for (const m of cleaned) {
           if (m.content.includes("@") && /@[a-f0-9]{20,}:/i.test(m.content)) {
             m.content = cleanMatrixIds(m.content);
@@ -3903,6 +3932,8 @@ export const useChatStore = defineStore(NAMESPACE, () => {
     declineInvite,
     inviteCount,
     setActiveRoom,
+    getRoomOpenUnreadCount,
+    sendReadReceiptForMessage,
     setHelpers,
     muteMember,
     setMemberPowerLevel,

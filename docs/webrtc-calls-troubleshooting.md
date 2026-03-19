@@ -52,3 +52,91 @@
 - **call-service.ts**: проверка VoIP не блокирует звонок; добавлен fallback на `canSupportVoip`. Расширено логирование: фаза соединения (connection phase), детальный вывод ошибки (code/message), подписка на ICE-состояние peer connection для отладки WiFi↔4G.
 
 Подробный разбор логов при звонках Mobile ↔ Mac (успех только Mobile→Mac, фейл Mac→Mobile из‑за ICE + «impolite»): см. **docs/webrtc-logs-analysis.md**.
+
+---
+
+## Чек-листы диагностики по сценариям (март 2026)
+
+> Полный план исправлений: [webrtc-fix-plan.md](./webrtc-fix-plan.md)
+
+### Сценарий A: Звонок не устанавливается (connecting → ended/failed)
+
+```
+□ 1. Открыть chrome://webrtc-internals на обеих сторонах
+□ 2. Проверить наличие relay-кандидатов (Type: relay)
+   └── Если нет → проблема TURN (см. чек-лист TURN ниже)
+□ 3. Проверить ICE connection state в логах:
+   └── "checking" → "failed" = нет пути между пирами, нужен TURN
+   └── "checking" → "disconnected" → ICE restart → "ignoring colliding negotiate" = impolite deadlock (#3 в fix-plan)
+   └── "checking" зависает = кандидаты не доходят (проблема сигналинга)
+□ 4. Проверить в Network Tab: уходят ли m.call.invite / m.call.answer / m.call.candidates
+   └── Если нет → проблема SDK или Matrix client
+   └── Если уходят, но не приходят на другой стороне → проблема сервера
+□ 5. Проверить консоль на ошибки:
+   └── "createNewMatrixCall returned null" → не HTTPS или нет RTCPeerConnection
+   └── "call error: ice_failed" → нужен TURN
+   └── "InvalidStateError" при addIceCandidate → race condition кандидатов (#2 в fix-plan)
+```
+
+### Сценарий B: Звонок устанавливается, но обрывается
+
+```
+□ 1. Проверить логи ICE state transitions:
+   └── connected → disconnected → "ICE restarting" → 2с → снова restart = утечка таймера (#4 в fix-plan)
+   └── connected → failed = сеть упала, нужны множественные retry (#8 в fix-plan)
+□ 2. Проверить track status:
+   └── track.readyState === "ended" = устройство отключилось (#6 в fix-plan)
+□ 3. Проверить peerConn.getStats() на packet loss / jitter
+□ 4. Проверить не открыт ли звонок в нескольких табах (BroadcastChannel race)
+```
+
+### Сценарий C: Входящий звонок не появляется
+
+```
+□ 1. Проверить лог: есть ли "[call-service] Incoming call" ?
+   └── Если нет → SDK не эмитит Call.incoming
+□ 2. Проверить disableVoip в конфиге Matrix client (должен быть false)
+□ 3. Проверить, что m.call.invite приходит в /sync ответе (Network Tab)
+□ 4. Проверить callEventHandler.ts — evaluateEventBuffer может терять события (баг scoping #10)
+□ 5. Проверить, что не сработал auto-reject другого таба (checkOtherTabHasCall)
+```
+
+### Сценарий D: Звонок Mac → Mobile всегда падает
+
+```
+□ 1. Это известная проблема: impolite deadlock (#3 в fix-plan)
+□ 2. В логах Mac искать: "ignoring colliding negotiate event because we're impolite"
+□ 3. Временный workaround: звонить с Mobile на Mac (Mobile = caller, Mac = answerer/polite)
+□ 4. Постоянное решение: патч onNegotiateReceived() в matrix-js-sdk-bastyon
+```
+
+### Чек-лист проверки TURN
+
+```
+□ 1. Проверить TURN credentials от сервера:
+   curl -H "Authorization: Bearer <TOKEN>" \
+     https://matrix.pocketnet.app/_matrix/client/v3/voip/turnServer
+   └── Ответ должен содержать uris, username, password
+   └── uris должны включать и UDP и TCP транспорты
+   └── uris должны включать turns: (TLS) для порта 443
+
+□ 2. Проверить доступность coturn:
+   turnutils_uclient -T -u <username> -w <password> <turn-host>
+
+□ 3. Проверить порты (с внешней машины):
+   nc -zvu <turn-host> 3478    # TURN UDP
+   nc -zv <turn-host> 3478     # TURN TCP
+   nc -zv <turn-host> 443      # TURNS TLS
+
+□ 4. Проверить конфигурацию coturn:
+   □ external-ip соответствует публичному IP
+   □ static-auth-secret совпадает с turn_shared_secret в homeserver.yaml
+   □ Relay ports (49152-65535) открыты на firewall
+   □ TLS сертификаты актуальны
+   □ Нет AAAA DNS записи (или IPv6 реально работает)
+   □ coturn не за NAT (или корректный 1:1 NAT mapping)
+
+□ 5. Проверить в chrome://webrtc-internals:
+   □ Есть relay candidates в ICE candidates list
+   □ Selected candidate pair использует relay (если P2P невозможен)
+```

@@ -29,12 +29,18 @@ importers:
       create-hash:
         specifier: ^1.2.0
         version: 1.2.0
+      dexie:
+        specifier: ^4.3.0
+        version: 4.3.0
+      emoji-kitchen-mart:
+        specifier: ^6.0.5
+        version: 6.0.5
       file-saver:
         specifier: ^2.0.5
         version: 2.0.5
       matrix-js-sdk-bastyon:
-        specifier: 23.2.2
-        version: 23.2.2
+        specifier: ^23.2.4
+        version: 23.2.4
       miscreant:
         specifier: ^0.3.2
         version: 0.3.2
@@ -65,6 +71,9 @@ importers:
       vee-validate:
         specifier: ^4.13.2
         version: 4.15.1(vue@3.5.29(typescript@5.9.3))
+      virtua:
+        specifier: ^0.48.8
+        version: 0.48.8(vue@3.5.29(typescript@5.9.3))
       vue:
         specifier: ^3.4.31
         version: 3.5.29(typescript@5.9.3)
@@ -78,6 +87,9 @@ importers:
         specifier: ^3.23.8
         version: 3.25.76
     devDependencies:
+      '@pinia/testing':
+        specifier: ^1.0.3
+        version: 1.0.3(pinia@2.3.1(typescript@5.9.3)(vue@3.5.29(typescript@5.9.3)))
       '@types/node':
         specifier: ^20.14.12
         version: 20.19.35
@@ -594,6 +606,11 @@ packages:
 
   '@one-ini/wasm@0.1.1':
     resolution: {integrity: sha512-XuySG1E38YScSJoMlqovLru4KTUNSjgVTIjyh7qMX6aNN5HY5Ct5LhRJdxO79JtTzKfzV/bnWpz+zquYrISsvw==}
+
+  '@pinia/testing@1.0.3':
+    resolution: {integrity: sha512-g+qR49GNdI1Z8rZxKrQC3GN+LfnGTNf5Kk8Nz5Cz6mIGva5WRS+ffPXQfzhA0nu6TveWzPNYTjGl4nJqd3Cu9Q==}
+    peerDependencies:
+      pinia: '>=3.0.4'
 
   '@pkgjs/parseargs@0.11.0':
     resolution: {integrity: sha512-+1VkjdD0QBLPodGrJUeqarH8VAIvQODIbwh9XpP5Syisf7YoQgsJKPNFoqqLQlu+VQ/tVSshMR6loPMn8U+dPg==}
@@ -1338,6 +1355,9 @@ packages:
   detect-node@2.1.0:
     resolution: {integrity: sha512-T0NIuQpnTvFDATNuHN5roPwSBG83rFsuO+MXXH9/3N1eFbn4wcPjttvjMLEPWJ0RGUYgQE7cGgS3tNxbqCGM7g==}
 
+  dexie@4.3.0:
+    resolution: {integrity: sha512-5EeoQpJvMKHe6zWt/FSIIuRa3CWlZeIl6zKXt+Lz7BU6RoRRLgX9dZEynRfXrkLcldKYCBiz7xekTEylnie1Ug==}
+
   didyoumean@1.2.2:
     resolution: {integrity: sha512-gxtyfqMg7GKyhQmb056K7M3xszy/myH8w+B4RT+QXBQsvAOdc3XymqDDPHx1BgPgsdAA5SIifona89YtRATDzw==}
 
@@ -1406,6 +1426,9 @@ packages:
     resolution: {integrity: sha512-u9YfoixttdauciHV9Ut9Zf3YipJoU093kR1GSYTTXTAXqhiXI0G1A0NnL/f0O2m2UULCXaXMf2W71PloR6V9pQ==}
     engines: {node: '>= 12.20.55'}
     hasBin: true
+
+  emoji-kitchen-mart@6.0.5:
+    resolution: {integrity: sha512-pA3PLp0sXwNRhW8TIRlSY0NFRJXbPYZz+BbrVoyLF2okXWdjxhO7p7AtcQnMDY7jPZCY/MfwkkfFdPEZfNy01Q==}
 
   emoji-regex@8.0.0:
     resolution: {integrity: sha512-MSjYzcWNOA0ewAHpz0MxpYFvwg6yjy1NG3xteoqz644VCo/RPgnr1/GGt+ic3iJTzQ8Eu3TdM14SawnVUmGE6A==}
@@ -1918,8 +1941,8 @@ packages:
   matrix-events-sdk@0.0.1:
     resolution: {integrity: sha512-1QEOsXO+bhyCroIe2/A5OwaxHvBm7EsSQ46DEDn8RBIfQwN5HWBpFvyWWR4QY0KHPPnnJdI99wgRiAl7Ad5qaA==}
 
-  matrix-js-sdk-bastyon@23.2.2:
-    resolution: {integrity: sha512-0rrpFu4X5lacNIjdxyEDr159qszM5e52+uJoPHo/vUczWp8JM32d1Yq8xigbZgLDcmn72L3fmP8QcKilmOjoRg==}
+  matrix-js-sdk-bastyon@23.2.4:
+    resolution: {integrity: sha512-gM9ID2p3MyMCpc3zT+29Gr4GN/ObMFxCxJqMQ3lRVdVck9b8JHrm+cZL4N9DRhQ7xExi8Kj2WHMjOuyA/YQOzw==}
     engines: {node: '>=18.0.0'}
 
   matrix-widget-api@1.17.0:
@@ -2777,6 +2800,26 @@ packages:
     resolution: {integrity: sha512-veufcmxri4e3XSrT0xwfUR7kguIkaxBeosDg00yDWhk49wdwkSUrvvsm7nc75e1PUyvIeZj6nS8VQRYz2/S4Xg==}
     engines: {node: '>=0.6.0'}
 
+  virtua@0.48.8:
+    resolution: {integrity: sha512-jpsxOw5V4B6hg44JePRLo9DL0TV7N1lBEVtPjKpAJebXyhI2s9lfiXJESaLapNtr3vtiSk/pWHiLf7B2a6UcgQ==}
+    peerDependencies:
+      react: '>=16.14.0'
+      react-dom: '>=16.14.0'
+      solid-js: '>=1.0'
+      svelte: '>=5.0'
+      vue: '>=3.2'
+    peerDependenciesMeta:
+      react:
+        optional: true
+      react-dom:
+        optional: true
+      solid-js:
+        optional: true
+      svelte:
+        optional: true
+      vue:
+        optional: true
+
   vite@5.4.21:
     resolution: {integrity: sha512-o5a9xKjbtuhY6Bi5S3+HvbRERmouabWbyUcpXXUA1u+GNUKoROi9byOJ8M0nHbHYHkYICiMlqxkg1KkYmm25Sw==}
     engines: {node: ^18.0.0 || >=20.0.0}
@@ -3398,6 +3441,10 @@ snapshots:
       semver: 7.7.4
 
   '@one-ini/wasm@0.1.1': {}
+
+  '@pinia/testing@1.0.3(pinia@2.3.1(typescript@5.9.3)(vue@3.5.29(typescript@5.9.3)))':
+    dependencies:
+      pinia: 2.3.1(typescript@5.9.3)(vue@3.5.29(typescript@5.9.3))
 
   '@pkgjs/parseargs@0.11.0':
     optional: true
@@ -4199,6 +4246,8 @@ snapshots:
   detect-node@2.1.0:
     optional: true
 
+  dexie@4.3.0: {}
+
   didyoumean@1.2.2: {}
 
   dir-compare@4.2.0:
@@ -4323,6 +4372,8 @@ snapshots:
       extract-zip: 2.0.1
     transitivePeerDependencies:
       - supports-color
+
+  emoji-kitchen-mart@6.0.5: {}
 
   emoji-regex@8.0.0: {}
 
@@ -4894,7 +4945,7 @@ snapshots:
 
   matrix-events-sdk@0.0.1: {}
 
-  matrix-js-sdk-bastyon@23.2.2:
+  matrix-js-sdk-bastyon@23.2.4:
     dependencies:
       '@babel/runtime': 7.28.6
       '@matrix-org/matrix-sdk-crypto-wasm': 7.0.0
@@ -5819,6 +5870,10 @@ snapshots:
       core-util-is: 1.0.2
       extsprintf: 1.4.1
     optional: true
+
+  virtua@0.48.8(vue@3.5.29(typescript@5.9.3)):
+    optionalDependencies:
+      vue: 3.5.29(typescript@5.9.3)
 
   vite@5.4.21(@types/node@20.19.35)(terser@5.46.0):
     dependencies:

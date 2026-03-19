@@ -375,8 +375,9 @@ export class AppInitializer {
     if (!this.api) return [];
     try {
       const data = await this.api.rpc("getpostscores", [txid]);
-      console.log("[appInit] loadPostScores raw response:", data);
+
       if (!Array.isArray(data)) return [];
+
       return data.map((s: any) => ({
         address: s.address ?? "",
         value: Number(s.value ?? 0),

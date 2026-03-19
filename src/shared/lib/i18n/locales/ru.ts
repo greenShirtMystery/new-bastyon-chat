@@ -185,6 +185,7 @@ export const ru: Record<TranslationKey, string> = {
 
   // ── Message list ──
   "messageList.noMessages": "Сообщений пока нет. Начните беседу!",
+  "messageList.newMessages": "Новые сообщения",
   "messageList.isTyping": "{name} печатает",
   "messageList.peopleTyping": "{count} чел. печатают",
   "messageList.typingTwo": "{name1} и {name2} печатают",

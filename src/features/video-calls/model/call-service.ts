@@ -108,6 +108,37 @@ function syncRemoteVideoMuted(call: MatrixCall) {
 }
 
 // ---------------------------------------------------------------------------
+// Media track loss detection (#6)
+// ---------------------------------------------------------------------------
+
+/**
+ * Wire `onended` handlers on local media tracks so the UI can warn the user
+ * when a device is unexpectedly disconnected (e.g. USB mic unplugged).
+ */
+function wireTrackEndedHandlers(call: MatrixCall) {
+  const localStream = call.localUsermediaStream;
+  if (!localStream) return;
+
+  const callStore = useCallStore();
+
+  const audioTrack = localStream.getAudioTracks()[0];
+  if (audioTrack && !audioTrack.onended) {
+    audioTrack.onended = () => {
+      console.warn("[call-service] Local audio track ended — device disconnected?");
+      callStore.audioMuted = true;
+    };
+  }
+
+  const videoTrack = localStream.getVideoTracks()[0];
+  if (videoTrack && !videoTrack.onended) {
+    videoTrack.onended = () => {
+      console.warn("[call-service] Local video track ended — device disconnected?");
+      callStore.videoMuted = true;
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Event listener lifecycle (#1)
 // ---------------------------------------------------------------------------
 
@@ -154,6 +185,8 @@ function wireCallEvents(call: MatrixCall, direction: "outgoing" | "incoming") {
       updateFeeds(call);
       // Apply saved device preferences with {exact} constraint
       applySavedDevicesExact(call);
+      // Monitor local media tracks for unexpected termination
+      wireTrackEndedHandlers(call);
     }
 
     if (status === CallStatus.ended) {

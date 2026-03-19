@@ -4,6 +4,7 @@ import { useAuthStore } from "@/entities/auth";
 import { UserAvatar } from "@/entities/user";
 import { hexEncode } from "@/shared/lib/matrix/functions";
 import { useCallService } from "@/features/video-calls/model/call-service";
+import { useContacts } from "@/features/contacts";
 
 interface Props {
   show: boolean;
@@ -57,13 +58,19 @@ const copyAddress = async () => {
   setTimeout(() => (copiedAddress.value = false), 2000);
 };
 
-const navigateToChat = () => {
+const navigateToChat = async () => {
   const hexAddr = hexEncode(props.address).toLowerCase();
   const existingRoom = chatStore.sortedRooms.find(
     (r) => !r.isGroup && r.members.includes(hexAddr),
   );
   if (existingRoom) {
     chatStore.setActiveRoom(existingRoom.id);
+  } else {
+    const { getOrCreateRoom } = useContacts();
+    const roomId = await getOrCreateRoom(props.address);
+    if (roomId) {
+      chatStore.setActiveRoom(roomId);
+    }
   }
   emit("close");
 };
