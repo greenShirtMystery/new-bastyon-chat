@@ -1640,6 +1640,132 @@ export function useMessages() {
     }
   };
 
+  /** Retry a failed media upload. Only works if the blob URL is still valid (same session). */
+  const retryMediaUpload = async (message: Message) => {
+    if (message.status !== MessageStatus.failed || !message.fileInfo) return;
+
+    const roomId = message.roomId;
+    const matrixService = getMatrixClientService();
+    if (!matrixService.isReady()) return;
+    if (!isChatDbReady()) return;
+
+    const dbKit = getChatDb();
+
+    // Find the local message by clientId (_key is the stable clientId)
+    const mKey = (message as Message & { _key?: string })._key;
+    if (!mKey) return;
+
+    const localMsg = await dbKit.messages.getByClientId(mKey);
+    if (!localMsg) return;
+
+    // Try to recover the blob from the still-alive blob URL
+    const blobUrl = localMsg.localBlobUrl || localMsg.fileInfo?.url;
+    if (!blobUrl) return;
+
+    let file: File;
+    try {
+      const resp = await fetch(blobUrl);
+      if (!resp.ok) throw new Error("Blob URL expired");
+      const blob = await resp.blob();
+      file = new File([blob], localMsg.fileInfo?.name || "file", {
+        type: localMsg.fileInfo?.type || "application/octet-stream",
+      });
+    } catch {
+      console.error("[retry] Blob URL no longer valid — user must re-send the file");
+      return;
+    }
+
+    // Reset status to pending with progress
+    await dbKit.db.messages.update(localMsg.localId!, {
+      status: "pending" as import("@/shared/lib/local-db/schema").LocalMessageStatus,
+      uploadProgress: 0,
+    });
+
+    // Re-run upload pipeline
+    try {
+      const roomCrypto = authStore.pcrypto?.rooms[roomId] as PcryptoRoomInstance | undefined;
+      let fileToUpload: Blob = file;
+      let secrets: Record<string, unknown> | undefined;
+
+      if (roomCrypto?.canBeEncrypt()) {
+        const encrypted = await roomCrypto.encryptFile(file);
+        secrets = encrypted.secrets;
+        fileToUpload = encrypted.file;
+      }
+
+      const url = await matrixService.uploadContent(fileToUpload, (progress) => {
+        const percent = progress.total > 0 ? Math.round((progress.loaded / progress.total) * 100) : 0;
+        dbKit.messages.updateUploadProgress(localMsg.clientId, percent);
+      });
+
+      // Build event content based on message type
+      const fi = localMsg.fileInfo!;
+      let content: Record<string, unknown>;
+
+      if (localMsg.type === "image") {
+        content = {
+          body: fi.caption || "Image",
+          msgtype: "m.image",
+          url,
+          info: {
+            w: fi.w, h: fi.h, mimetype: fi.type, size: fi.size,
+            ...(secrets ? { secrets } : {}),
+            ...(fi.caption ? { caption: fi.caption } : {}),
+            ...(fi.captionAbove != null ? { captionAbove: fi.captionAbove } : {}),
+          },
+        };
+      } else if (localMsg.type === "audio") {
+        const intWaveform = fi.waveform?.map((v: number) => Math.round(v * 1024));
+        content = {
+          body: "Audio",
+          msgtype: "m.audio",
+          url,
+          info: {
+            mimetype: fi.type, size: Math.round(fi.size),
+            duration: fi.duration ? Math.round(fi.duration * 1000) : undefined,
+            waveform: intWaveform,
+            ...(secrets ? { secrets } : {}),
+          },
+        };
+      } else if (localMsg.type === "videoCircle") {
+        content = {
+          body: "Video message",
+          msgtype: "m.video",
+          url,
+          info: {
+            mimetype: fi.type, size: Math.round(fi.size), w: 480, h: 480,
+            duration: fi.duration ? Math.round(fi.duration * 1000) : undefined,
+            videoNote: true,
+            ...(secrets ? { secrets } : {}),
+          },
+        };
+      } else {
+        // Generic file (m.file)
+        const fileBody: Record<string, unknown> = {
+          name: fi.name, type: fi.type, size: fi.size, url,
+        };
+        if (secrets) fileBody.secrets = secrets;
+        content = { body: JSON.stringify(fileBody), msgtype: "m.file" };
+      }
+
+      const serverEventId = await matrixService.sendEncryptedText(roomId, content, localMsg.clientId);
+      await dbKit.messages.confirmMediaSent(localMsg.clientId, serverEventId, {
+        ...fi,
+        url,
+        secrets: secrets as FileInfo["secrets"],
+      });
+
+      const blobToRevoke = localMsg.localBlobUrl;
+      if (blobToRevoke) setTimeout(() => URL.revokeObjectURL(blobToRevoke), 5000);
+    } catch (e) {
+      console.error("[retry] Upload failed again:", e);
+      await dbKit.db.messages.where("clientId").equals(localMsg.clientId).modify({
+        status: "failed" as import("@/shared/lib/local-db/schema").LocalMessageStatus,
+        uploadProgress: undefined,
+      });
+    }
+  };
+
   return {
     deleteMessage,
     drainOfflineQueue,
@@ -1647,6 +1773,7 @@ export function useMessages() {
     endPoll,
     forwardMessage,
     loadMessages,
+    retryMediaUpload,
     sendAudio,
     sendFile,
     sendGif,
