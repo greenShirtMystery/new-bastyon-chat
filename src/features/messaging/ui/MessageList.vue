@@ -584,14 +584,37 @@ watch(
       // Allow banner dismissal after user has had time to see it
       setTimeout(() => { bannerDismissAllowed = true; }, 2000);
 
-      // Start read tracking shortly after render.
-      // Elements are already queued via observeElement(); startTracking()
-      // bulk-observes them so IntersectionObserver fires initial callbacks.
-      setTimeout(() => {
-        if (chatStore.activeRoomId === roomId) {
-          readTracker.startTracking(getScrollContainer());
+      // Start read tracking with container polling instead of fixed timeout.
+      // getScrollContainer() may return null if VList hasn't created its
+      // internal scroll element yet — poll until available (max ~1s).
+      const startReadTracking = async () => {
+        const MAX_ATTEMPTS = 20;
+        const POLL_MS = 50;
+        for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+          if (chatStore.activeRoomId !== roomId) return; // room changed
+          const container = getScrollContainer();
+          if (container && container.scrollHeight > 0) {
+            const started = readTracker.startTracking(container);
+            if (started) {
+              // Wait one frame for layout to fully settle, then re-scan
+              requestAnimationFrame(() => {
+                readTracker.performManualScan();
+                readTracker.flushNow();
+              });
+              return;
+            }
+          }
+          await new Promise<void>(r => setTimeout(r, POLL_MS));
         }
-      }, 300);
+        // Last resort: try anyway (container may have zero scrollHeight initially)
+        if (chatStore.activeRoomId === roomId) {
+          const container = getScrollContainer();
+          if (container) {
+            readTracker.startTracking(container);
+          }
+        }
+      };
+      startReadTracking();
     });
   },
   { immediate: true },
