@@ -6,8 +6,8 @@ export type DisplayPhase = SyncPhase | "idle";
 const SHOW_DELAY: Partial<Record<SyncPhase, number>> = {
   offline: 0,
   error: 0,
-  connecting: 300,
-  catching_up: 300,
+  connecting: 1000,
+  catching_up: 1000,
 };
 
 const MIN_DISPLAY = 600;
