@@ -14,8 +14,10 @@ export type {
   SyncStateEntry,
   LocalAttachment,
   DecryptionJob,
+  ListenedMessage,
 } from "./schema";
 export { DecryptionWorker } from "./decryption-worker";
+export { ListenedRepository } from "./listened-repository";
 
 export { localToMessage, localToMessages, localStatusToMessageStatus, deriveOutboundStatus } from "./mappers";
 export { MessageRepository } from "./message-repository";
