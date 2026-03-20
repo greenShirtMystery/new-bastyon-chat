@@ -59,7 +59,7 @@ function getItemTimestamp(item: ChatRoom | Channel): number {
   if (isChannel(item)) {
     return item.lastContent ? item.lastContent.time * 1000 : 0;
   }
-  return item.updatedAt;
+  return item.lastMessage?.timestamp ?? item.updatedAt;
 }
 
 /** Reactive map of room ID → resolved display name.
