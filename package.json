@@ -32,6 +32,7 @@
     "@capacitor/haptics": "^8.0.1",
     "@capacitor/local-notifications": "^8.0.2",
     "@capacitor/push-notifications": "^8.0.2",
+    "@capacitor/share": "^8.0.1",
     "@capacitor/status-bar": "^8.0.1",
     "@vee-validate/zod": "^4.13.2",
     "audio-recorder-polyfill": "^0.4.1",
