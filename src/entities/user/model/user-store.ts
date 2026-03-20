@@ -1,6 +1,7 @@
 import { defineStore } from "pinia";
 import { shallowRef, triggerRef } from "vue";
 import { createAppInitializer } from "@/app/providers/initializers/app-initializer";
+import { ProfileLoader } from "@/shared/lib/profile-loader";
 
 import type { User } from "./types";
 
@@ -143,6 +144,12 @@ export const useUserStore = defineStore(NAMESPACE, () => {
     await batchPromise;
   };
 
+  /** DataLoader-style profile loading: collects all requests within a microtick
+   *  into batches of 30, with yielding between batches for UI responsiveness.
+   *  Use this instead of calling loadUsersBatch directly from hot paths. */
+  const profileLoader = new ProfileLoader((addrs) => loadUsersBatch(addrs));
+  const enqueueProfiles = (addresses: string[]) => profileLoader.load(addresses);
+
   /** Background-refresh stale profiles without blocking UI.
    *  Processes in small batches with delays so the user never notices. */
   const refreshStaleUsers = async () => {
@@ -204,6 +211,7 @@ export const useUserStore = defineStore(NAMESPACE, () => {
   startBackgroundRefresh();
 
   return {
+    enqueueProfiles,
     getUser,
     loadUserIfMissing,
     loadUsersBatch,
