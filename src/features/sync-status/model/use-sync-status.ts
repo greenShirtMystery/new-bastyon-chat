@@ -19,10 +19,13 @@ export interface SyncStatusReturn {
 }
 
 const RECONNECT_THRESHOLD = 5_000;
+const STALE_TIMEOUT = 30_000;
+const ERROR_STALE_TIMEOUT = 60_000;
 
 const rawStatus = ref<SyncPhase>("connecting");
 let lastUpToDateAt = 0;
 let initialized = false;
+let staleTimer: ReturnType<typeof setTimeout> | null = null;
 
 let _debouncedResult: { visibleStatus: Ref<DisplayPhase> } | null = null;
 
@@ -33,9 +36,32 @@ function getDebounced() {
   return _debouncedResult;
 }
 
+function isActivePhase(s: SyncPhase): boolean {
+  return s === "offline" || s === "connecting" || s === "catching_up" || s === "error";
+}
+
+function clearStaleTimer() {
+  if (staleTimer) {
+    clearTimeout(staleTimer);
+    staleTimer = null;
+  }
+}
+
+function startStaleTimer() {
+  clearStaleTimer();
+  const timeout = rawStatus.value === "error" ? ERROR_STALE_TIMEOUT : STALE_TIMEOUT;
+  staleTimer = setTimeout(() => {
+    staleTimer = null;
+    if (isActivePhase(rawStatus.value)) {
+      rawStatus.value = "up_to_date";
+    }
+  }, timeout);
+}
+
 export function handleSdkSync(sdkState: string): void {
   if (typeof navigator !== "undefined" && !navigator.onLine) {
     rawStatus.value = "offline";
+    startStaleTimer();
     return;
   }
 
@@ -43,19 +69,24 @@ export function handleSdkSync(sdkState: string): void {
     case "PREPARED": {
       lastUpToDateAt = Date.now();
       rawStatus.value = "up_to_date";
+      clearStaleTimer();
       break;
     }
     case "SYNCING": {
       const gap = Date.now() - lastUpToDateAt;
       rawStatus.value = gap > RECONNECT_THRESHOLD ? "catching_up" : "syncing";
+      if (rawStatus.value === "catching_up") startStaleTimer();
+      else clearStaleTimer();
       break;
     }
     case "ERROR":
     case "STOPPED":
       rawStatus.value = "error";
+      startStaleTimer();
       break;
     case "RECONNECTING":
       rawStatus.value = "connecting";
+      startStaleTimer();
       break;
   }
 }
@@ -63,6 +94,7 @@ export function handleSdkSync(sdkState: string): void {
 export function resetSyncStatus(): void {
   rawStatus.value = "connecting";
   lastUpToDateAt = 0;
+  clearStaleTimer();
 }
 
 export function useSyncStatus(): SyncStatusReturn {
