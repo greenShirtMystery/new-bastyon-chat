@@ -887,7 +887,9 @@ export const useChatStore = defineStore(NAMESPACE, () => {
       for (let i = 0; i < toLoad.length; i += BATCH) {
         const batch = toLoad.slice(i, i + BATCH);
         await Promise.all(batch.map(async (mr: any) => {
-          try { await mr.loadMembersIfNeeded(); } catch { /* ignore */ }
+          try { await mr.loadMembersIfNeeded(); } catch (e) {
+            console.warn(`[chat-store] loadMembersIfNeeded failed for ${mr.roomId}:`, e);
+          }
         }));
         await new Promise(r => setTimeout(r, 0));
       }
@@ -1260,10 +1262,9 @@ export const useChatStore = defineStore(NAMESPACE, () => {
       }
     }
     if (addressesToLoad.length > 0) {
-      uStore.loadUsersBatch([...new Set(addressesToLoad)]).catch(() => {
-        // Unblock rooms so they can be retried on next viewport load
-        for (const id of roomsInThisBatch) profilesRequestedForRooms.delete(id);
-      });
+      // Use DataLoader pattern: requests are collected within a microtick
+      // and sent in batches of 30 with yielding between them
+      uStore.enqueueProfiles([...new Set(addressesToLoad)]);
     }
   };
 

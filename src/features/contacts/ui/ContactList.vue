@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, nextTick, watch, onUnmounted } from "vue";
+import { ref, computed, nextTick, watch, onUnmounted, triggerRef } from "vue";
 import { useChatStore } from "@/entities/chat";
 import type { ChatRoom, Message } from "@/entities/chat";
 import { MessageType, MessageStatus } from "@/entities/chat";
@@ -117,12 +117,16 @@ function _resolveMemberNames(room: ChatRoom, allUsers: Record<string, any>, myHe
   return names;
 }
 
+/** Rooms where name resolution permanently failed — stop showing skeleton for these */
+const gaveUpRooms = ref(new Set<string>());
+
 /** Track which rooms have no real display name yet */
 const unresolvedRoomSet = computed(() => {
   const set = new Set<string>();
   const allUsers = userStore.users;
   const myHexId = authStore.address ? hexEncode(authStore.address) : "";
   for (const room of chatStore.sortedRooms) {
+    if (gaveUpRooms.value.has(room.id)) continue;
     const resolved = _resolveMemberNames(room, allUsers, myHexId);
     if (resolved.length === 0) set.add(room.id);
   }
@@ -155,10 +159,19 @@ const MAX_NAME_RETRIES = 5;
 const NAME_RETRY_BASE_MS = 2_000; // 2s, 4s, 8s, 16s, 32s
 
 watch(unresolvedRoomSet, (set) => {
-  if (nameRetryCount >= MAX_NAME_RETRIES) return;
   const unresolvedRoomIds = [...set];
   if (unresolvedRoomIds.length === 0) {
     nameRetryCount = 0;
+    return;
+  }
+  if (nameRetryCount >= MAX_NAME_RETRIES) {
+    // All retries exhausted — give up, show fallback name instead of infinite skeleton
+    console.warn(
+      `[contact-list] giving up on ${unresolvedRoomIds.length} unresolved rooms after ${MAX_NAME_RETRIES} retries:`,
+      unresolvedRoomIds,
+    );
+    for (const id of unresolvedRoomIds) gaveUpRooms.value.add(id);
+    triggerRef(gaveUpRooms);
     return;
   }
   clearTimeout(nameRetryTimer);
@@ -172,6 +185,20 @@ watch(unresolvedRoomSet, (set) => {
 }, { immediate: true });
 
 onUnmounted(() => clearTimeout(nameRetryTimer));
+
+// If user profiles arrive late (e.g. from background refresh), remove gave-up flag
+watch(() => userStore.users, () => {
+  if (gaveUpRooms.value.size === 0) return;
+  const myHexId = authStore.address ? hexEncode(authStore.address) : "";
+  const allUsers = userStore.users;
+  for (const roomId of [...gaveUpRooms.value]) {
+    const room = chatStore.sortedRooms.find(r => r.id === roomId);
+    if (!room) continue;
+    if (_resolveMemberNames(room, allUsers, myHexId).length > 0) {
+      gaveUpRooms.value.delete(roomId);
+    }
+  }
+}, { deep: false });
 
 /** Format last message preview — delegated to shared composable */
 
