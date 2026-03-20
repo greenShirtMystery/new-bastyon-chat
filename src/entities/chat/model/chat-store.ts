@@ -603,7 +603,7 @@ export const useChatStore = defineStore(NAMESPACE, () => {
           roomId: lr.id,
           senderId: lr.lastMessageSenderId ?? "",
           content: lr.lastMessagePreview,
-          timestamp: lr.lastMessageTimestamp ?? lr.updatedAt,
+          timestamp: lr.lastMessageTimestamp ?? 0,
           status: deriveOutboundStatus(
               lr.lastMessageLocalStatus ?? "synced",
               lr.lastMessageTimestamp ?? 0,
@@ -622,9 +622,10 @@ export const useChatStore = defineStore(NAMESPACE, () => {
         const aPinned = pinnedRoomIds.value.has(a.id) ? 1 : 0;
         const bPinned = pinnedRoomIds.value.has(b.id) ? 1 : 0;
         if (aPinned !== bPinned) return bPinned - aPinned;
-        // Sort by last message time (not updatedAt which gets polluted by metadata syncs)
-        const aTime = a.lastMessage?.timestamp ?? a.updatedAt;
-        const bTime = b.lastMessage?.timestamp ?? b.updatedAt;
+        // Sort by last message time ONLY — updatedAt gets polluted by Matrix
+        // state events (member joins etc.) which inflate it to ~Date.now()
+        const aTime = a.lastMessage?.timestamp ?? 0;
+        const bTime = b.lastMessage?.timestamp ?? 0;
         return bTime - aTime;
       });
   });
