@@ -512,6 +512,11 @@ export const en = {
   "invite.shareOn": "Share on",
   "invite.fab": "Invite",
 
+  // ── Native share ──
+  "share.linkCopied": "Link copied to clipboard",
+  "share.copyFailed": "Failed to copy link",
+  "share.nativeShare": "Share via...",
+
   // ── Share group link ──
   "shareGroup.inviteLink": "Invite Link",
   "shareGroup.copyLink": "Copy Link",

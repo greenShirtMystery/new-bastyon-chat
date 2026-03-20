@@ -508,6 +508,11 @@ export const ru: Record<TranslationKey, string> = {
   "invite.shareOn": "Поделиться в",
   "invite.fab": "Пригласить",
 
+  // ── Native share ──
+  "share.linkCopied": "Ссылка скопирована",
+  "share.copyFailed": "Не удалось скопировать ссылку",
+  "share.nativeShare": "Поделиться через...",
+
   // ── Share group link ──
   "shareGroup.inviteLink": "Ссылка-приглашение",
   "shareGroup.copyLink": "Копировать ссылку",
