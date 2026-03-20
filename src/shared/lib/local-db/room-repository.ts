@@ -8,20 +8,24 @@ export class RoomRepository {
   // Reads
   // ---------------------------------------------------------------------------
 
-  /** Self-heal rooms with updatedAt=0 — use best available fallback timestamp */
+  /** Self-heal rooms with updatedAt=0 — use best available fallback timestamp.
+   *  IMPORTANT: do NOT use syncedAt — it's Date.now() on every sync and inflates
+   *  rooms without messages to the top of the sorted list. */
   private healUpdatedAt(rooms: LocalRoom[]): LocalRoom[] {
     for (const r of rooms) {
       if (!r.updatedAt) {
-        r.updatedAt = r.lastMessageTimestamp || r.syncedAt || 1;
+        r.updatedAt = r.lastMessageTimestamp || 1;
       }
     }
     return rooms;
   }
 
-  /** Sort key: prefer lastMessageTimestamp (actual message time),
-   *  fall back to updatedAt for rooms with no messages yet */
+  /** Sort key: ONLY use lastMessageTimestamp (actual message time).
+   *  Do NOT fall back to updatedAt — it gets polluted by Matrix state events
+   *  (member joins, room creation) which set it to ~Date.now(), pushing
+   *  rooms without messages above rooms with real messages. */
   private sortKey(r: LocalRoom): number {
-    return r.lastMessageTimestamp || r.updatedAt || 0;
+    return r.lastMessageTimestamp || 0;
   }
 
   /** Get all joined rooms sorted by last activity (newest first), excluding tombstones */
