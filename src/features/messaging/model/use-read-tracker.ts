@@ -22,6 +22,8 @@ export function useReadTracker(options: ReadTrackerOptions) {
   let flushedHighestTs = 0;
   let batchTimer: ReturnType<typeof setInterval> | null = null;
   let observer: IntersectionObserver | null = null;
+  /** Stored root element for use by performManualScan() */
+  let trackedRoot: HTMLElement | null = null;
 
   /**
    * Elements registered via observeElement() before startTracking() was called.
@@ -45,14 +47,33 @@ export function useReadTracker(options: ReadTrackerOptions) {
     }
   }
 
-  function startTracking(container?: HTMLElement | null) {
-    if (observer) return; // already tracking
+  /** Imperative scan: check all tracked elements via getBoundingClientRect. */
+  function scanViewport() {
+    if (!observer || !trackedRoot) return;
+    const rootRect = trackedRoot.getBoundingClientRect();
+    const tracked = trackedRoot.querySelectorAll<HTMLElement>("[data-message-ts]");
+    for (const el of tracked) {
+      const elRect = el.getBoundingClientRect();
+      const visibleTop = Math.max(elRect.top, rootRect.top);
+      const visibleBottom = Math.min(elRect.bottom, rootRect.bottom);
+      const visibleHeight = visibleBottom - visibleTop;
+      const ratio = elRect.height > 0 ? visibleHeight / elRect.height : 0;
+      if (ratio >= VISIBILITY_THRESHOLD) {
+        promoteToRead(el);
+      }
+    }
+  }
+
+  function startTracking(container?: HTMLElement | null): boolean {
+    if (observer) return true; // already tracking
 
     const root = container ?? containerRef.value;
     if (!root) {
       console.warn("[read-tracker] startTracking called without container");
-      return;
+      return false;
     }
+
+    trackedRoot = root;
 
     observer = new IntersectionObserver(
       (entries) => {
@@ -82,27 +103,30 @@ export function useReadTracker(options: ReadTrackerOptions) {
     // Periodic flush of the high-water mark
     batchTimer = setInterval(flushBatch, BATCH_INTERVAL_MS);
 
-    // Imperative initial scan: IntersectionObserver callbacks may not fire
-    // reliably on mount (virtua virtualisation, root mismatch, or elements
-    // already fully visible before observe()). We perform a synchronous
-    // getBoundingClientRect check for all tracked elements and flush
-    // immediately so entering a chat with visible unreads marks them read.
+    // Synchronous initial scan: catch elements already visible before
+    // IntersectionObserver callbacks fire (belt-and-suspenders).
+    scanViewport();
+    flushBatch();
+
+    // Deferred second scan: layout may not be fully settled yet, so re-check
+    // after one animation frame for elements that became visible.
     requestAnimationFrame(() => {
       if (!observer) return; // stopped before rAF fired
-      const rootRect = root.getBoundingClientRect();
-      const tracked = root.querySelectorAll<HTMLElement>("[data-message-ts]");
-      for (const el of tracked) {
-        const elRect = el.getBoundingClientRect();
-        const visibleTop = Math.max(elRect.top, rootRect.top);
-        const visibleBottom = Math.min(elRect.bottom, rootRect.bottom);
-        const visibleHeight = visibleBottom - visibleTop;
-        const ratio = elRect.height > 0 ? visibleHeight / elRect.height : 0;
-        if (ratio >= VISIBILITY_THRESHOLD) {
-          promoteToRead(el);
-        }
-      }
+      scanViewport();
       flushBatch();
     });
+
+    return true;
+  }
+
+  /** Synchronous scan + flush — for callers that need to force re-checking. */
+  function performManualScan() {
+    scanViewport();
+  }
+
+  /** Immediately flush the current high-water mark to the store. */
+  function flushNow() {
+    flushBatch();
   }
 
   function observeElement(el: HTMLElement) {
@@ -124,6 +148,7 @@ export function useReadTracker(options: ReadTrackerOptions) {
   function stopTracking() {
     observer?.disconnect();
     observer = null;
+    trackedRoot = null;
     if (batchTimer !== null) {
       clearInterval(batchTimer);
       batchTimer = null;
@@ -134,5 +159,5 @@ export function useReadTracker(options: ReadTrackerOptions) {
     flushedHighestTs = 0;
   }
 
-  return { startTracking, stopTracking, observeElement, unobserveElement };
+  return { startTracking, stopTracking, observeElement, unobserveElement, performManualScan, flushNow };
 }
