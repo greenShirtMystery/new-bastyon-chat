@@ -117,21 +117,17 @@ function matrixRoomToChatRoom(room: any, kit: MatrixKit, myUserId: string, nameH
         const senderName = nameHints?.[sender] || sender.slice(0, 8) + "...";
         const stateKey = raw.state_key as string | undefined;
         const targetAddr = stateKey ? matrixIdToAddress(stateKey) : sender;
-        const targetName = targetAddr !== sender
-          ? (nameHints?.[targetAddr] || targetAddr.slice(0, 8) + "...")
-          : senderName;
         const isSelf = targetAddr === sender;
-        let text = "";
-        let template = "";
-        if (membership === "join") { text = isSelf ? `${senderName} joined the chat` : `${senderName} added ${targetName}`; template = isSelf ? "{sender} joined the chat" : "{sender} added {target}"; }
-        else if (membership === "leave") { text = isSelf ? `${senderName} left the chat` : `${senderName} removed ${targetName}`; template = isSelf ? "{sender} left the chat" : "{sender} removed {target}"; }
-        else if (membership === "invite") { text = `${senderName} invited ${targetName}`; template = "{sender} invited {target}"; }
-        if (text) {
+        let templateKey = "";
+        if (membership === "join") { templateKey = isSelf ? "system.joined" : "system.added"; }
+        else if (membership === "leave") { templateKey = isSelf ? "system.left" : "system.removed"; }
+        else if (membership === "invite") { templateKey = "system.invited"; }
+        if (templateKey) {
           lastSystemMessage = {
             id: raw.event_id as string, roomId, senderId: sender,
-            content: text, timestamp: (raw.origin_server_ts as number) ?? 0,
+            content: senderName, timestamp: (raw.origin_server_ts as number) ?? 0,
             status: MessageStatus.sent, type: MessageType.system,
-            systemMeta: { template, senderAddr: sender, targetAddr: targetAddr !== sender ? targetAddr : undefined },
+            systemMeta: { template: templateKey, senderAddr: sender, targetAddr: targetAddr !== sender ? targetAddr : undefined },
           };
         }
       } else if (raw.type === "m.call.hangup") {
@@ -141,15 +137,13 @@ function matrixRoomToChatRoom(room: any, kit: MatrixKit, myUserId: string, nameH
           || (callContent as any).version === 1;
         const durationMs = typeof callContent.duration === "number" ? callContent.duration : 0;
         const sender = matrixIdToAddress(raw.sender as string);
-        const senderName = nameHints?.[sender] || sender.slice(0, 8) + "...";
-        const text = reason === "invite_timeout" ? `Missed call from ${senderName}` : `Call with ${senderName}`;
-        const callTemplate = reason === "invite_timeout" ? "Missed call from {sender}" : "Call with {sender}";
+        const callTemplateKey = reason === "invite_timeout" ? "system.missedCallFrom" : "system.callWith";
         lastSystemMessage = {
           id: raw.event_id as string, roomId, senderId: sender,
-          content: text, timestamp: (raw.origin_server_ts as number) ?? 0,
+          content: "", timestamp: (raw.origin_server_ts as number) ?? 0,
           status: MessageStatus.sent, type: MessageType.system,
           callInfo: { callType: isVideo ? "video" : "voice", missed: reason === "invite_timeout", duration: Math.round(durationMs / 1000) },
-          systemMeta: { template: callTemplate, senderAddr: sender },
+          systemMeta: { template: callTemplateKey, senderAddr: sender },
         };
       }
     }
@@ -2200,78 +2194,78 @@ export const useChatStore = defineStore(NAMESPACE, () => {
     const content = raw.content as Record<string, unknown>;
     const eventType = raw.type as string;
     const sender = matrixIdToAddress(raw.sender as string);
-    const senderName = getDisplayName(sender) || sender.slice(0, 8) + "...";
 
-    let text = "";
-    let template = "";
+    let templateKey = "";
     let targetAddr: string | undefined;
+    let extraMeta: Record<string, string> | undefined;
 
     if (eventType === "m.room.member") {
       const membership = content.membership as string;
       const stateKey = raw.state_key as string | undefined;
       targetAddr = stateKey ? matrixIdToAddress(stateKey) : sender;
-      const targetName = targetAddr !== sender
-        ? (getDisplayName(targetAddr) || targetAddr.slice(0, 8) + "...")
-        : senderName;
       const isSelf = targetAddr === sender;
 
       if (membership === "join") {
-        text = isSelf ? `${senderName} joined the chat` : `${senderName} added ${targetName}`;
-        template = isSelf ? "{sender} joined the chat" : "{sender} added {target}";
+        templateKey = isSelf ? "system.joined" : "system.added";
       } else if (membership === "leave") {
-        text = isSelf ? `${senderName} left the chat` : `${senderName} removed ${targetName}`;
-        template = isSelf ? "{sender} left the chat" : "{sender} removed {target}";
+        templateKey = isSelf ? "system.left" : "system.removed";
       } else if (membership === "ban") {
-        text = `${senderName} banned ${targetName}`;
-        template = "{sender} banned {target}";
+        templateKey = "system.banned";
       } else if (membership === "invite") {
-        text = `${senderName} invited ${targetName}`;
-        template = "{sender} invited {target}";
+        templateKey = "system.invited";
       } else {
         return null;
       }
     } else if (eventType === "m.room.name") {
       const newName = (content.name as string) || "";
-      // Room names in our system are often internal hashes — only show the
-      // human-readable name if it doesn't look like a hex hash.
       const isHash = /^#?[0-9a-f]{20,}$/i.test(newName);
       if (isHash || !newName) {
-        text = `${senderName} updated the room`;
-        template = "{sender} updated the room";
+        templateKey = "system.updatedRoom";
       } else {
-        text = `${senderName} changed the room name to "${newName}"`;
-        template = `{sender} changed the room name to "${newName}"`;
+        templateKey = "system.changedName";
+        extraMeta = { name: newName };
       }
     } else if (eventType === "m.room.power_levels") {
-      text = `${senderName} changed room permissions`;
-      template = "{sender} changed room permissions";
+      templateKey = "system.changedPermissions";
     } else if (eventType === "m.room.avatar") {
-      text = `${senderName} changed the room photo`;
-      template = "{sender} changed the room photo";
+      templateKey = "system.changedPhoto";
     } else if (eventType === "m.room.topic") {
       const newTopic = (content.topic as string) || "";
-      text = newTopic
-        ? `${senderName} set the room description`
-        : `${senderName} cleared the room description`;
-      template = newTopic
-        ? "{sender} set the room description"
-        : "{sender} cleared the room description";
+      templateKey = newTopic ? "system.setDescription" : "system.clearedDescription";
     } else if (eventType === "m.room.pinned_events") {
-      text = `${senderName} pinned a message`;
-      template = "{sender} pinned a message";
+      templateKey = "system.pinnedMessage";
     } else {
       return null;
     }
+
+    // content stores a snapshot for Dexie preview (English fallback);
+    // the real display text is resolved at render time via systemMeta.template + i18n
+    const senderName = getDisplayName(sender) || sender.slice(0, 8) + "...";
+    const targetName = targetAddr && targetAddr !== sender
+      ? (getDisplayName(targetAddr) || targetAddr.slice(0, 8) + "...")
+      : senderName;
+    const fallbackText = templateKey
+      .replace("system.", "")
+      .replace(/([A-Z])/g, " $1")
+      .toLowerCase();
+    const snapshotText = cleanMatrixIds(
+      `${senderName} ${fallbackText}${targetAddr && targetAddr !== sender ? ` ${targetName}` : ""}`,
+    );
 
     return {
       id: raw.event_id as string,
       roomId,
       senderId: sender,
-      content: cleanMatrixIds(text),
+      content: snapshotText,
       timestamp: (raw.origin_server_ts as number) ?? 0,
       status: MessageStatus.sent,
       type: MessageType.system,
-      systemMeta: { template, senderAddr: sender, targetAddr: targetAddr !== sender ? targetAddr : undefined },
+      systemMeta: {
+        template: templateKey,
+        senderAddr: sender,
+        targetAddr: targetAddr !== sender ? targetAddr : undefined,
+        ...extraMeta && { extra: extraMeta },
+      },
     };
   };
 
@@ -2298,21 +2292,22 @@ export const useChatStore = defineStore(NAMESPACE, () => {
         || (callContent as any).version === 1;
       const durationMs = typeof callContent.duration === "number" ? callContent.duration : 0;
       const sender = matrixIdToAddress(raw.sender as string);
-      let text: string;
+      let callTemplateKey: string;
       if (reason === "invite_timeout") {
-        text = isVideo ? `Missed video call` : `Missed voice call`;
+        callTemplateKey = isVideo ? "system.missedVideoCall" : "system.missedVoiceCall";
       } else {
-        text = isVideo ? `Video call` : `Voice call`;
+        callTemplateKey = isVideo ? "system.videoCall" : "system.voiceCall";
       }
       return {
         id: raw.event_id as string,
         roomId,
         senderId: sender,
-        content: text,
+        content: "",
         timestamp: (raw.origin_server_ts as number) ?? 0,
         status: MessageStatus.sent,
         type: MessageType.system,
         callInfo: { callType: isVideo ? "video" : "voice", missed: reason === "invite_timeout", duration: Math.round(durationMs / 1000) },
+        systemMeta: { template: callTemplateKey, senderAddr: sender },
       };
     }
 
@@ -3345,24 +3340,23 @@ export const useChatStore = defineStore(NAMESPACE, () => {
         const isVideo = (callContent as any).offer_type === "video"
           || (callContent as any).version === 1;
         const durationMs = typeof callContent.duration === "number" ? callContent.duration : 0;
-        // Determine if call was answered (has duration) or missed
         const sender = matrixIdToAddress(raw.sender as string);
-        const senderName = getDisplayName(sender) || sender.slice(0, 8) + "...";
-        let text: string;
+        let callTemplateKey: string;
         if (reason === "invite_timeout") {
-          text = isVideo ? `Missed video call` : `Missed voice call`;
+          callTemplateKey = isVideo ? "system.missedVideoCall" : "system.missedVoiceCall";
         } else {
-          text = isVideo ? `Video call` : `Voice call`;
+          callTemplateKey = isVideo ? "system.videoCall" : "system.voiceCall";
         }
         const sysMsg: Message = {
           id: raw.event_id as string,
           roomId,
           senderId: sender,
-          content: text,
+          content: "",
           timestamp: (raw.origin_server_ts as number) ?? 0,
           status: MessageStatus.sent,
           type: MessageType.system,
           callInfo: { callType: isVideo ? "video" : "voice", missed: reason === "invite_timeout", duration: Math.round(durationMs / 1000) },
+          systemMeta: { template: callTemplateKey, senderAddr: sender },
         };
         addMessage(roomId, sysMsg);
         dexieWriteMessage(sysMsg, roomId, raw);

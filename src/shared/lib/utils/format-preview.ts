@@ -41,9 +41,15 @@ export function useFormatPreview() {
             msg.systemMeta.senderAddr,
             msg.systemMeta.targetAddr,
             (addr) => chatStore.getDisplayName(addr),
+            t,
+            msg.systemMeta.extra,
           );
         } else {
           sysText = cleanMatrixIds(msg.content);
+        }
+        // Guard: never show hex/address strings in chat list preview
+        if (/[a-f0-9]{16,}/i.test(sysText)) {
+          sysText = t("system.unknownEvent");
         }
         if (msg.callInfo) {
           const icon = msg.callInfo.callType === "video" ? "📹" : "📞";
@@ -60,7 +66,7 @@ export function useFormatPreview() {
 
     if (room.isGroup && msg.senderId) {
       const myAddr = authStore.address ?? "";
-      const senderName = msg.senderId === myAddr ? "You" : chatStore.getDisplayName(msg.senderId);
+      const senderName = msg.senderId === myAddr ? t("contactList.you") : chatStore.getDisplayName(msg.senderId);
       preview = `${senderName}: ${preview}`;
     }
     return preview;

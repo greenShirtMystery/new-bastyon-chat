@@ -537,6 +537,28 @@ export const ru: Record<TranslationKey, string> = {
   "linkPreview.loading": "Загрузка...",
   "linkPreview.linkPreview": "Превью ссылки",
 
+  // ── System messages ──
+  "system.joined": "{sender} присоединился к чату",
+  "system.left": "{sender} покинул чат",
+  "system.added": "{sender} добавил {target}",
+  "system.removed": "{sender} удалил {target}",
+  "system.banned": "{sender} заблокировал {target}",
+  "system.invited": "{sender} пригласил {target}",
+  "system.updatedRoom": "{sender} обновил комнату",
+  "system.changedName": "{sender} изменил название комнаты на \"{name}\"",
+  "system.changedPermissions": "{sender} изменил права доступа",
+  "system.changedPhoto": "{sender} изменил фото комнаты",
+  "system.setDescription": "{sender} обновил описание комнаты",
+  "system.clearedDescription": "{sender} очистил описание комнаты",
+  "system.pinnedMessage": "{sender} закрепил сообщение",
+  "system.missedVideoCall": "Пропущенный видеозвонок",
+  "system.missedVoiceCall": "Пропущенный голосовой звонок",
+  "system.videoCall": "Видеозвонок",
+  "system.voiceCall": "Голосовой звонок",
+  "system.missedCallFrom": "Пропущенный звонок от {sender}",
+  "system.callWith": "Звонок с {sender}",
+  "system.unknownEvent": "Системное событие",
+
   // ── Language names ──
   "locale.en": "English",
   "locale.ru": "Русский",
