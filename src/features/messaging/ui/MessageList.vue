@@ -33,12 +33,21 @@ const { t } = useI18n();
 
 const { bannerState, freezeBanner, dismissBanner, hasBanner } = useUnreadBanner();
 
-/** Resolve system message text dynamically using current display names */
-const resolveSystemMsg = (msg: { content: string; systemMeta?: { template: string; senderAddr: string; targetAddr?: string } }): string => {
+/** Resolve system message text dynamically using current display names + i18n */
+const resolveSystemMsg = (msg: { content: string; systemMeta?: { template: string; senderAddr: string; targetAddr?: string; extra?: Record<string, string> } }): string => {
   if (msg.systemMeta?.template) {
-    return resolveSystemText(msg.systemMeta.template, msg.systemMeta.senderAddr, msg.systemMeta.targetAddr, (addr) => chatStore.getDisplayName(addr));
+    const text = resolveSystemText(
+      msg.systemMeta.template, msg.systemMeta.senderAddr, msg.systemMeta.targetAddr,
+      (addr) => chatStore.getDisplayName(addr), t, msg.systemMeta.extra,
+    );
+    // Guard: never render hex/address strings — show safe fallback
+    if (/[a-f0-9]{16,}/i.test(text)) return t("system.unknownEvent");
+    return text;
   }
-  return cleanMatrixIds(msg.content);
+  // Legacy messages without systemMeta — sanitize and guard
+  const cleaned = cleanMatrixIds(msg.content);
+  if (/[a-f0-9]{16,}/i.test(cleaned)) return t("system.unknownEvent");
+  return cleaned;
 };
 
 // Provide search query for MessageContent highlighting

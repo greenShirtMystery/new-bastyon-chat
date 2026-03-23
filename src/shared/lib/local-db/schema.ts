@@ -108,6 +108,7 @@ export interface LocalMessage {
     template: string;
     senderAddr: string;
     targetAddr?: string;
+    extra?: Record<string, string>;
   };
 
   // Sync & decryption metadata
