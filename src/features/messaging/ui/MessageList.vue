@@ -879,6 +879,11 @@ let scrollThrottleRaf: number | null = null;
 
 const onScroll = () => {
   if (switching.value) return;
+  // Suppress ALL scroll side-effects during pagination — the ResizeObserver
+  // is correcting scrollTop in real-time, and any reactive updates triggered
+  // by scroll events (isNearBottom, showScrollFab, floating date) would cause
+  // Vue re-renders that fight the correction and produce visible jitter.
+  if (loadingMore.value) return;
 
   // Throttle via rAF — at most once per frame (~16ms)
   if (scrollThrottleRaf !== null) return;
