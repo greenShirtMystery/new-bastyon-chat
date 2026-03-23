@@ -188,18 +188,19 @@ const fabBadgeCount = computed(() => {
 });
 
 // --- Predictive prefetch state ---
-const LOAD_THRESHOLD = 1200; // px from top — start loading (was 400)
-const PREFETCH_THRESHOLD = 2500; // px from top — background prefetch zone
-const VELOCITY_BOOST_THRESHOLD = 1500; // px/s — fast scroll triggers early prefetch
-const prefetching = ref(false); // true while background prefetch is in progress
+const LOAD_THRESHOLD = 1200; // px from top — expand Dexie window
+const PREFETCH_THRESHOLD = 2500; // px from top — background cache fill
+const VELOCITY_BOOST_THRESHOLD = 1500; // px/s — fast scroll triggers early thresholds
+const networkWaiting = ref(false); // true when Dexie cache exhausted, waiting for network
+let prefetchInFlight = false; // background prefetch lock (non-reactive — no UI effect)
 
-/** shift=true ONLY during pagination (prepending older messages at the top).
- *  MUST be false when appending new messages or toggling the typing indicator,
- *  because Virtua's shift assumes length changes come from the START of the list.
- *  With shift=true on appends, the internal height cache shifts by 1 position,
- *  assigning every visible item the cached height of its neighbour — causing
- *  1-2 frames of incorrect positioning (the overlap / z-fighting glitch). */
-const shiftMode = computed(() => loadingMore.value || prefetching.value);
+/** Explicit shift mode lock — enabled ONLY while prepending older messages.
+ *  Virtua shift tells the virtualizer that items were added at the START,
+ *  so it auto-corrects scrollTop. We enable this around expand/load operations
+ *  and disable immediately after DOM settles.
+ *  MUST be false when appending (new messages, typing indicator). */
+const shiftModeLock = ref(false);
+const shiftMode = computed(() => shiftModeLock.value);
 let lastScrollTop = 0;
 let lastScrollTime = 0;
 let scrollVelocity = 0; // px per second (positive = scrolling up)
@@ -459,7 +460,9 @@ watch(
     showDateHeader.value = false;
     recentMessageIds.value.clear();
     isNearBottom.value = true;
-    prefetching.value = false;
+    prefetchInFlight = false;
+    networkWaiting.value = false;
+    shiftModeLock.value = false;
     bannerDismissAllowed = false;
     lastScrollTop = 0;
     lastScrollTime = 0;
@@ -757,44 +760,58 @@ const waitForDomSettle = (): Promise<void> =>
     });
   });
 
-/** Load older messages and preserve scroll position */
-const doLoadMore = (roomId: string, container: HTMLElement): Promise<void> => {
-  if (prefetching.value) return Promise.resolve(); // avoid race with prefetch
-  // Expand Dexie query window for instant local pagination
-  chatStore.expandMessageWindow();
-  const prevHeight = container.scrollHeight;
+/** Expand-first load: try Dexie cache first, fall back to network.
+ *  Relies on Virtua's shift mode for scroll position preservation
+ *  instead of manual scrollTop correction. */
+const doLoadMore = async (roomId: string): Promise<void> => {
+  if (loadingMore.value) return;
   loadingMore.value = true;
-  return chatStore.loadMoreMessages(roomId).then(async (more) => {
-    hasMore.value = more;
+  shiftModeLock.value = true;
+
+  try {
+    const prevLen = chatStore.activeMessages.length;
+
+    // Step 1: Expand Dexie query window — instant if cache has data
+    chatStore.expandMessageWindow();
     await waitForDomSettle();
-    if (chatStore.activeRoomId !== roomId) return; // stale room guard
-    const el = getScrollContainer();
-    if (el) {
-      el.scrollTop += el.scrollHeight - prevHeight;
+
+    if (chatStore.activeRoomId !== roomId) return;
+    const newLen = chatStore.activeMessages.length;
+
+    // Step 2: If Dexie had no more messages, fetch from network
+    if (newLen <= prevLen && hasMore.value) {
+      networkWaiting.value = true;
+      const more = await chatStore.loadMoreMessages(roomId);
+      hasMore.value = more;
+
+      if (more && chatStore.activeRoomId === roomId) {
+        // loadMoreMessages wrote to Dexie — expand window to show them
+        chatStore.expandMessageWindow();
+        await waitForDomSettle();
+      }
+      networkWaiting.value = false;
     }
+  } catch {
+    networkWaiting.value = false;
+  } finally {
+    // Let Virtua finish its shift correction before disabling
+    await waitForDomSettle();
+    shiftModeLock.value = false;
     loadingMore.value = false;
-  }).catch(() => {
-    loadingMore.value = false;
-  });
+  }
 };
 
-/** Background prefetch: loads next batch silently so it's ready when user scrolls further */
-const doPrefetch = (roomId: string, container: HTMLElement) => {
-  if (prefetching.value || loadingMore.value || !hasMore.value) return;
-  const prevHeight = container.scrollHeight;
-  prefetching.value = true;
-  chatStore.loadMoreMessages(roomId).then(async (more) => {
-    hasMore.value = more;
-    await waitForDomSettle();
-    if (chatStore.activeRoomId !== roomId) return; // stale room guard
-    const el = getScrollContainer();
-    if (el) {
-      el.scrollTop += el.scrollHeight - prevHeight;
-    }
-    prefetching.value = false;
-  }).catch(() => {
-    prefetching.value = false;
-  });
+/** True background prefetch: fills Dexie cache silently with NO UI side effects.
+ *  Does not touch loadingMore, shiftMode, scrollTop, or any reactive state
+ *  that would cause visible changes. When the user scrolls further up,
+ *  expandMessageWindow() will find the data already in Dexie. */
+const triggerPrefetch = (roomId: string) => {
+  if (prefetchInFlight || loadingMore.value || !hasMore.value) return;
+  prefetchInFlight = true;
+  chatStore.prefetchOlderToCache(roomId)
+    .then(more => { hasMore.value = more; })
+    .catch(() => {})
+    .finally(() => { prefetchInFlight = false; });
 };
 
 /** Load newer messages (forward pagination in detached mode).
@@ -877,20 +894,23 @@ const onScrollThrottled = () => {
 
   if (!hasMore.value) return;
 
-  // Determine effective threshold — fast scroll means load earlier
-  const effectiveLoadThreshold = scrollVelocity > VELOCITY_BOOST_THRESHOLD
-    ? PREFETCH_THRESHOLD
+  // Velocity-adaptive thresholds — fast scroll triggers earlier
+  const speed = Math.abs(scrollVelocity);
+  const effectiveLoadThreshold = speed > 3000 ? 3000
+    : speed > VELOCITY_BOOST_THRESHOLD ? 2000
     : LOAD_THRESHOLD;
+  const effectivePrefetchThreshold = speed > 3000 ? 6000
+    : speed > VELOCITY_BOOST_THRESHOLD ? 4000
+    : PREFETCH_THRESHOLD;
 
-  // Primary load zone — user is close to top
-  if (scrollTop < effectiveLoadThreshold && !loadingMore.value && !prefetching.value) {
-    doLoadMore(roomId, container);
-    return;
+  // Background prefetch zone — silently fill Dexie cache, no UI effect
+  if (scrollTop < effectivePrefetchThreshold && scrollVelocity > 0) {
+    triggerPrefetch(roomId);
   }
 
-  // Prefetch zone — user is approaching, preload in background
-  if (scrollTop < PREFETCH_THRESHOLD && scrollVelocity > 0) {
-    doPrefetch(roomId, container);
+  // Primary expand zone — expand Dexie window (instant from cache)
+  if (scrollTop < effectiveLoadThreshold && !loadingMore.value) {
+    doLoadMore(roomId);
   }
 };
 
@@ -926,8 +946,8 @@ const attachScrollListener = () => {
         const el = scrollListenEl;
         if (!el || switching.value) return;
 
-        // Skip auto-scroll while loading older messages
-        if (loadingMore.value || prefetching.value) {
+        // Skip auto-scroll while loading older messages or user is scrolled up
+        if (loadingMore.value || shiftModeLock.value || !isNearBottom.value) {
           prevScrollHeight = el.scrollHeight;
           return;
         }
@@ -1126,6 +1146,14 @@ defineExpose({ scrollToMessage, setSearchQuery });
       </span>
     </div>
 
+    <!-- Network wait shimmer — subtle 2px bar when Dexie cache exhausted and fetching from server -->
+    <transition name="fade-refresh">
+      <div
+        v-if="networkWaiting"
+        class="pointer-events-none absolute inset-x-0 top-0 z-30 h-0.5 animate-shimmer bg-gradient-to-r from-transparent via-color-bg-ac/40 to-transparent"
+      />
+    </transition>
+
     <!-- Stale cache refresh indicator -->
     <transition name="fade-refresh">
       <div
@@ -1139,12 +1167,13 @@ defineExpose({ scrollToMessage, setSearchQuery });
       </div>
     </transition>
 
-    <!-- Loading state (show skeleton during loading, switching, or while Dexie hasn't responded) -->
-    <MessageSkeleton v-if="loading || (switching && chatStore.activeMessages.length === 0) || (chatStore.chatDbKitRef && !chatStore.dexieMessagesReady)" />
+    <!-- Loading state: skeleton ONLY on initial room load when no messages exist yet.
+         Never during pagination (expandMessageWindow / loadMoreMessages) to avoid skeleton flash. -->
+    <MessageSkeleton v-if="(loading || switching) && chatStore.activeMessages.length === 0" />
 
-    <!-- Empty state (only after fully loaded + settled + Dexie ready, not during switching) -->
+    <!-- Empty state (only after fully loaded + settled, not during switching) -->
     <div
-      v-if="!loading && !switching && chatStore.activeMessages.length === 0 && settled && chatStore.dexieMessagesReady"
+      v-if="!loading && !switching && chatStore.activeMessages.length === 0 && settled"
       class="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 text-text-on-main-bg-color"
     >
       <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" class="opacity-20">
@@ -1164,11 +1193,6 @@ defineExpose({ scrollToMessage, setSearchQuery });
       @scroll="onVListScroll"
     >
       <template #default="{ item, index }">
-        <!-- Loading spinner (first item position) -->
-        <div v-if="index === 0 && loadingMore" class="flex justify-center py-3">
-          <span class="inline-block h-5 w-5 animate-spin rounded-full border-2 border-color-bg-ac border-t-transparent" />
-        </div>
-
         <!-- Date separator -->
         <div
           v-if="item.type === 'date-separator'"
@@ -1403,6 +1427,15 @@ defineExpose({ scrollToMessage, setSearchQuery });
 .fade-refresh-enter-from,
 .fade-refresh-leave-to {
   opacity: 0;
+}
+
+/* Network wait shimmer — moves gradient left→right */
+@keyframes shimmer-move {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+.animate-shimmer {
+  animation: shimmer-move 1.5s ease-in-out infinite;
 }
 
 /* Message entrance animations */

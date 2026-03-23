@@ -4,7 +4,7 @@ import { liveQuery } from "dexie";
 export interface LiveQueryResult<T> {
   /** Reactive query data (starts as `initial`, updates on every DB change) */
   data: ShallowRef<T>;
-  /** `false` until the first query result arrives; resets to `false` on dep change */
+  /** `false` until the first query result arrives; stays `true` across re-subscriptions */
   isReady: Ref<boolean>;
 }
 
@@ -28,7 +28,9 @@ export function useLiveQuery<T>(
 
   const subscribe = () => {
     subscription?.unsubscribe();
-    isReady.value = false;
+    // Do NOT reset isReady — stale data is better than a skeleton flash.
+    // isReady stays true after the first emission so UI keeps showing
+    // existing messages while the new query settles.
     const observable = liveQuery(querier);
     subscription = observable.subscribe({
       next: (value: T) => {

@@ -3055,12 +3055,98 @@ export const useChatStore = defineStore(NAMESPACE, () => {
       applyExistingReceipts(matrixRoom, timelineEvents, msgs, matrixService.getUserId());
       setMessages(roomId, msgs);
 
+      // Dual-write: persist scrollback messages to Dexie so that
+      // expandMessageWindow() can serve older messages from local cache
+      // without a network round-trip (Telegram-like instant history).
+      if (chatDbKitRef.value && msgs.length > 0) {
+        const parsedMessages: ParsedMessage[] = msgs
+          .filter(m => m.id && !m.id.startsWith("msg_"))
+          .map(m => ({
+            eventId: m.id,
+            roomId: m.roomId,
+            senderId: m.senderId,
+            content: m.content,
+            timestamp: m.timestamp,
+            type: m.type,
+            fileInfo: m.fileInfo,
+            replyTo: m.replyTo,
+            forwardedFrom: m.forwardedFrom,
+            callInfo: m.callInfo,
+            pollInfo: m.pollInfo,
+            transferInfo: m.transferInfo,
+            linkPreview: m.linkPreview,
+            deleted: m.deleted,
+            systemMeta: m.systemMeta,
+            reactions: m.reactions,
+          }));
+        chatDbKitRef.value.eventWriter.writeMessages(parsedMessages).catch(e => {
+          console.warn("[chat-store] loadMoreMessages Dexie write failed:", e);
+        });
+      }
+
       // Enrich any still-unresolved reply previews from Dexie (non-blocking)
       enrichUnresolvedReplies(roomId).catch(() => {});
 
       return true;
     } catch (e) {
       console.error("[chat-store] loadMoreMessages error:", e);
+      return false;
+    }
+  };
+
+  /** Background prefetch: fetch older messages from Matrix and persist to Dexie
+   *  WITHOUT touching any reactive UI state (messages.value, loadingMore, etc.).
+   *  This fills the local cache so that expandMessageWindow() can serve history
+   *  instantly from Dexie on the next scroll-up, achieving Telegram-like UX.
+   *  Returns false when no more history is available. */
+  const prefetchOlderToCache = async (roomId: string): Promise<boolean> => {
+    try {
+      const matrixService = getMatrixClientService();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const matrixRoom = matrixService.getRoom(roomId) as any;
+      if (!matrixRoom) return false;
+
+      const prevCount = getTimelineEvents(matrixRoom).length;
+
+      try {
+        await matrixService.scrollback(roomId, 50);
+      } catch (e) {
+        console.warn("[chat-store] prefetchOlderToCache scrollback failed:", e);
+        return false;
+      }
+
+      const timelineEvents = getTimelineEvents(matrixRoom);
+      if (timelineEvents.length <= prevCount) return false;
+
+      // Write ONLY to Dexie — no setMessages, no UI reactivity triggered
+      if (chatDbKitRef.value) {
+        const msgs = await parseTimelineEvents(timelineEvents, roomId);
+        const parsedMessages: ParsedMessage[] = msgs
+          .filter(m => m.id && !m.id.startsWith("msg_"))
+          .map(m => ({
+            eventId: m.id,
+            roomId: m.roomId,
+            senderId: m.senderId,
+            content: m.content,
+            timestamp: m.timestamp,
+            type: m.type,
+            fileInfo: m.fileInfo,
+            replyTo: m.replyTo,
+            forwardedFrom: m.forwardedFrom,
+            callInfo: m.callInfo,
+            pollInfo: m.pollInfo,
+            transferInfo: m.transferInfo,
+            linkPreview: m.linkPreview,
+            deleted: m.deleted,
+            systemMeta: m.systemMeta,
+            reactions: m.reactions,
+          }));
+        await chatDbKitRef.value.eventWriter.writeMessages(parsedMessages);
+      }
+
+      return true;
+    } catch (e) {
+      console.warn("[chat-store] prefetchOlderToCache error:", e);
       return false;
     }
   };
@@ -4105,6 +4191,7 @@ export const useChatStore = defineStore(NAMESPACE, () => {
     loadPinnedMessages,
     loadMoreMessages,
     loadRoomMessages,
+    prefetchOlderToCache,
     markRoomAsRead,
     markRoomChanged,
     messages,
