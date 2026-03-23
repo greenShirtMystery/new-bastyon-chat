@@ -6,13 +6,15 @@ import type { ChatDatabase, LocalMessage } from "../schema";
 import { MessageType } from "@/entities/chat/model/types";
 
 // Minimal in-memory Dexie for testing
-class TestDb extends Dexie implements ChatDatabase {
+class TestDb extends Dexie {
   messages!: Dexie.Table<LocalMessage, number>;
   rooms!: Dexie.Table<any, string>;
   decryptionQueue!: Dexie.Table<any, number>;
   listenedMessages!: Dexie.Table<any, string>;
   pendingOps!: Dexie.Table<any, number>;
   users!: Dexie.Table<any, string>;
+  syncState!: Dexie.Table<any, string>;
+  attachments!: Dexie.Table<any, number>;
 
   constructor() {
     super("TestDb_reply", { indexedDB, IDBKeyRange });
@@ -24,6 +26,8 @@ class TestDb extends Dexie implements ChatDatabase {
       listenedMessages: "eventId",
       pendingOps: "++id, status",
       users: "address",
+      syncState: "key",
+      attachments: "++id, messageLocalId, status",
     });
   }
 }
