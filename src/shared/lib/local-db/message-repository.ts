@@ -276,6 +276,39 @@ export class MessageRepository {
       });
   }
 
+  /** Patch unresolved replyTo on messages that were stored before the
+   *  referenced message was available. Only overwrites when the existing
+   *  replyTo has empty senderId AND content AND is not marked deleted.
+   *  Called after loadRoomMessages resolves replies from timeline/Dexie. */
+  async patchUnresolvedReplies(
+    patches: { eventId: string; replyTo: ReplyTo }[],
+  ): Promise<number> {
+    if (patches.length === 0) return 0;
+    let patched = 0;
+    await this.db.transaction("rw", this.db.messages, async () => {
+      for (const patch of patches) {
+        const count = await this.db.messages
+          .where("eventId")
+          .equals(patch.eventId)
+          .modify((msg: LocalMessage) => {
+            // Only patch if replyTo exists, is unresolved, and not deleted
+            if (
+              msg.replyTo &&
+              !msg.replyTo.deleted &&
+              !msg.replyTo.senderId &&
+              !msg.replyTo.content
+            ) {
+              msg.replyTo.senderId = patch.replyTo.senderId;
+              msg.replyTo.content = patch.replyTo.content;
+              msg.replyTo.type = patch.replyTo.type;
+            }
+          });
+        patched += count;
+      }
+    });
+    return patched;
+  }
+
   /** Update reactions on a message */
   async updateReactions(
     eventId: string,
@@ -463,4 +496,5 @@ export class MessageRepository {
       .toArray();
     return msgs;
   }
+
 }
