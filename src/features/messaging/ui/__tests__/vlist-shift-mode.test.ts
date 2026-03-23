@@ -17,12 +17,15 @@ import { ref, computed, nextTick } from "vue";
  * when older messages are prepended at the top of the list.
  */
 
-/** Replicates the shiftMode computed from MessageList.vue */
+/** Replicates the shiftMode computed from MessageList.vue.
+ *  NOTE: these tests verify a copy of the logic, not the actual component code.
+ *  If the condition in MessageList.vue changes, these tests must be updated too. */
 function createShiftMode() {
   const loadingMore = ref(false);
   const prefetching = ref(false);
+  const loadingNewer = ref(false);
   const shiftMode = computed(() => loadingMore.value || prefetching.value);
-  return { loadingMore, prefetching, shiftMode };
+  return { loadingMore, prefetching, loadingNewer, shiftMode };
 }
 
 describe("VList shiftMode", () => {
@@ -56,6 +59,26 @@ describe("VList shiftMode", () => {
   it("stays false when new messages are appended (no pagination)", () => {
     const { shiftMode } = createShiftMode();
     // Simulates: new message arrives, typing indicator toggles — no pagination
+    expect(shiftMode.value).toBe(false);
+  });
+
+  it("stays false during forward pagination (loadNewer appends to END)", () => {
+    const { loadingNewer, shiftMode } = createShiftMode();
+    // doLoadNewer uses its own flag, must NOT feed into shiftMode
+    // because newer messages are appended at the end of the list
+    loadingNewer.value = true;
+    expect(shiftMode.value).toBe(false);
+  });
+
+  it("loadingNewer does not interfere with loadingMore", () => {
+    const { loadingMore, loadingNewer, shiftMode } = createShiftMode();
+    loadingNewer.value = true;
+    loadingMore.value = true;
+    // shift should be true only because of loadingMore (prepend)
+    expect(shiftMode.value).toBe(true);
+
+    loadingMore.value = false;
+    // loadingNewer still true but shift should be false
     expect(shiftMode.value).toBe(false);
   });
 });

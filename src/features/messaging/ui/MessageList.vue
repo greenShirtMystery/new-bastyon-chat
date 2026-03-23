@@ -788,10 +788,13 @@ const doPrefetch = (roomId: string, container: HTMLElement) => {
   });
 };
 
-/** Load newer messages (forward pagination in detached mode) */
+/** Load newer messages (forward pagination in detached mode).
+ *  Uses its own flag (loadingNewer) instead of loadingMore because newer
+ *  messages are APPENDED — shiftMode must stay false during this operation. */
+const loadingNewer = ref(false);
 const doLoadNewer = async (roomId: string) => {
-  if (!isChatDbReady() || loadingMore.value) return;
-  loadingMore.value = true;
+  if (!isChatDbReady() || loadingNewer.value || loadingMore.value) return;
+  loadingNewer.value = true;
   try {
     const msgs = chatStore.activeMessages;
     if (msgs.length === 0) return;
@@ -810,7 +813,7 @@ const doLoadNewer = async (roomId: string) => {
     const mapped = newer.map(toMessage);
     chatStore.enterDetachedMode(roomId, [...chatStore.activeMessages, ...mapped]);
   } finally {
-    loadingMore.value = false;
+    loadingNewer.value = false;
   }
 };
 
@@ -858,7 +861,7 @@ const onScrollThrottled = () => {
   // Forward pagination in detached mode
   if (chatStore.isDetachedFromLatest) {
     const distFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
-    if (distFromBottom < LOAD_THRESHOLD && !loadingMore.value) {
+    if (distFromBottom < LOAD_THRESHOLD && !loadingNewer.value) {
       doLoadNewer(roomId);
     }
   }
