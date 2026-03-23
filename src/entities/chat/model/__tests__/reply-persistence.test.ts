@@ -12,6 +12,8 @@ class TestDb extends Dexie {
   listenedMessages!: Dexie.Table<any, string>;
   pendingOps!: Dexie.Table<any, number>;
   users!: Dexie.Table<any, string>;
+  syncState!: Dexie.Table<any, string>;
+  attachments!: Dexie.Table<any, number>;
 
   constructor(name: string) {
     super(name, { indexedDB, IDBKeyRange });
@@ -19,9 +21,11 @@ class TestDb extends Dexie {
       messages: "++localId, eventId, clientId, [roomId+timestamp], [roomId+status], senderId",
       rooms: "id, updatedAt, membership, isDeleted",
       decryptionQueue: "++id, status, [status+nextAttemptAt]",
-      listenedMessages: "messageId",
+      listenedMessages: "eventId",
       pendingOps: "++id, status",
       users: "address",
+      syncState: "key",
+      attachments: "++id, messageLocalId, status",
     });
   }
 }
