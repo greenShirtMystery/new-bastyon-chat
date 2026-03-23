@@ -10,6 +10,14 @@ vi.mock("@/shared/lib/cache/chat-cache", () => ({
   getCachedRooms: vi.fn(() => Promise.resolve([])),
   cacheMessages: vi.fn(() => Promise.resolve()),
   getCachedMessages: vi.fn(() => Promise.resolve([])),
+  getCacheTimestamp: vi.fn(() => Promise.resolve(null)),
+}));
+
+// ── Mock matrix client service ─────────────────────────────────
+vi.mock("@/entities/matrix", () => ({
+  getMatrixClientService: vi.fn(),
+  MatrixClientService: vi.fn(),
+  resetMatrixClientService: vi.fn(),
 }));
 
 import { getCachedMessages } from "@/shared/lib/cache/chat-cache";
