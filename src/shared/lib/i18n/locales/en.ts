@@ -541,6 +541,28 @@ export const en = {
   "linkPreview.loading": "Loading...",
   "linkPreview.linkPreview": "Link preview",
 
+  // ── System messages ──
+  "system.joined": "{sender} joined the chat",
+  "system.left": "{sender} left the chat",
+  "system.added": "{sender} added {target}",
+  "system.removed": "{sender} removed {target}",
+  "system.banned": "{sender} banned {target}",
+  "system.invited": "{sender} invited {target}",
+  "system.updatedRoom": "{sender} updated the room",
+  "system.changedName": "{sender} changed the room name to \"{name}\"",
+  "system.changedPermissions": "{sender} changed room permissions",
+  "system.changedPhoto": "{sender} changed the room photo",
+  "system.setDescription": "{sender} set the room description",
+  "system.clearedDescription": "{sender} cleared the room description",
+  "system.pinnedMessage": "{sender} pinned a message",
+  "system.missedVideoCall": "Missed video call",
+  "system.missedVoiceCall": "Missed voice call",
+  "system.videoCall": "Video call",
+  "system.voiceCall": "Voice call",
+  "system.missedCallFrom": "Missed call from {sender}",
+  "system.callWith": "Call with {sender}",
+  "system.unknownEvent": "System event",
+
   // ── Language names ──
   "locale.en": "English",
   "locale.ru": "Русский",

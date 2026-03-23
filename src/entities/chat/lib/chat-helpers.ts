@@ -9,11 +9,17 @@ import { MessageType } from "../model/types";
 
 /** Convert a Matrix user ID to a raw Bastyon address.
  *  Matrix username = hexEncode(bastyonAddress), so we need hexDecode after getmatrixid.
+ *  Validates the decoded result contains only printable alphanumeric characters.
  *
  *  Example: "@5050624e714377...3259753a:server" → "PPbNqCwe...2yYu"
  */
 export function matrixIdToAddress(matrixUserId: string): string {
-  return hexDecode(getmatrixid(matrixUserId));
+  const hexPart = getmatrixid(matrixUserId);
+  const decoded = hexDecode(hexPart);
+  // Reject strings with non-printable or non-alphanumeric characters
+  if (/^[A-Za-z0-9]+$/.test(decoded)) return decoded;
+  // Return raw hex part as fallback — display layer will sanitize
+  return hexPart;
 }
 
 /** Determine MessageType from MIME type string */
@@ -144,17 +150,32 @@ export function cleanMatrixIds(text: string): string {
   return result;
 }
 
-/** Resolve a system message template using a name-resolver function.
- *  Replaces {sender} and {target} placeholders with resolved display names. */
+/** Resolve a system message i18n key using a name-resolver and translation function.
+ *  If the template is an i18n key (starts with "system."), uses t() for localization.
+ *  Falls back to legacy template interpolation for old messages stored with English templates. */
 export function resolveSystemText(
   template: string,
   senderAddr: string,
   targetAddr: string | undefined,
   resolveName: (addr: string) => string,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  t?: (key: any, params?: Record<string, string | number>) => string,
+  extra?: Record<string, string>,
 ): string {
-  let result = template.replace("{sender}", resolveName(senderAddr));
-  if (targetAddr) {
-    result = result.replace("{target}", resolveName(targetAddr));
+  const sender = resolveName(senderAddr);
+  const target = targetAddr ? resolveName(targetAddr) : undefined;
+
+  // New path: i18n key (e.g. "system.joined")
+  if (t && template.startsWith("system.")) {
+    const params: Record<string, string> = { sender, ...extra };
+    if (target) params.target = target;
+    return t(template, params);
+  }
+
+  // Legacy path: old messages stored with English template strings
+  let result = template.replace("{sender}", sender);
+  if (target) {
+    result = result.replace("{target}", target);
   }
   return result;
 }

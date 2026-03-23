@@ -11,7 +11,7 @@
  *   A bug here breaks: encrypted file decryption, image/video rendering.
  */
 import { describe, it, expect } from "vitest";
-import { matrixIdToAddress, messageTypeFromMime, parseFileInfo, looksLikeProperName } from "./chat-helpers";
+import { matrixIdToAddress, messageTypeFromMime, parseFileInfo, looksLikeProperName, resolveSystemText, isUnresolvedName, cleanMatrixIds } from "./chat-helpers";
 import { hexEncode } from "@/shared/lib/matrix/functions";
 import { MessageType } from "../model/types";
 
@@ -337,5 +337,143 @@ describe("looksLikeProperName", () => {
 
   it("accepts name that differs from raw address", () => {
     expect(looksLikeProperName("Alice", "PPbNqCweFnTePQyXWR21B9jXWCiDJa2yYu")).toBe(true);
+  });
+});
+
+// ─── resolveSystemText ──────────────────────────────────────────
+
+describe("resolveSystemText", () => {
+  const mockT = (key: string, params?: Record<string, string | number>) => {
+    const templates: Record<string, string> = {
+      "system.joined": "{sender} joined the chat",
+      "system.removed": "{sender} removed {target}",
+      "system.changedName": "{sender} changed the room name to \"{name}\"",
+      "system.unknownEvent": "System event",
+      "system.missedVideoCall": "Missed video call",
+    };
+    let text = templates[key] ?? key;
+    if (params) {
+      for (const [k, v] of Object.entries(params)) {
+        text = text.replace(new RegExp(`\\{${k}\\}`, "g"), String(v));
+      }
+    }
+    return text;
+  };
+  const resolveName = (addr: string) => addr === "alice_addr" ? "Alice" : addr === "bob_addr" ? "Bob" : addr;
+
+  it("resolves i18n key with sender name", () => {
+    const result = resolveSystemText("system.joined", "alice_addr", undefined, resolveName, mockT);
+    expect(result).toBe("Alice joined the chat");
+  });
+
+  it("resolves i18n key with sender and target", () => {
+    const result = resolveSystemText("system.removed", "alice_addr", "bob_addr", resolveName, mockT);
+    expect(result).toBe("Alice removed Bob");
+  });
+
+  it("resolves i18n key with extra params", () => {
+    const result = resolveSystemText("system.changedName", "alice_addr", undefined, resolveName, mockT, { name: "General" });
+    expect(result).toBe("Alice changed the room name to \"General\"");
+  });
+
+  it("resolves call template without sender/target placeholders", () => {
+    const result = resolveSystemText("system.missedVideoCall", "alice_addr", undefined, resolveName, mockT);
+    expect(result).toBe("Missed video call");
+  });
+
+  it("falls back to legacy template when no t() provided", () => {
+    const result = resolveSystemText("{sender} joined the chat", "alice_addr", undefined, resolveName);
+    expect(result).toBe("Alice joined the chat");
+  });
+
+  it("falls back to legacy template when template is not an i18n key", () => {
+    const result = resolveSystemText("{sender} left the chat", "alice_addr", undefined, resolveName, mockT);
+    expect(result).toBe("Alice left the chat");
+  });
+
+  it("returns raw key when i18n key is unknown", () => {
+    const result = resolveSystemText("system.nonexistent", "alice_addr", undefined, resolveName, mockT);
+    expect(result).toBe("system.nonexistent");
+  });
+});
+
+// ─── isUnresolvedName ───────────────────────────────────────────
+
+describe("isUnresolvedName", () => {
+  it("detects hex hash strings", () => {
+    expect(isUnresolvedName("5053634c4b526232517a4232674d76766b4a47")).toBe(true);
+  });
+
+  it("detects truncated hex (8chars…)", () => {
+    expect(isUnresolvedName("5053634c\u2026566f")).toBe(true);
+  });
+
+  it("detects raw Matrix ID", () => {
+    expect(isUnresolvedName("@5053634c4b526232517a4232:server")).toBe(true);
+  });
+
+  it("detects raw Bastyon address (base58, 20+ chars)", () => {
+    expect(isUnresolvedName("PPbNqCweFnTePQyXWR21B9jXWCiDJa2yYu")).toBe(true);
+  });
+
+  it("detects empty/short names", () => {
+    expect(isUnresolvedName("")).toBe(true);
+    expect(isUnresolvedName("A")).toBe(true);
+  });
+
+  it("accepts human-readable names", () => {
+    expect(isUnresolvedName("Alice")).toBe(false);
+    expect(isUnresolvedName("Боб")).toBe(false);
+    expect(isUnresolvedName("John_Doe")).toBe(false);
+    expect(isUnresolvedName("Perehvat_Upravleniya")).toBe(false);
+  });
+});
+
+// ─── cleanMatrixIds ─────────────────────────────────────────────
+
+describe("cleanMatrixIds", () => {
+  it("replaces @hexid:server with decoded address", () => {
+    const addr = "PPbNqCweFnTePQyXWR21B9jXWCiDJa2yYu";
+    const hex = hexEncode(addr).toLowerCase();
+    const result = cleanMatrixIds(`@${hex}:server left the chat`);
+    expect(result).toBe(`${addr} left the chat`);
+  });
+
+  it("replaces bare hex strings (40+ chars) with decoded address", () => {
+    const addr = "PPbNqCweFnTePQyXWR21B9jXWCiDJa2yYu";
+    const hex = hexEncode(addr).toLowerCase();
+    const result = cleanMatrixIds(`${hex} joined the chat`);
+    expect(result).toBe(`${addr} joined the chat`);
+  });
+
+  it("truncates undecodable hex strings", () => {
+    // 50 chars of hex that don't decode to valid base58
+    const badHex = "aa".repeat(25);
+    const result = cleanMatrixIds(`${badHex} did something`);
+    expect(result).toContain("\u2026");
+    expect(result).not.toContain(badHex);
+  });
+
+  it("returns text unchanged when no hex patterns present", () => {
+    expect(cleanMatrixIds("Alice joined the chat")).toBe("Alice joined the chat");
+  });
+});
+
+// ─── matrixIdToAddress: non-printable char validation ───────────
+
+describe("matrixIdToAddress — non-printable character validation", () => {
+  it("returns hex fallback when decoded string has non-printable chars", () => {
+    // Hex that decodes to string with control characters
+    // \x17 = 0x17 (ETB), encoded as hex pair "17"
+    const hexWithControlChar = "4141" + "17" + "4242"; // "AA\x17BB"
+    const result = matrixIdToAddress(`@${hexWithControlChar}:server`);
+    // Should NOT contain control characters — should return the hex part
+    expect(/^[A-Za-z0-9]+$/.test(result)).toBe(true);
+  });
+
+  it("returns valid decoded address for proper hex input", () => {
+    const addr = "PPbNqCweFnTePQyXWR21B9jXWCiDJa2yYu";
+    const hex = hexEncode(addr).toLowerCase();
+    expect(matrixIdToAddress(`@${hex}:server`)).toBe(addr);
   });
 });
