@@ -790,18 +790,15 @@ const waitForStableHeight = (el: HTMLElement, maxWait = 500): Promise<void> =>
   });
 
 /** Expand-first load: try Dexie cache first, fall back to network.
- *  Uses manual scrollTop correction (not Virtua shift) because liveQuery
- *  data arrives asynchronously and shift mode corrupts the height cache. */
+ *  Scroll correction is handled by contentResizeObserver in real-time:
+ *  when loadingMore=true, the observer adjusts scrollTop on EVERY height
+ *  change (before paint), so the user never sees an uncorrected frame. */
 const doLoadMore = async (roomId: string): Promise<void> => {
   if (loadingMore.value) return;
   loadingMore.value = true;
 
   try {
-    const container = getScrollContainer();
-    if (!container) return;
-
     const prevLen = chatStore.activeMessages.length;
-    const prevHeight = container.scrollHeight;
 
     // Step 1: Expand Dexie query window — instant if cache has data
     chatStore.expandMessageWindow();
@@ -826,16 +823,9 @@ const doLoadMore = async (roomId: string): Promise<void> => {
       networkWaiting.value = false;
     }
 
-    // Step 3: Wait for Virtua to finish measuring all new items
-    if (chatStore.activeRoomId !== roomId) return;
+    // Step 3: Wait for Virtua to finish measuring (ResizeObserver handles correction)
     const el = getScrollContainer();
-    if (el) {
-      await waitForStableHeight(el);
-      const delta = el.scrollHeight - prevHeight;
-      if (delta > 0) {
-        el.scrollTop += delta;
-      }
-    }
+    if (el) await waitForStableHeight(el);
   } catch {
     networkWaiting.value = false;
   } finally {
@@ -988,14 +978,26 @@ const attachScrollListener = () => {
         const el = scrollListenEl;
         if (!el || switching.value) return;
 
-        // Skip auto-scroll while loading older messages or user is scrolled up
-        if (loadingMore.value || !isNearBottom.value) {
-          prevScrollHeight = el.scrollHeight;
+        const newHeight = el.scrollHeight;
+        if (newHeight === prevScrollHeight) return;
+
+        // During pagination: correct scrollTop immediately on EVERY height change.
+        // ResizeObserver fires before paint, so user never sees the uncorrected frame.
+        if (loadingMore.value) {
+          const delta = newHeight - prevScrollHeight;
+          prevScrollHeight = newHeight;
+          if (delta > 0) {
+            el.scrollTop += delta;
+          }
           return;
         }
 
-        const newHeight = el.scrollHeight;
-        if (newHeight === prevScrollHeight) return;
+        // User is scrolled up (reading history, not loading) — just track height
+        if (!isNearBottom.value) {
+          prevScrollHeight = newHeight;
+          return;
+        }
+
         prevScrollHeight = newHeight;
 
         // Event-driven scroll: content just resized (image loaded, reply
