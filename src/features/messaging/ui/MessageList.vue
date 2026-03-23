@@ -757,6 +757,38 @@ const waitForDomSettle = (): Promise<void> =>
     });
   });
 
+/** Wait for activeMessages.length to change (liveQuery responded) or timeout. */
+const waitForDataChange = (prevLen: number, timeout = 300): Promise<void> =>
+  new Promise((resolve) => {
+    if (chatStore.activeMessages.length !== prevLen) { resolve(); return; }
+    const timer = setTimeout(() => { stop(); resolve(); }, timeout);
+    const stop = watch(() => chatStore.activeMessages.length, (len) => {
+      if (len !== prevLen) { clearTimeout(timer); stop(); resolve(); }
+    });
+  });
+
+/** Wait for scrollHeight to stabilize — Virtua measures new items via ResizeObserver
+ *  which fires asynchronously. Poll until 3 consecutive frames have same height. */
+const waitForStableHeight = (el: HTMLElement, maxWait = 500): Promise<void> =>
+  new Promise((resolve) => {
+    let lastHeight = el.scrollHeight;
+    let stableFrames = 0;
+    const start = performance.now();
+    const check = () => {
+      const h = el.scrollHeight;
+      if (h === lastHeight) {
+        stableFrames++;
+        if (stableFrames >= 3) { resolve(); return; }
+      } else {
+        stableFrames = 0;
+        lastHeight = h;
+      }
+      if (performance.now() - start > maxWait) { resolve(); return; }
+      requestAnimationFrame(check);
+    };
+    requestAnimationFrame(check);
+  });
+
 /** Expand-first load: try Dexie cache first, fall back to network.
  *  Uses manual scrollTop correction (not Virtua shift) because liveQuery
  *  data arrives asynchronously and shift mode corrupts the height cache. */
@@ -774,10 +806,8 @@ const doLoadMore = async (roomId: string): Promise<void> => {
     // Step 1: Expand Dexie query window — instant if cache has data
     chatStore.expandMessageWindow();
 
-    // Wait for liveQuery to respond + DOM to settle
-    await waitForDomSettle();
-    // Extra frame for Virtua to measure new items
-    await waitForDomSettle();
+    // Wait for liveQuery to actually deliver new data
+    await waitForDataChange(prevLen);
 
     if (chatStore.activeRoomId !== roomId) return;
     const newLen = chatStore.activeMessages.length;
@@ -789,18 +819,18 @@ const doLoadMore = async (roomId: string): Promise<void> => {
       hasMore.value = more;
 
       if (more && chatStore.activeRoomId === roomId) {
-        // loadMoreMessages wrote to Dexie — expand window to show them
+        const lenBeforeRetry = chatStore.activeMessages.length;
         chatStore.expandMessageWindow();
-        await waitForDomSettle();
-        await waitForDomSettle();
+        await waitForDataChange(lenBeforeRetry);
       }
       networkWaiting.value = false;
     }
 
-    // Step 3: Manual scroll correction — keep viewport on the same messages
+    // Step 3: Wait for Virtua to finish measuring all new items
     if (chatStore.activeRoomId !== roomId) return;
     const el = getScrollContainer();
     if (el) {
+      await waitForStableHeight(el);
       const delta = el.scrollHeight - prevHeight;
       if (delta > 0) {
         el.scrollTop += delta;
