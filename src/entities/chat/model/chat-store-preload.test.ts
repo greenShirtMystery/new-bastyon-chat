@@ -25,6 +25,11 @@ vi.mock("@/entities/matrix", () => ({
   resetMatrixClientService: vi.fn(),
 }));
 
+// ── Mock MatrixClientService ────────────────────────────────────
+vi.mock("@/entities/matrix", () => ({
+  getMatrixClientService: vi.fn(),
+}));
+
 import { getCachedMessages } from "@/shared/lib/cache/chat-cache";
 import { getMatrixClientService } from "@/entities/matrix";
 
