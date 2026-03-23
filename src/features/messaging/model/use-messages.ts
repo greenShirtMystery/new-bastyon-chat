@@ -1,3 +1,4 @@
+import { onScopeDispose } from "vue";
 import { useChatStore, MessageStatus, MessageType } from "@/entities/chat";
 import type { FileInfo, Message, LinkPreview } from "@/entities/chat";
 import { useAuthStore } from "@/entities/auth";
@@ -22,7 +23,7 @@ export function useMessages() {
         resolve({ w: img.naturalWidth, h: img.naturalHeight });
         URL.revokeObjectURL(img.src);
       };
-      img.onerror = () => resolve({ w: 0, h: 0 });
+      img.onerror = () => { URL.revokeObjectURL(img.src); resolve({ w: 0, h: 0 }); };
       img.src = URL.createObjectURL(file);
     });
   };
@@ -172,9 +173,12 @@ export function useMessages() {
     }
   };
 
-  // Listen for online event to drain queue
+  // Listen for online event to drain queue (with cleanup)
   if (typeof window !== "undefined") {
     window.addEventListener("online", drainOfflineQueue);
+    onScopeDispose(() => {
+      window.removeEventListener("online", drainOfflineQueue);
+    });
   }
 
   /** Send a file/image/video/audio message */

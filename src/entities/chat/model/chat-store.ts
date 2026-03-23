@@ -581,18 +581,21 @@ export const useChatStore = defineStore(NAMESPACE, () => {
 
   // Structural sharing: skip full recompute when dexieRooms reference hasn't changed
   let _prevDexieRef: LocalRoom[] | null = null;
-  let _prevPinnedRef: ReadonlySet<string> | null = null;
+  let _prevPinnedKey: string | null = null;
   let _prevSorted: ChatRoom[] | null = null;
+
+  const _pinnedKey = (s: ReadonlySet<string>) => [...s].sort().join(",");
 
   const sortedRooms = computed(() => {
     perfCount("sortedRooms:recompute");
     // Use Dexie rooms when initialized (single source of truth), fallback to old shallowRef otherwise
     let source: ChatRoom[];
     const dexie = chatDbKitRef.value ? dexieRooms.value : null;
+    const curPinnedKey = _pinnedKey(pinnedRoomIds.value);
 
     if (dexie) {
-      // Structural sharing: if dexieRooms reference AND pinnedRoomIds haven't changed, reuse result
-      if (dexie === _prevDexieRef && pinnedRoomIds.value === _prevPinnedRef && _prevSorted) {
+      // Structural sharing: if dexieRooms reference AND pinnedRoomIds contents haven't changed, reuse result
+      if (dexie === _prevDexieRef && curPinnedKey === _prevPinnedKey && _prevSorted) {
         return _prevSorted;
       }
       source = dexie.map(lr => ({
@@ -641,7 +644,7 @@ export const useChatStore = defineStore(NAMESPACE, () => {
 
     // Cache for structural sharing on next call
     _prevDexieRef = dexie;
-    _prevPinnedRef = pinnedRoomIds.value;
+    _prevPinnedKey = curPinnedKey;
     _prevSorted = result;
     return result;
   });

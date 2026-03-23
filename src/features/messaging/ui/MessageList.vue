@@ -562,7 +562,11 @@ watch(
             const timer = setTimeout(resolve, SYNC_WAIT_MS);
             const stopWatch = watch(
               () => chatStore.activeMessages.length,
-              (len) => { if (len > 0) { clearTimeout(timer); stopWatch(); resolve(); } },
+              (len) => {
+                if (len > 0 && chatStore.activeRoomId === roomId) {
+                  clearTimeout(timer); stopWatch(); resolve();
+                }
+              },
             );
             setTimeout(() => stopWatch(), SYNC_WAIT_MS + 50);
           });
@@ -805,13 +809,17 @@ const doLoadMore = async (roomId: string): Promise<void> => {
  *  Does not touch loadingMore, shiftMode, scrollTop, or any reactive state
  *  that would cause visible changes. When the user scrolls further up,
  *  expandMessageWindow() will find the data already in Dexie. */
+let prefetchRoomId: string | null = null;
 const triggerPrefetch = (roomId: string) => {
   if (prefetchInFlight || loadingMore.value || !hasMore.value) return;
   prefetchInFlight = true;
+  prefetchRoomId = roomId;
   chatStore.prefetchOlderToCache(roomId)
-    .then(more => { hasMore.value = more; })
+    .then(more => {
+      if (chatStore.activeRoomId === prefetchRoomId) { hasMore.value = more; }
+    })
     .catch(() => {})
-    .finally(() => { prefetchInFlight = false; });
+    .finally(() => { prefetchInFlight = false; prefetchRoomId = null; });
 };
 
 /** Load newer messages (forward pagination in detached mode).
