@@ -19,7 +19,8 @@ import EmojiPicker from "./EmojiPicker.vue";
 import MediaViewer from "./MediaViewer.vue";
 import ReactionEffect from "./ReactionEffect.vue";
 import TypingBubble from "./TypingBubble.vue";
-import { VList } from "virtua/vue";
+import ChatVirtualScroller from "@/shared/ui/ChatVirtualScroller.vue";
+import { useI18n } from "@/shared/lib/i18n";
 import { useUnreadBanner } from "../model/use-unread-banner";
 import { useReadTracker } from "../model/use-read-tracker";
 import UnreadBanner from "./UnreadBanner.vue";
@@ -171,7 +172,7 @@ const handleEmojiSelect = (emoji: string) => {
 const lastReactionEmoji = ref<string | null>(null);
 
 const listRef = ref<HTMLElement>();
-const scrollerRef = ref<InstanceType<typeof VList>>();
+const scrollerRef = ref<{ scrollToBottom: () => void; scrollToIndex: (idx: number, opts?: { align?: "start" | "center" | "end" }) => void; $el: HTMLElement }>();
 const isNearBottom = ref(true);
 const showScrollFab = ref(false);
 const loading = ref(false);
@@ -188,18 +189,12 @@ const fabBadgeCount = computed(() => {
 });
 
 // --- Scroll threshold state ---
-const LOAD_THRESHOLD = 1200; // px from top — expand Dexie window
+const LOAD_THRESHOLD = 1200; // px from max scroll — trigger expand
 const VELOCITY_BOOST_THRESHOLD = 1500; // px/s — fast scroll triggers early thresholds
 const networkWaiting = ref(false); // true when Dexie cache exhausted, waiting for network
-
-/** Shift mode is ALWAYS false. Virtua's shift assumes synchronous prepend,
- *  but our data arrives asynchronously via Dexie liveQuery, causing the internal
- *  height cache to corrupt (giant gaps between messages). Instead we use manual
- *  scrollTop correction after DOM settles. */
-const shiftMode = false;
 let lastScrollTop = 0;
 let lastScrollTime = 0;
-let scrollVelocity = 0; // px per second (positive = scrolling up)
+let scrollVelocity = 0; // px per second (positive = scrolling toward older)
 
 /** Flatten messages + date separators into a single virtual list */
 interface VirtualItem {
@@ -260,7 +255,18 @@ const virtualItems = computed<VirtualItem[]>(() => {
   return items;
 });
 
-/** Get the actual scroll container (VList's root element has overflow-y: auto). */
+/** Reversed for the inverted scroller: newest first (index 0 = visual bottom).
+ *  History loading appends to the END of this array = visual TOP = no scroll jump. */
+const reversedItems = computed(() => {
+  const items = virtualItems.value;
+  const reversed = new Array(items.length);
+  for (let i = 0; i < items.length; i++) {
+    reversed[i] = items[items.length - 1 - i];
+  }
+  return reversed;
+});
+
+/** Get the actual scroll container (scroller's root element). */
 const getScrollContainer = (): HTMLElement | null => {
   const el = scrollerRef.value?.$el as HTMLElement | undefined;
   if (el) return el;
@@ -297,7 +303,7 @@ const vTrackRead = {
 };
 
 const { scrollToMessage, scrollTarget } = useScrollToMessage(
-  virtualItems,
+  reversedItems,
   scrollerRef,
   getScrollContainer,
 );
@@ -315,100 +321,52 @@ const handleReturnToLatest = async () => {
  *  initial checkScroll() would immediately dismiss it before the user sees it. */
 let bannerDismissAllowed = false;
 
-/** Check if user is scrolled near the bottom */
+/** Check if user is scrolled near the bottom.
+ *  In column-reverse: scrollTop=0 means at the bottom (newest messages). */
 const checkScroll = () => {
   const el = getScrollContainer();
   if (!el) return;
-  const { scrollTop, scrollHeight, clientHeight } = el;
-  const distFromBottom = scrollHeight - scrollTop - clientHeight;
-  isNearBottom.value = distFromBottom < 100;
-  showScrollFab.value = distFromBottom > 300;
+  const { scrollTop } = el;
+  isNearBottom.value = scrollTop < 100;
+  showScrollFab.value = scrollTop > 300;
   if (isNearBottom.value) {
     newMessageCount.value = 0;
     if (hasBanner() && bannerDismissAllowed) dismissBanner();
   }
 };
 
-let scrollBottomTimer: ReturnType<typeof setTimeout> | undefined;
-let scrollRafId1: number | undefined;
 let pendingScrollToBottom = false;
-let pendingOnSettled: (() => void) | undefined;
 let scrollStableTimer: ReturnType<typeof setTimeout> | undefined;
-let scrollStableRaf: number | undefined;
+/** Scroll to newest messages (bottom of chat = scrollTop 0 in column-reverse). */
 const scrollToBottom = (_smooth = false, onSettled?: () => void) => {
   newMessageCount.value = 0;
-
-  // Cancel any pending operations from a previous call
-  clearTimeout(scrollBottomTimer);
   clearTimeout(scrollStableTimer);
-  if (scrollRafId1 != null) cancelAnimationFrame(scrollRafId1);
-  if (scrollStableRaf != null) cancelAnimationFrame(scrollStableRaf);
-
-  const doScroll = () => {
-    const el = getScrollContainer();
-    if (el) {
-      el.scrollTop = el.scrollHeight + 9999;
-    }
-  };
-
-  // Activate event-driven mode: contentResizeObserver will keep
-  // scrolling to bottom on every resize until content stabilises.
   pendingScrollToBottom = true;
-  pendingOnSettled = onSettled;
 
-  // Immediate scroll on next tick (handles fast/static content)
   nextTick(() => {
-    // First pass: ask Virtua to position the last item at the viewport end.
-    // This forces it to recalculate offsets from its (possibly stale) cache,
-    // which is still better than raw scrollTop that ignores Virtua entirely.
-    const items = virtualItems.value;
-    if (items.length > 0 && scrollerRef.value) {
-      scrollerRef.value.scrollToIndex(items.length - 1, { align: "end" });
-    } else {
-      doScroll();
-    }
-    // One rAF pass for layout that settles within a single frame
-    scrollRafId1 = requestAnimationFrame(() => {
-      doScroll(); // overshoot fallback — catches any measurement lag
-      // Start the stability window — if no resize fires within 300ms,
-      // content has stabilised and we can stop.
+    const el = getScrollContainer();
+    if (el) el.scrollTop = 0;
+    // Wait for content to settle (images loading, reactions expanding)
+    requestAnimationFrame(() => {
+      const el2 = getScrollContainer();
+      if (el2) el2.scrollTop = 0;
       resetStableTimer(onSettled);
     });
   });
 };
 
-/** Reset the stability timer. Called after every content resize while
- *  pendingScrollToBottom is true. When 300ms pass without a resize,
- *  we consider the content stable and stop auto-scrolling. */
 const resetStableTimer = (onSettled?: () => void) => {
-  if (onSettled) pendingOnSettled = onSettled;
   clearTimeout(scrollStableTimer);
   scrollStableTimer = setTimeout(() => {
     pendingScrollToBottom = false;
-    pendingOnSettled?.();
-    pendingOnSettled = undefined;
+    onSettled?.();
   }, 300);
-};
-
-/** Micro-nudge scrollTop to force virtua to recalculate item offsets.
- *  Used when an individual item's height changes (image load, etc.)
- *  and we're NOT in a pendingScrollToBottom flow. */
-const nudgeVirtua = () => {
-  if (pendingScrollToBottom) return; // already handled by stable scroll
-  const el = getScrollContainer();
-  if (!el) return;
-  // A 0.5px scroll jitter is invisible but forces layout recalc.
-  const before = el.scrollTop;
-  el.scrollTop = before + 0.5;
-  requestAnimationFrame(() => {
-    if (el) el.scrollTop = before;
-  });
 };
 
 /** Two-step FAB: first press → first unread, second press → bottom */
 const handleFabClick = () => {
   if (hasBanner()) {
-    const bannerIdx = virtualItems.value.findIndex(item => item.type === "unread-banner");
+    const bannerIdx = reversedItems.value.findIndex(item => item.type === "unread-banner");
     if (bannerIdx >= 0) {
       scrollerRef.value?.scrollToIndex(bannerIdx, { align: "start" });
       return;
@@ -450,7 +408,6 @@ watch(
     loading.value = false;
     refreshingStaleCache.value = false;
     newMessageCount.value = 0;
-    prevScrollHeight = 0;
     hasMore.value = true;
     showScrollFab.value = false;
     showDateHeader.value = false;
@@ -589,18 +546,21 @@ watch(
           console.log("[unread-banner] PHASE3 bannerIdx=%d items=%d", bannerIdx, virtualItems.value.length);
         }
         if (bannerIdx >= 0) {
-          scrollerRef.value?.scrollToIndex(bannerIdx, { align: "start" });
+          // Convert to reversed index for the inverted scroller
+          const reversedIdx = reversedItems.value.findIndex(item => item.type === "unread-banner");
+          if (reversedIdx >= 0) {
+            scrollerRef.value?.scrollToIndex(reversedIdx, { align: "start" });
+          }
         } else if (el) {
-          el.scrollTop = el.scrollHeight + 9999;
+          el.scrollTop = 0; // column-reverse: bottom = scrollTop 0
         }
       } else if (el) {
-        el.scrollTop = el.scrollHeight + 9999;
+        el.scrollTop = 0; // column-reverse: bottom = scrollTop 0
       }
 
       // ═══ PHASE 4: REVEAL ═══
       settled.value = true;
       switching.value = false;
-      prevScrollHeight = el?.scrollHeight ?? 0;
       checkScroll();
 
       // Prefetch first batch of older messages into Dexie so they're
@@ -744,20 +704,6 @@ const updateFloatingDate = () => {
   }, 1500);
 };
 
-/**
- * Wait for DOM to fully settle after adding messages — nextTick alone is not enough
- * because ResizeObserver may fire AFTER Vue's DOM patch.
- * Double rAF guarantees the browser has painted and observers have run.
- */
-const waitForDomSettle = (): Promise<void> =>
-  new Promise((resolve) => {
-    nextTick(() => {
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => resolve());
-      });
-    });
-  });
-
 /** Wait for activeMessages.length to change (liveQuery responded) or timeout. */
 const waitForDataChange = (prevLen: number, timeout = 300): Promise<void> =>
   new Promise((resolve) => {
@@ -777,9 +723,9 @@ const startPrefetch = (roomId: string) => {
 };
 
 /** Expand Dexie window to show more messages on scroll-up.
- *  Data should already be in Dexie from prefetch. If cache is exhausted,
- *  falls back to a synchronous network fetch.
- *  Scroll correction is handled by contentResizeObserver in real-time. */
+ *  With the inverted scroller (column-reverse), older messages are APPENDED
+ *  to the end of the reversed array = visual top = far from viewport.
+ *  NO scroll correction needed — the browser maintains scroll position. */
 const doLoadMore = async (roomId: string): Promise<void> => {
   if (loadingMore.value) return;
   loadingMore.value = true;
@@ -787,14 +733,14 @@ const doLoadMore = async (roomId: string): Promise<void> => {
   try {
     const prevLen = chatStore.activeMessages.length;
 
-    // Step 1: Expand Dexie query window — should find prefetched data
+    // Expand Dexie query window — should find prefetched data
     chatStore.expandMessageWindow();
     await waitForDataChange(prevLen);
 
     if (chatStore.activeRoomId !== roomId) return;
     const newLen = chatStore.activeMessages.length;
 
-    // Step 2: If Dexie had nothing new, fetch from network (safety net)
+    // If Dexie had nothing new, fetch from network (safety net)
     if (newLen <= prevLen && hasMore.value) {
       networkWaiting.value = true;
       const more = await chatStore.loadMoreMessages(roomId);
@@ -806,10 +752,7 @@ const doLoadMore = async (roomId: string): Promise<void> => {
       networkWaiting.value = false;
     }
 
-    // Wait 2 frames for Virtua to measure new items + ResizeObserver to correct scroll
-    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
-
-    // Step 3: Prefetch next batch so it's ready for the next scroll-up
+    // Prefetch next batch so it's ready for the next scroll-up
     if (hasMore.value && chatStore.activeRoomId === roomId) {
       startPrefetch(roomId);
     }
@@ -820,9 +763,7 @@ const doLoadMore = async (roomId: string): Promise<void> => {
   }
 };
 
-/** Load newer messages (forward pagination in detached mode).
- *  Uses its own flag (loadingNewer) instead of loadingMore because newer
- *  messages are APPENDED — shiftMode must stay false during this operation. */
+/** Load newer messages (forward pagination in detached mode). */
 const loadingNewer = ref(false);
 const doLoadNewer = async (roomId: string) => {
   if (!isChatDbReady() || loadingNewer.value || loadingMore.value) return;
@@ -853,12 +794,6 @@ let scrollThrottleRaf: number | null = null;
 
 const onScroll = () => {
   if (switching.value) return;
-  // Suppress ALL scroll side-effects during pagination — the ResizeObserver
-  // is correcting scrollTop in real-time, and any reactive updates triggered
-  // by scroll events (isNearBottom, showScrollFab, floating date) would cause
-  // Vue re-renders that fight the correction and produce visible jitter.
-  if (loadingMore.value) return;
-
   // Throttle via rAF — at most once per frame (~16ms)
   if (scrollThrottleRaf !== null) return;
   scrollThrottleRaf = requestAnimationFrame(() => {
@@ -867,8 +802,8 @@ const onScroll = () => {
   });
 };
 
-/** VList @scroll handler — adapts virtua's offset-based callback to our scroll logic */
-const onVListScroll = (_offset: number) => {
+/** ChatVirtualScroller @scroll handler */
+const onScrollerScroll = (_scrollTop: number) => {
   onScroll();
 };
 
@@ -881,12 +816,13 @@ const onScrollThrottled = () => {
   if (!container) return;
   const { scrollTop } = container;
 
-  // Calculate scroll velocity (positive means scrolling up)
+  // Calculate scroll velocity (positive = scrolling toward older messages)
+  // In column-reverse: scrollTop increases when scrolling up (toward older)
   const now = performance.now();
   if (lastScrollTime > 0) {
-    const dt = (now - lastScrollTime) / 1000; // seconds
+    const dt = (now - lastScrollTime) / 1000;
     if (dt > 0) {
-      scrollVelocity = (lastScrollTop - scrollTop) / dt; // px/s, positive = up
+      scrollVelocity = (scrollTop - lastScrollTop) / dt; // px/s, positive = toward older
     }
   }
   lastScrollTop = scrollTop;
@@ -896,14 +832,18 @@ const onScrollThrottled = () => {
   if (!roomId) return;
 
   // Forward pagination in detached mode
+  // In column-reverse: near bottom = scrollTop ≈ 0
   if (chatStore.isDetachedFromLatest) {
-    const distFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
-    if (distFromBottom < LOAD_THRESHOLD && !loadingNewer.value) {
+    if (scrollTop < LOAD_THRESHOLD && !loadingNewer.value) {
       doLoadNewer(roomId);
     }
   }
 
   if (!hasMore.value) return;
+
+  // Distance from the top (oldest messages) = how far scrollTop can still go
+  const maxScroll = container.scrollHeight - container.clientHeight;
+  const distFromTop = maxScroll - scrollTop;
 
   // Velocity-adaptive threshold — fast scroll triggers expand earlier
   const speed = Math.abs(scrollVelocity);
@@ -911,149 +851,52 @@ const onScrollThrottled = () => {
     : speed > VELOCITY_BOOST_THRESHOLD ? 2000
     : LOAD_THRESHOLD;
 
-  // Expand Dexie window — data is already local (preloaded on room enter)
-  if (scrollTop < effectiveLoadThreshold && !loadingMore.value) {
+  // Load more when near the top (oldest end) in column-reverse
+  if (distFromTop < effectiveLoadThreshold && !loadingMore.value) {
     doLoadMore(roomId);
   }
 };
 
-let scrollListenEl: HTMLElement | null = null;
+// Content resize observer: when near bottom, auto-scroll to keep newest visible
+// (images loading, reactions expanding, etc.)
 let contentResizeObserver: ResizeObserver | null = null;
-let containerResizeObserver: ResizeObserver | null = null;
-let prevContainerHeight = 0;
-let prevScrollHeight = 0;
 
-const attachScrollListener = () => {
-  // Detach from old element if any
-  if (scrollListenEl) {
-    scrollListenEl.removeEventListener("scroll", onScroll);
-    scrollListenEl = null;
-  }
-  if (contentResizeObserver) {
-    contentResizeObserver.disconnect();
-    contentResizeObserver = null;
-  }
-  if (containerResizeObserver) {
-    containerResizeObserver.disconnect();
-    containerResizeObserver = null;
-  }
-  nextTick(() => {
-    scrollListenEl = getScrollContainer();
-    scrollListenEl?.addEventListener("scroll", onScroll, { passive: true });
+const attachContentObserver = () => {
+  contentResizeObserver?.disconnect();
+  const el = getScrollContainer();
+  if (!el) return;
 
-    // Watch for content height changes (images loading, posts expanding, etc.)
-    // When near bottom, auto-scroll to compensate for layout shifts.
-    if (scrollListenEl) {
-      prevScrollHeight = scrollListenEl.scrollHeight;
-      let paginationCorrectionRaf: number | null = null;
-      contentResizeObserver = new ResizeObserver(() => {
-        const el = scrollListenEl;
-        if (!el || switching.value) return;
-
-        const newHeight = el.scrollHeight;
-        if (newHeight === prevScrollHeight) return;
-
-        // During pagination: batch scroll correction into a single rAF.
-        // Multiple ResizeObserver callbacks fire per frame as Virtua measures
-        // new items — batching prevents layout thrashing from repeated scrollTop writes.
-        if (loadingMore.value) {
-          if (paginationCorrectionRaf === null) {
-            const baseHeight = prevScrollHeight;
-            paginationCorrectionRaf = requestAnimationFrame(() => {
-              paginationCorrectionRaf = null;
-              const finalHeight = el.scrollHeight;
-              const delta = finalHeight - baseHeight;
-              prevScrollHeight = finalHeight;
-              if (delta > 0) {
-                el.scrollTop += delta;
-              }
-            });
-          }
-          return;
-        }
-
-        // User is scrolled up (reading history, not loading) — just track height
-        if (!isNearBottom.value) {
-          prevScrollHeight = newHeight;
-          return;
-        }
-
-        prevScrollHeight = newHeight;
-
-        // Event-driven scroll: content just resized (image loaded, reply
-        // preview rendered, reaction added). If we're in a pending scroll
-        // or simply near the bottom, scroll down and reset the stability timer.
-        if (pendingScrollToBottom || isNearBottom.value) {
-          if (scrollStableRaf != null) cancelAnimationFrame(scrollStableRaf);
-          scrollStableRaf = requestAnimationFrame(() => {
-            el.scrollTop = el.scrollHeight + 9999;
-            scrollStableRaf = undefined;
-          });
-
-          // If in pending mode, extend the stability window
-          if (pendingScrollToBottom) {
-            resetStableTimer();
-          }
-        }
-      });
-      // Observe the INNER content wrapper of VList (not the scroll container itself).
-      // ResizeObserver on the scroll container only fires when the container's own
-      // dimensions change. The inner div changes height when items resize (reactions,
-      // images loading), which is what we actually need to track.
-      const contentEl = scrollListenEl.firstElementChild as HTMLElement | null;
-      contentResizeObserver.observe(contentEl ?? scrollListenEl);
-    }
-
-    // Watch for container height changes (reply bar, edit bar, link preview, etc.)
-    // When the input area grows, the message list shrinks — adjust scrollTop so
-    // the same messages stay visible (Telegram-style stable viewport).
-    if (listRef.value) {
-      prevContainerHeight = listRef.value.clientHeight;
-      containerResizeObserver = new ResizeObserver(() => {
-        const container = listRef.value;
-        const scrollEl = getScrollContainer();
-        if (!container || !scrollEl || switching.value) return;
-        const newHeight = container.clientHeight;
-        if (newHeight === prevContainerHeight) return;
-        const delta = prevContainerHeight - newHeight; // positive when container shrinks
-        prevContainerHeight = newHeight;
-        if (delta > 0) {
-          // Container shrank (e.g. reply bar appeared) — scroll down to keep content stable
-          scrollEl.scrollTop += delta;
-        } else if (isNearBottom.value) {
-          // Container grew (e.g. reply bar removed) and we were near bottom — stay at bottom
-          scrollEl.scrollTop = scrollEl.scrollHeight + 9999;
-        }
-      });
-      containerResizeObserver.observe(listRef.value);
+  contentResizeObserver = new ResizeObserver(() => {
+    if (switching.value) return;
+    // In column-reverse, near bottom = scrollTop ≈ 0.
+    // When content resizes and we're near bottom, keep at bottom.
+    if (pendingScrollToBottom || isNearBottom.value) {
+      const scrollEl = getScrollContainer();
+      if (scrollEl) scrollEl.scrollTop = 0;
+      if (pendingScrollToBottom) resetStableTimer();
     }
   });
+  // Observe the scroll container's first child (content wrapper)
+  const contentEl = el.firstElementChild as HTMLElement | null;
+  contentResizeObserver.observe(contentEl ?? el);
 };
 
 onMounted(() => {
-  // Don't call scrollToBottom() here — watch(activeRoomId, { immediate: true })
-  // already handles it. A competing call from onMounted would cancel the watch's
-  // onSettled callback (which sets switching=false), causing switching to stay
-  // true indefinitely and breaking subsequent scroll behavior.
-  attachScrollListener();
+  attachContentObserver();
 });
 
-// Re-attach scroll listener when scroller appears/changes (e.g. room switch from empty → messages)
-// Also acts as a safety net: if the main watch couldn't set settled=true (e.g. because
-// the scroller wasn't mounted yet during the first immediate invocation), finalize here.
+// Re-attach when scroller mounts (e.g. room switch from empty → messages)
 watch(
   () => scrollerRef.value,
   (scroller) => {
-    attachScrollListener();
+    attachContentObserver();
     if (scroller && !settled.value && !loading.value) {
       nextTick(() => {
-        // Double-check: settled may have been set by the main watch in the meantime
         if (settled.value) return;
         const el = getScrollContainer();
-        if (el) el.scrollTop = el.scrollHeight + 9999;
+        if (el) el.scrollTop = 0; // column-reverse: bottom = 0
         settled.value = true;
         switching.value = false;
-        prevScrollHeight = el?.scrollHeight ?? 0;
         checkScroll();
       });
     }
@@ -1062,25 +905,11 @@ watch(
 
 onUnmounted(() => {
   readTracker.stopTracking();
-  if (scrollListenEl) {
-    scrollListenEl.removeEventListener("scroll", onScroll);
-  }
-  if (contentResizeObserver) {
-    contentResizeObserver.disconnect();
-  }
-  if (containerResizeObserver) {
-    containerResizeObserver.disconnect();
-  }
-  if (scrollThrottleRaf !== null) {
-    cancelAnimationFrame(scrollThrottleRaf);
-  }
+  contentResizeObserver?.disconnect();
+  if (scrollThrottleRaf !== null) cancelAnimationFrame(scrollThrottleRaf);
   clearTimeout(dateHideTimer);
-  clearTimeout(scrollBottomTimer);
   clearTimeout(scrollStableTimer);
-  if (scrollRafId1 != null) cancelAnimationFrame(scrollRafId1);
-  if (scrollStableRaf != null) cancelAnimationFrame(scrollStableRaf);
   pendingScrollToBottom = false;
-  pendingOnSettled = undefined;
 });
 
 const getDateLabel = (
@@ -1136,18 +965,8 @@ const typingNames = computed(() => {
     .map((id: string) => chatStore.getDisplayName(id));
 });
 
-/** When typing indicator toggles and the total virtualItems length stays the
- *  same (typing removed + message added in the same reactive flush), the item
- *  at the last index swaps from TypingBubble (~48px) to MessageBubble (~100-200px)
- *  but Virtua keeps the old cached height for that index.  Nudge forces a
- *  remeasure so the layout doesn't show a brief overlap. */
-watch(typingText, (cur, prev) => {
-  const appeared = !prev && !!cur;
-  const disappeared = !!prev && !cur;
-  if ((appeared || disappeared) && !pendingScrollToBottom) {
-    nextTick(() => nudgeVirtua());
-  }
-});
+// Typing indicator toggle — no nudge needed with ChatVirtualScroller
+// (ResizeObserver handles height changes automatically)
 
 /** Expose setSearchQuery for ChatSearch integration */
 const setSearchQuery = (q: string) => {
@@ -1206,17 +1025,16 @@ defineExpose({ scrollToMessage, setSearchQuery });
       <span class="text-sm">No messages yet. Start a conversation!</span>
     </div>
 
-    <!-- Virtualized Messages (virtua VList — zero-config dynamic heights, no recycling bugs) -->
-    <VList
+    <!-- Virtualized Messages (custom inverted scroller — column-reverse eliminates prepend scroll jumps) -->
+    <ChatVirtualScroller
       v-if="!loading"
       ref="scrollerRef"
-      :data="virtualItems"
-      :shift="shiftMode"
+      :items="reversedItems"
       class="h-full overscroll-contain px-4 py-3"
       :style="{ opacity: settled ? 1 : 0, transition: settled ? 'opacity 0.1s ease-out' : 'none' }"
-      @scroll="onVListScroll"
+      @scroll="onScrollerScroll"
     >
-      <template #default="{ item, index }">
+      <template #default="{ item }">
         <!-- Date separator -->
         <div
           v-if="item.type === 'date-separator'"
@@ -1301,7 +1119,6 @@ defineExpose({ scrollToMessage, setSearchQuery });
             @add-reaction="handleOpenEmojiPicker"
             @poll-vote="handlePollVote"
             @poll-end="handlePollEnd"
-            @resize="nudgeVirtua"
             @retry-media="retryMediaUpload"
           >
             <template #avatar>
@@ -1319,7 +1136,7 @@ defineExpose({ scrollToMessage, setSearchQuery });
           </div>
         </div>
       </template>
-    </VList>
+    </ChatVirtualScroller>
 
     <!-- Context menu -->
     <MessageContextMenu
