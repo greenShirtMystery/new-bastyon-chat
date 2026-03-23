@@ -194,13 +194,11 @@ const VELOCITY_BOOST_THRESHOLD = 1500; // px/s — fast scroll triggers early th
 const networkWaiting = ref(false); // true when Dexie cache exhausted, waiting for network
 let prefetchInFlight = false; // background prefetch lock (non-reactive — no UI effect)
 
-/** Explicit shift mode lock — enabled ONLY while prepending older messages.
- *  Virtua shift tells the virtualizer that items were added at the START,
- *  so it auto-corrects scrollTop. We enable this around expand/load operations
- *  and disable immediately after DOM settles.
- *  MUST be false when appending (new messages, typing indicator). */
-const shiftModeLock = ref(false);
-const shiftMode = computed(() => shiftModeLock.value);
+/** Shift mode is ALWAYS false. Virtua's shift assumes synchronous prepend,
+ *  but our data arrives asynchronously via Dexie liveQuery, causing the internal
+ *  height cache to corrupt (giant gaps between messages). Instead we use manual
+ *  scrollTop correction after DOM settles. */
+const shiftMode = false;
 let lastScrollTop = 0;
 let lastScrollTime = 0;
 let scrollVelocity = 0; // px per second (positive = scrolling up)
@@ -462,7 +460,6 @@ watch(
     isNearBottom.value = true;
     prefetchInFlight = false;
     networkWaiting.value = false;
-    shiftModeLock.value = false;
     bannerDismissAllowed = false;
     lastScrollTop = 0;
     lastScrollTime = 0;
@@ -761,18 +758,25 @@ const waitForDomSettle = (): Promise<void> =>
   });
 
 /** Expand-first load: try Dexie cache first, fall back to network.
- *  Relies on Virtua's shift mode for scroll position preservation
- *  instead of manual scrollTop correction. */
+ *  Uses manual scrollTop correction (not Virtua shift) because liveQuery
+ *  data arrives asynchronously and shift mode corrupts the height cache. */
 const doLoadMore = async (roomId: string): Promise<void> => {
   if (loadingMore.value) return;
   loadingMore.value = true;
-  shiftModeLock.value = true;
 
   try {
+    const container = getScrollContainer();
+    if (!container) return;
+
     const prevLen = chatStore.activeMessages.length;
+    const prevHeight = container.scrollHeight;
 
     // Step 1: Expand Dexie query window — instant if cache has data
     chatStore.expandMessageWindow();
+
+    // Wait for liveQuery to respond + DOM to settle
+    await waitForDomSettle();
+    // Extra frame for Virtua to measure new items
     await waitForDomSettle();
 
     if (chatStore.activeRoomId !== roomId) return;
@@ -788,15 +792,23 @@ const doLoadMore = async (roomId: string): Promise<void> => {
         // loadMoreMessages wrote to Dexie — expand window to show them
         chatStore.expandMessageWindow();
         await waitForDomSettle();
+        await waitForDomSettle();
       }
       networkWaiting.value = false;
+    }
+
+    // Step 3: Manual scroll correction — keep viewport on the same messages
+    if (chatStore.activeRoomId !== roomId) return;
+    const el = getScrollContainer();
+    if (el) {
+      const delta = el.scrollHeight - prevHeight;
+      if (delta > 0) {
+        el.scrollTop += delta;
+      }
     }
   } catch {
     networkWaiting.value = false;
   } finally {
-    // Let Virtua finish its shift correction before disabling
-    await waitForDomSettle();
-    shiftModeLock.value = false;
     loadingMore.value = false;
   }
 };
@@ -947,7 +959,7 @@ const attachScrollListener = () => {
         if (!el || switching.value) return;
 
         // Skip auto-scroll while loading older messages or user is scrolled up
-        if (loadingMore.value || shiftModeLock.value || !isNearBottom.value) {
+        if (loadingMore.value || !isNearBottom.value) {
           prevScrollHeight = el.scrollHeight;
           return;
         }
