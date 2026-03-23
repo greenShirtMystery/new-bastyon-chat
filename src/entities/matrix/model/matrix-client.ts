@@ -494,21 +494,24 @@ export class MatrixClientService {
   }
 
   /** Mark messages as read using /read_markers endpoint (same as old bastyon-chat).
-   *  The /receipt/ endpoint returns 500 on this server, but /read_markers works. */
-  async sendReadReceipt(event: unknown): Promise<void> {
-    if (!this.client) return;
+   *  The /receipt/ endpoint returns 500 on this server, but /read_markers works.
+   *  Returns true if the server accepted the receipt, false on error. */
+  async sendReadReceipt(event: unknown): Promise<boolean> {
+    if (!this.client) return false;
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const ev = event as any;
       const roomId: string = ev.getRoomId?.() ?? ev.event?.room_id;
       const eventId: string = ev.getId?.() ?? ev.event?.event_id;
-      if (!roomId || !eventId) return;
+      if (!roomId || !eventId) return false;
 
       // Use setRoomReadMarkers — same approach as old bastyon-chat (list/index.js:666)
       // This uses POST /rooms/{roomId}/read_markers instead of /receipt/
       await this.client.setRoomReadMarkers(roomId, eventId, ev);
+      return true;
     } catch (e) {
       console.warn("[matrix-client] sendReadReceipt error:", e);
+      return false;
     }
   }
 

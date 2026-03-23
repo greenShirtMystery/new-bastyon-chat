@@ -1,9 +1,10 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { setActivePinia } from "pinia";
 import { createTestingPinia } from "@pinia/testing";
 import { useChatStore } from "./chat-store";
 import { makeMsg, makeRoom } from "@/test-utils";
 import { MessageStatus, MessageType } from "./types";
+import { getMatrixClientService } from "@/entities/matrix";
 
 describe("chat-store", () => {
   let store: ReturnType<typeof useChatStore>;
@@ -344,6 +345,132 @@ describe("chat-store", () => {
     it("resets unreadCount to 0", () => {
       store.addRoom(makeRoom({ id: "!r1:s", unreadCount: 10 }));
       store.markRoomAsRead("!r1:s");
+      expect(store.rooms[0].unreadCount).toBe(0);
+    });
+  });
+
+  // ─── handleReceiptEvent (cross-device read sync) ─────────────
+
+  describe("handleReceiptEvent", () => {
+    const MY_USER_ID = "@me:server";
+    const OTHER_USER_ID = "@other:server";
+
+    beforeEach(() => {
+      // Override the mock factory to return getUserId at top level
+      // (handleReceiptEvent calls matrixService.getUserId(), not matrixService.kit.client.getUserId())
+      (getMatrixClientService as ReturnType<typeof vi.fn>).mockReturnValue({
+        getUserId: vi.fn(() => MY_USER_ID),
+        sendReadReceipt: vi.fn(async () => true),
+        kit: {
+          client: { getUserId: vi.fn(() => MY_USER_ID) },
+          isTetatetChat: vi.fn(() => true),
+          getRoomMembers: vi.fn(() => []),
+        },
+      });
+    });
+
+    it("clears in-memory unreadCount when receiving own read receipt from another device", () => {
+      const roomId = "!r1:server";
+      store.addRoom(makeRoom({ id: roomId }));
+      store.setActiveRoom(roomId);
+      const msg = makeMsg({ id: "$evt1", roomId, timestamp: 1000, senderId: "other" });
+      store.addMessage(roomId, msg);
+      store.rooms[0].unreadCount = 5;
+
+      // Simulate receipt event from /sync with our own userId
+      const receiptEvent = {
+        getContent: () => ({
+          "$evt1": {
+            "m.read": {
+              [MY_USER_ID]: { ts: 1000 },
+            },
+          },
+        }),
+      };
+
+      store.handleReceiptEvent(receiptEvent, { roomId });
+
+      // Own receipt should clear unreadCount (cross-device sync)
+      expect(store.rooms[0].unreadCount).toBe(0);
+    });
+
+    it("does not clear unreadCount for receipts from other users", () => {
+      const roomId = "!r1:server";
+      store.addRoom(makeRoom({ id: roomId }));
+      store.setActiveRoom(roomId);
+      const msg = makeMsg({ id: "$evt1", roomId, timestamp: 1000, senderId: "me" });
+      store.addMessage(roomId, msg);
+      store.rooms[0].unreadCount = 5;
+
+      const receiptEvent = {
+        getContent: () => ({
+          "$evt1": {
+            "m.read": {
+              [OTHER_USER_ID]: { ts: 1000 },
+            },
+          },
+        }),
+      };
+
+      store.handleReceiptEvent(receiptEvent, { roomId });
+
+      // Other user's receipt should NOT clear our unreadCount
+      expect(store.rooms[0].unreadCount).toBe(5);
+    });
+
+    it("handles mixed own + other receipts in same event", () => {
+      const roomId = "!r1:server";
+      store.addRoom(makeRoom({ id: roomId }));
+      // Set active room so addMessage doesn't increment unreadCount
+      store.setActiveRoom(roomId);
+      const msg = makeMsg({ id: "$evt1", roomId, timestamp: 2000, senderId: "someone" });
+      store.addMessage(roomId, msg);
+      // Set unread manually to simulate state before receipt
+      store.rooms[0].unreadCount = 8;
+
+      const receiptEvent = {
+        getContent: () => ({
+          "$evt1": {
+            "m.read": {
+              [OTHER_USER_ID]: { ts: 2000 },
+              [MY_USER_ID]: { ts: 2000 },
+            },
+          },
+        }),
+      };
+
+      store.handleReceiptEvent(receiptEvent, { roomId });
+
+      // Own receipt in the mix should still clear unread
+      expect(store.rooms[0].unreadCount).toBe(0);
+    });
+
+    it("ignores receipt events with no content", () => {
+      store.addRoom(makeRoom({ id: "!r1:server", unreadCount: 3 }));
+
+      store.handleReceiptEvent({ getContent: () => null }, { roomId: "!r1:server" });
+
+      expect(store.rooms[0].unreadCount).toBe(3);
+    });
+
+    it("falls back to receipt ts when message not found in memory", () => {
+      const roomId = "!r1:server";
+      store.addRoom(makeRoom({ id: roomId, unreadCount: 4 }));
+      // Note: NOT adding message to store — simulates messages not loaded yet
+
+      const receiptEvent = {
+        getContent: () => ({
+          "$unknown_evt": {
+            "m.read": {
+              [MY_USER_ID]: { ts: 5000 },
+            },
+          },
+        }),
+      };
+
+      store.handleReceiptEvent(receiptEvent, { roomId });
+
+      // Should still clear unread even without message in memory
       expect(store.rooms[0].unreadCount).toBe(0);
     });
   });
