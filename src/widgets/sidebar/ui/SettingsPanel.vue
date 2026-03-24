@@ -8,6 +8,7 @@ import Avatar from "@/shared/ui/avatar/Avatar.vue";
 import { Toggle } from "@/shared/ui/toggle";
 import { isNative, isAndroid } from "@/shared/lib/platform";
 import { registerPlugin } from "@capacitor/core";
+import { App } from "@capacitor/app";
 import { useSidebarTab } from "../model/use-sidebar-tab";
 
 // App updater Capacitor plugin (Android only)
@@ -89,6 +90,19 @@ const confirmDisableTor = () => {
   showDisableWarning.value = false;
   torStore.toggle();
 };
+
+// --- App version ---
+const appVersion = ref("");
+onMounted(async () => {
+  if (isNative) {
+    try {
+      const info = await App.getInfo();
+      appVersion.value = info.version;
+    } catch {
+      appVersion.value = "";
+    }
+  }
+});
 
 // --- Check for updates (Android only) ---
 const updateChecking = ref(false);
@@ -342,6 +356,14 @@ const handleLogout = () => {
 
         <!-- Divider -->
         <div class="my-1 border-t border-neutral-grad-0" />
+
+        <!-- App version -->
+        <div
+          v-if="appVersion"
+          class="px-3 py-2 text-center text-xs text-text-on-main-bg-color opacity-60"
+        >
+          Forta Chat v{{ appVersion }}
+        </div>
 
         <!-- Logout -->
         <button
