@@ -166,6 +166,7 @@ export const en = {
   "message.photo": "Photo",
   "message.video": "Video",
   "message.voiceMessage": "Voice message",
+  "message.videoMessage": "Video message",
   "message.file": "File",
   "message.deleted": "This message was deleted",
   "message.retry": "Retry",
