@@ -75,6 +75,8 @@ export const ru: Record<TranslationKey, string> = {
   "settings.torProxy": "Tor-прокси",
   "settings.torFailed": "Не удалось запустить Tor. Попробуйте выключить и включить снова.",
   "settings.wallet": "Кошелёк PKOIN",
+  "settings.checkUpdates": "Проверить обновления",
+  "settings.checking": "Проверяем...",
   "settings.logout": "Выйти",
   "settings.anonymous": "Аноним",
   "settings.notifications": "Уведомления",

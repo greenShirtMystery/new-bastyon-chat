@@ -6,8 +6,15 @@ import { useUserStore } from "@/entities/user/model";
 import { useWallet } from "@/features/wallet/model/use-wallet";
 import Avatar from "@/shared/ui/avatar/Avatar.vue";
 import { Toggle } from "@/shared/ui/toggle";
-import { isNative } from "@/shared/lib/platform";
+import { isNative, isAndroid } from "@/shared/lib/platform";
+import { registerPlugin } from "@capacitor/core";
 import { useSidebarTab } from "../model/use-sidebar-tab";
+
+// App updater Capacitor plugin (Android only)
+interface AppUpdaterPlugin {
+  checkForUpdate(): Promise<void>;
+}
+const AppUpdaterPlugin = isAndroid ? registerPlugin<AppUpdaterPlugin>("AppUpdater") : null;
 
 const authStore = useAuthStore();
 const themeStore = useThemeStore();
@@ -81,6 +88,21 @@ const handleTorToggle = () => {
 const confirmDisableTor = () => {
   showDisableWarning.value = false;
   torStore.toggle();
+};
+
+// --- Check for updates (Android only) ---
+const updateChecking = ref(false);
+
+const handleCheckUpdates = async () => {
+  if (!AppUpdaterPlugin || updateChecking.value) return;
+  updateChecking.value = true;
+  try {
+    await AppUpdaterPlugin.checkForUpdate();
+  } catch (e) {
+    console.warn("[settings] Update check failed:", e);
+  } finally {
+    updateChecking.value = false;
+  }
 };
 
 const handleLogout = () => {
@@ -283,6 +305,40 @@ const handleLogout = () => {
             class="text-xs text-text-on-main-bg-color"
           >—</span>
         </div>
+
+        <!-- Check for updates (Android only) -->
+        <button
+          v-if="isAndroid"
+          class="flex w-full items-center gap-3 rounded-lg px-3 py-3 transition-colors hover:bg-neutral-grad-0"
+          :disabled="updateChecking"
+          @click="handleCheckUpdates"
+        >
+          <svg
+            width="20"
+            height="20"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            class="shrink-0 text-text-on-main-bg-color"
+          >
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+            <polyline points="7 10 12 15 17 10" />
+            <line x1="12" y1="15" x2="12" y2="3" />
+          </svg>
+          <span class="flex-1 text-left text-sm text-text-color">
+            {{ updateChecking ? t("settings.checking") : t("settings.checkUpdates") }}
+          </span>
+          <svg
+            v-if="updateChecking"
+            class="h-4 w-4 shrink-0 animate-spin text-text-on-main-bg-color"
+            viewBox="0 0 24 24"
+            fill="none"
+          >
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+          </svg>
+        </button>
 
         <!-- Divider -->
         <div class="my-1 border-t border-neutral-grad-0" />
