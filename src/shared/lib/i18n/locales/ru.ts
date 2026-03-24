@@ -168,6 +168,7 @@ export const ru: Record<TranslationKey, string> = {
   "message.photo": "Фото",
   "message.video": "Видео",
   "message.voiceMessage": "Голосовое сообщение",
+  "message.videoMessage": "Видеосообщение",
   "message.file": "Файл",
   "message.deleted": "Сообщение удалено",
   "message.retry": "Повторить",

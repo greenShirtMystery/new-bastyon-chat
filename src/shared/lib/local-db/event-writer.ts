@@ -375,6 +375,7 @@ export class EventWriter {
     if (type === MessageType.image) return "[photo]";
     if (type === MessageType.video) return "[video]";
     if (type === MessageType.audio) return "[voice message]";
+    if (type === MessageType.videoCircle) return "[video message]";
     if (type === MessageType.file) return "[file]";
     if (type === MessageType.poll) return "[poll]";
     if (type === MessageType.transfer) return `[transfer] ${transferAmount ?? 0} PKOIN`;

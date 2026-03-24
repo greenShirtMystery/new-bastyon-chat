@@ -560,6 +560,7 @@ export const useChatStore = defineStore(NAMESPACE, () => {
   // This prevents VList from re-rendering unchanged items when the array grows during pagination.
   let _prevDexieInput: import("@/shared/lib/local-db").LocalMessage[] = [];
   let _prevActiveOutput: Message[] = [];
+  let _prevWatermark: number = 0;
   const activeMessages = computed<Message[]>(() => {
     let msgs: Message[];
     if (chatDbKitRef.value) {
@@ -567,13 +568,14 @@ export const useChatStore = defineStore(NAMESPACE, () => {
       const myAddr = useAuthStore().address ?? undefined;
       const watermark = activeRoomOutboundWatermark.value;
 
-      // Fast path: if Dexie returned the exact same array reference, reuse output
-      if (raw === _prevDexieInput && _prevActiveOutput.length > 0) {
+      // Fast path: reuse only if BOTH input array AND watermark are unchanged
+      if (raw === _prevDexieInput && watermark === _prevWatermark && _prevActiveOutput.length > 0) {
         return _prevActiveOutput;
       }
 
       // Incremental conversion: reuse Message objects for unchanged LocalMessages.
       // Build a lookup from the previous output by eventId for O(1) reuse.
+      const watermarkChanged = watermark !== _prevWatermark;
       const prevById = new Map<string, Message>();
       for (const m of _prevActiveOutput) {
         prevById.set(m.id, m);
@@ -582,14 +584,18 @@ export const useChatStore = defineStore(NAMESPACE, () => {
       msgs = raw.map(local => {
         const id = local.eventId ?? local.clientId;
         const prev = prevById.get(id);
-        // Reuse if same timestamp (content hasn't changed)
-        if (prev && prev.timestamp === local.timestamp) {
+        const isOwnMessage = myAddr && local.senderId === myAddr;
+        // Reuse if content unchanged AND status wouldn't change.
+        // Own messages must be re-derived when watermark changes (read receipt arrived).
+        if (prev && prev.timestamp === local.timestamp
+            && !(watermarkChanged && isOwnMessage)) {
           return prev;
         }
         return localToMessages([local], watermark, myAddr)[0];
       });
 
       _prevDexieInput = raw;
+      _prevWatermark = watermark;
     } else {
       msgs = activeRoomId.value ? (messages.value[activeRoomId.value] ?? []) : [];
     }

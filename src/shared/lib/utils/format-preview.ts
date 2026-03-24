@@ -30,6 +30,9 @@ export function useFormatPreview() {
       case MessageType.audio:
         preview = msg.content && msg.content !== "[voice message]" ? `🎤 ${msg.content}` : "🎤 " + t("message.voiceMessage");
         break;
+      case MessageType.videoCircle:
+        preview = msg.content && msg.content !== "[video message]" ? `🎬 ${msg.content}` : "🎬 " + t("message.videoMessage");
+        break;
       case MessageType.file:
         preview = `📎 ${msg.content || t("message.file")}`;
         break;
