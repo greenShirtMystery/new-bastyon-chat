@@ -16,6 +16,8 @@ android/.gradle/
 android/capacitor-cordova-android-plugins/build/
 android/capacitor-filesystem/build/
 *.apk
+*.jks
+*.keystore
 
 # Vite
 *.local
