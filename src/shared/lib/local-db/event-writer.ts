@@ -10,6 +10,7 @@ import {
   type TransferInfo,
 } from "@/entities/chat/model/types";
 import { WriteBuffer, type BufferedWrite } from "./write-buffer";
+import { perfMark, perfMeasure } from "@/shared/lib/perf-markers";
 
 // ---------------------------------------------------------------------------
 // Types for parsed events coming from chat-store / Matrix SDK layer
@@ -166,6 +167,7 @@ export class EventWriter {
    * Calls onChange() once per unique roomId (not per message).
    */
   private async flushBatch(items: BufferedWrite[]): Promise<void> {
+    perfMark("flush-batch:start");
     const changedRooms = new Set<string>();
 
     await this.db.transaction("rw", [this.db.messages, this.db.rooms], async () => {
@@ -187,6 +189,9 @@ export class EventWriter {
         }
       }
     });
+
+    perfMark("flush-batch:end");
+    perfMeasure("flush-batch", "flush-batch:start", "flush-batch:end");
 
     // Notify once per unique room (outside the transaction)
     for (const roomId of changedRooms) {

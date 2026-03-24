@@ -3903,9 +3903,14 @@ export const useChatStore = defineStore(NAMESPACE, () => {
         if (roomCrypto) {
           try {
             await maybeYieldDecrypt();
+            perfMark("decrypt-event:start");
             const decrypted = await roomCrypto.decryptEvent(raw);
+            perfMark("decrypt-event:end");
+            perfMeasure("decrypt-event", "decrypt-event:start", "decrypt-event:end");
             body = decrypted.body;
           } catch (e) {
+            perfMark("decrypt-event:end");
+            perfMeasure("decrypt-event", "decrypt-event:start", "decrypt-event:end");
             console.warn("[chat-store] handleTimelineEvent decrypt failed:", e);
             body = "[encrypted]";
           }
