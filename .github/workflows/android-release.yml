@@ -42,6 +42,9 @@ jobs:
         run: |
           echo "${{ secrets.ANDROID_KEYSTORE }}" | base64 -d > android/app/release-keystore.jks
 
+      - name: Override Gradle Java home for CI
+        run: sed -i 's|^org.gradle.java.home=.*|org.gradle.java.home='"$JAVA_HOME"'|' android/gradle.properties
+
       - name: Make gradlew executable
         run: chmod +x android/gradlew
 
