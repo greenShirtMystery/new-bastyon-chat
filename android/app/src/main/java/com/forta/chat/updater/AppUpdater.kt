@@ -1,17 +1,17 @@
 package com.forta.chat.updater
 
 import android.app.AlertDialog
-import android.app.NotificationChannel
-import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.os.Build
-import android.provider.Settings
 import android.util.Log
+import android.view.Gravity
+import android.widget.LinearLayout
+import android.widget.ProgressBar
+import android.widget.TextView
 import android.widget.Toast
-import androidx.core.app.NotificationCompat
 import androidx.core.content.FileProvider
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
@@ -27,7 +27,8 @@ import java.util.concurrent.TimeUnit
 
 data class GithubReleaseInfo(
     val versionName: String,
-    val apkUrl: String
+    val apkUrl: String,
+    val releasePageUrl: String
 )
 
 // ---- Main updater object ----
@@ -47,20 +48,22 @@ object AppUpdater {
 
     private const val AUTO_CHECK_INTERVAL_MS = 60 * 60 * 1000L // 1 hour
 
-    private const val NOTIFICATION_CHANNEL_ID = "update_download"
-    private const val NOTIFICATION_ID = 9001
-
-    private val httpClient = OkHttpClient.Builder()
+    // Short timeouts for API calls
+    private val apiClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(15, TimeUnit.SECONDS)
+        .build()
+
+    // Longer timeouts + explicit redirect following for APK download
+    private val downloadClient = OkHttpClient.Builder()
+        .connectTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(5, TimeUnit.MINUTES)
+        .followRedirects(true)
+        .followSslRedirects(true)
         .build()
 
     // ---- Public API ----
 
-    /**
-     * Check for update. Call from MainActivity.onCreate with isManual=false,
-     * or from "Check for updates" button with isManual=true.
-     */
     suspend fun checkForUpdateIfNeeded(context: Context, isManual: Boolean) {
         try {
             if (!isManual && !isAutoCheckDue(context)) {
@@ -70,7 +73,6 @@ object AppUpdater {
 
             val releaseInfo = fetchLatestReleaseInfo()
 
-            // Update cache
             val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             prefs.edit()
                 .putLong(PREF_LAST_CHECK_TIME, System.currentTimeMillis())
@@ -119,36 +121,42 @@ object AppUpdater {
             .get()
             .build()
 
-        val response = httpClient.newCall(request).execute()
-
-        if (!response.isSuccessful) {
-            throw RuntimeException("GitHub API returned ${response.code}: ${response.message}")
-        }
-
-        val body = response.body?.string()
-            ?: throw RuntimeException("Empty response body from GitHub API")
-
-        val json = JSONObject(body)
-        val tagName = json.getString("tag_name")
-        val versionName = tagName.removePrefix("v")
-
-        val assets = json.getJSONArray("assets")
-        var apkUrl: String? = null
-
-        for (i in 0 until assets.length()) {
-            val asset = assets.getJSONObject(i)
-            val name = asset.getString("name")
-            if (name.endsWith(".apk")) {
-                apkUrl = asset.getString("browser_download_url")
-                break
+        val response = apiClient.newCall(request).execute()
+        response.use { resp ->
+            if (!resp.isSuccessful) {
+                throw RuntimeException("GitHub API returned ${resp.code}: ${resp.message}")
             }
-        }
 
-        if (apkUrl == null) {
-            throw RuntimeException("No APK asset found in latest release ($tagName)")
-        }
+            val body = resp.body?.string()
+                ?: throw RuntimeException("Empty response body from GitHub API")
 
-        GithubReleaseInfo(versionName = versionName, apkUrl = apkUrl)
+            val json = JSONObject(body)
+            val tagName = json.getString("tag_name")
+            val versionName = tagName.removePrefix("v")
+            val releasePageUrl = json.getString("html_url")
+
+            val assets = json.getJSONArray("assets")
+            var apkUrl: String? = null
+
+            for (i in 0 until assets.length()) {
+                val asset = assets.getJSONObject(i)
+                val name = asset.getString("name")
+                if (name.endsWith(".apk")) {
+                    apkUrl = asset.getString("browser_download_url")
+                    break
+                }
+            }
+
+            if (apkUrl == null) {
+                throw RuntimeException("No APK asset found in latest release ($tagName)")
+            }
+
+            GithubReleaseInfo(
+                versionName = versionName,
+                apkUrl = apkUrl,
+                releasePageUrl = releasePageUrl
+            )
+        }
     }
 
     // ---- Version comparison ----
@@ -162,10 +170,6 @@ object AppUpdater {
         }
     }
 
-    /**
-     * Returns true if [remote] is strictly greater than [local].
-     * Compares major.minor.patch numerically.
-     */
     fun isVersionNewer(remote: String, local: String): Boolean {
         val remoteParts = remote.split(".").mapNotNull { it.toIntOrNull() }
         val localParts = local.split(".").mapNotNull { it.toIntOrNull() }
@@ -177,7 +181,7 @@ object AppUpdater {
             if (r > l) return true
             if (r < l) return false
         }
-        return false // equal
+        return false
     }
 
     // ---- Cache ----
@@ -191,132 +195,171 @@ object AppUpdater {
     // ---- UI ----
 
     private fun showUpdateDialog(context: Context, releaseInfo: GithubReleaseInfo) {
+        // If can't install APKs from this source — just offer to open releases page
+        val canInstall = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            context.packageManager.canRequestPackageInstalls()
+        } else {
+            true
+        }
+
         AlertDialog.Builder(context)
             .setTitle("Доступно обновление")
             .setMessage("Новая версия ${releaseInfo.versionName} доступна для загрузки. Обновить сейчас?")
             .setPositiveButton("Обновить") { _, _ ->
-                // Check if install from unknown sources is allowed (Android 8+)
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    if (!context.packageManager.canRequestPackageInstalls()) {
-                        // Redirect user to enable install from this source
-                        Toast.makeText(
-                            context,
-                            "Разрешите установку из этого источника, затем попробуйте снова",
-                            Toast.LENGTH_LONG
-                        ).show()
-                        val intent = Intent(
-                            Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
-                            android.net.Uri.parse("package:${context.packageName}")
-                        )
-                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        context.startActivity(intent)
-                        return@setPositiveButton
-                    }
-                }
-
-                // Start download in background
-                @Suppress("OPT_IN_USAGE")
-                GlobalScope.launch(Dispatchers.IO) {
-                    downloadAndInstallApk(context, releaseInfo.apkUrl)
+                if (canInstall) {
+                    startDownloadWithProgressDialog(context, releaseInfo)
+                } else {
+                    // Open releases page in browser — user can download and install manually
+                    openReleasePage(context, releaseInfo.releasePageUrl)
                 }
             }
             .setNegativeButton("Позже", null)
             .show()
     }
 
-    // ---- Download & Install ----
+    private fun openReleasePage(context: Context, url: String) {
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        context.startActivity(intent)
+    }
 
-    suspend fun downloadAndInstallApk(context: Context, apkUrl: String) {
-        try {
-            createNotificationChannel(context)
+    // ---- Download with progress dialog ----
 
-            val notificationManager =
-                context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+    private fun startDownloadWithProgressDialog(context: Context, releaseInfo: GithubReleaseInfo) {
+        // Build progress dialog layout
+        val padding = (24 * context.resources.displayMetrics.density).toInt()
+        val layout = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(padding, padding, padding, padding / 2)
+        }
 
-            val builder = NotificationCompat.Builder(context, NOTIFICATION_CHANNEL_ID)
-                .setSmallIcon(android.R.drawable.stat_sys_download)
-                .setContentTitle("Загрузка обновления")
-                .setContentText("Скачивание...")
-                .setPriority(NotificationCompat.PRIORITY_LOW)
-                .setOngoing(true)
-                .setProgress(100, 0, false)
+        val progressBar = ProgressBar(context, null, android.R.attr.progressBarStyleHorizontal).apply {
+            max = 100
+            progress = 0
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+        }
 
-            notificationManager.notify(NOTIFICATION_ID, builder.build())
+        val progressText = TextView(context).apply {
+            text = "Подготовка..."
+            gravity = Gravity.CENTER
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                topMargin = (12 * context.resources.displayMetrics.density).toInt()
+            }
+        }
 
-            withContext(Dispatchers.IO) {
-                val request = Request.Builder()
-                    .url(apkUrl)
-                    .build()
+        layout.addView(progressBar)
+        layout.addView(progressText)
 
-                val response = httpClient.newCall(request).execute()
+        val dialog = AlertDialog.Builder(context)
+            .setTitle("Загрузка обновления ${releaseInfo.versionName}")
+            .setView(layout)
+            .setCancelable(false)
+            .setNegativeButton("Отмена", null)
+            .create()
 
-                if (!response.isSuccessful) {
-                    throw RuntimeException("Download failed: ${response.code}")
-                }
+        dialog.show()
 
-                val body = response.body ?: throw RuntimeException("Empty download body")
-                val contentLength = body.contentLength()
-
-                // Save to app's external files directory (accessible via FileProvider)
-                val updatesDir = File(context.getExternalFilesDir(null), "updates")
-                if (!updatesDir.exists()) updatesDir.mkdirs()
-
-                val apkFile = File(updatesDir, "forta-chat-update.apk")
-
-                body.byteStream().use { input ->
-                    FileOutputStream(apkFile).use { output ->
-                        val buffer = ByteArray(8192)
-                        var bytesRead: Long = 0
-                        var read: Int
-
-                        while (input.read(buffer).also { read = it } != -1) {
-                            output.write(buffer, 0, read)
-                            bytesRead += read
-
-                            if (contentLength > 0) {
-                                val progress = (bytesRead * 100 / contentLength).toInt()
-                                builder.setProgress(100, progress, false)
-                                    .setContentText("Скачано $progress%")
-                                notificationManager.notify(NOTIFICATION_ID, builder.build())
-                            }
-                        }
+        @Suppress("OPT_IN_USAGE")
+        GlobalScope.launch(Dispatchers.IO) {
+            try {
+                val apkFile = downloadApk(context, releaseInfo.apkUrl) { percent ->
+                    launch(Dispatchers.Main) {
+                        progressBar.progress = percent
+                        progressText.text = "Скачано $percent%"
                     }
                 }
 
-                // Download complete — update notification
                 withContext(Dispatchers.Main) {
-                    notificationManager.cancel(NOTIFICATION_ID)
+                    dialog.dismiss()
                 }
 
-                // Verify downloaded version before installing
+                // Verify version
                 val downloadedVersion = getApkVersionName(context, apkFile)
                 val currentVersion = getCurrentVersion(context)
                 if (downloadedVersion != null && !isVersionNewer(downloadedVersion, currentVersion)) {
-                    Log.w(TAG, "Downloaded APK version ($downloadedVersion) is not newer than current ($currentVersion). Aborting install.")
+                    Log.w(TAG, "Downloaded APK ($downloadedVersion) not newer than current ($currentVersion)")
                     apkFile.delete()
-                    return@withContext
+                    return@launch
                 }
 
-                // Install the APK
                 withContext(Dispatchers.Main) {
                     installApk(context, apkFile)
                 }
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Download/install failed", e)
-            withContext(Dispatchers.Main) {
-                val notificationManager =
-                    context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-                notificationManager.cancel(NOTIFICATION_ID)
-
-                Toast.makeText(
-                    context,
-                    "Ошибка загрузки обновления: ${e.localizedMessage}",
-                    Toast.LENGTH_LONG
-                ).show()
+            } catch (e: Exception) {
+                Log.e(TAG, "Download failed", e)
+                withContext(Dispatchers.Main) {
+                    dialog.dismiss()
+                    Toast.makeText(
+                        context,
+                        "Ошибка загрузки: ${e.localizedMessage}",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
             }
         }
     }
+
+    // ---- Download ----
+
+    private fun downloadApk(
+        context: Context,
+        apkUrl: String,
+        onProgress: (Int) -> Unit
+    ): File {
+        val request = Request.Builder()
+            .url(apkUrl)
+            .build()
+
+        val response = downloadClient.newCall(request).execute()
+
+        if (!response.isSuccessful) {
+            response.close()
+            throw RuntimeException("Download failed: ${response.code}")
+        }
+
+        val body = response.body ?: run {
+            response.close()
+            throw RuntimeException("Empty download body")
+        }
+
+        val contentLength = body.contentLength()
+
+        val updatesDir = File(context.getExternalFilesDir(null), "updates")
+        if (!updatesDir.exists()) updatesDir.mkdirs()
+        val apkFile = File(updatesDir, "forta-chat-update.apk")
+
+        body.byteStream().use { input ->
+            FileOutputStream(apkFile).use { output ->
+                val buffer = ByteArray(8192)
+                var bytesRead: Long = 0
+                var lastReportedPercent = -1
+                var read: Int
+
+                while (input.read(buffer).also { read = it } != -1) {
+                    output.write(buffer, 0, read)
+                    bytesRead += read
+
+                    if (contentLength > 0) {
+                        val percent = (bytesRead * 100 / contentLength).toInt()
+                        if (percent != lastReportedPercent) {
+                            lastReportedPercent = percent
+                            onProgress(percent)
+                        }
+                    }
+                }
+            }
+        }
+
+        return apkFile
+    }
+
+    // ---- Install ----
 
     private fun installApk(context: Context, apkFile: File) {
         val uri = FileProvider.getUriForFile(
@@ -340,23 +383,6 @@ object AppUpdater {
             info?.versionName
         } catch (e: Exception) {
             null
-        }
-    }
-
-    // ---- Notifications ----
-
-    private fun createNotificationChannel(context: Context) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                NOTIFICATION_CHANNEL_ID,
-                "Обновление приложения",
-                NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                description = "Прогресс загрузки обновления"
-            }
-
-            val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            manager.createNotificationChannel(channel)
         }
     }
 }
