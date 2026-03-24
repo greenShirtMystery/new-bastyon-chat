@@ -38,6 +38,12 @@ export function useFormatPreview() {
       case MessageType.file:
         preview = `📎 ${msg.content || t("message.file")}`;
         break;
+      case MessageType.poll:
+        preview = `📊 ${msg.pollInfo?.question || t("message.poll")}`;
+        break;
+      case MessageType.transfer:
+        preview = `💸 ${msg.transferInfo ? `${msg.transferInfo.amount} PKOIN` : (msg.content || t("message.transfer"))}`;
+        break;
       case MessageType.system: {
         let sysText: string;
         if (msg.systemMeta?.template) {
@@ -52,8 +58,8 @@ export function useFormatPreview() {
         } else {
           sysText = cleanMatrixIds(msg.content);
         }
-        // Guard: never show hex/address strings in chat list preview
-        if (/[a-f0-9]{16,}/i.test(sysText)) {
+        // Guard: never show raw hex/address/Matrix-ID strings in chat list preview
+        if (/[a-f0-9]{16,}/i.test(sysText) || /![a-zA-Z0-9]+:/.test(sysText)) {
           sysText = t("system.unknownEvent");
         }
         if (msg.callInfo) {

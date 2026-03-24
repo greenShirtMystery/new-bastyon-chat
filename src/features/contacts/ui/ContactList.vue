@@ -568,6 +568,11 @@ const getRoomLongPress = (room: ChatRoom) => {
               <span v-else-if="(item as ChatRoom).membership === 'invite'" class="truncate text-sm italic text-color-bg-ac">
                 {{ t("contactList.inviteToChat") }}
               </span>
+              <!-- Shimmer skeleton while encrypted message is being decrypted (must be before type-specific checks) -->
+              <span
+                v-else-if="isEncryptedPlaceholder((item as ChatRoom).lastMessage?.content)"
+                class="inline-block h-3 w-32 animate-pulse rounded bg-neutral-grad-2"
+              />
               <span
                 v-else-if="(item as ChatRoom).lastMessage?.callInfo"
                 class="truncate text-sm"
@@ -581,11 +586,6 @@ const getRoomLongPress = (room: ChatRoom) => {
               >
                 {{ formatPreview((item as ChatRoom).lastMessage, item as ChatRoom) }}
               </span>
-              <!-- Shimmer skeleton while encrypted message is being decrypted -->
-              <span
-                v-else-if="isEncryptedPlaceholder((item as ChatRoom).lastMessage?.content)"
-                class="inline-block h-3 w-32 animate-pulse rounded bg-neutral-grad-2"
-              />
               <span v-else class="truncate text-sm text-text-on-main-bg-color">
                 <span v-if="(item as ChatRoom).lastMessageReaction" class="mr-0.5">{{ (item as ChatRoom).lastMessageReaction!.emoji }}</span>{{ formatPreview((item as ChatRoom).lastMessage, item as ChatRoom) }}
               </span>

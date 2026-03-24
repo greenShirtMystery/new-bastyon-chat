@@ -1430,20 +1430,24 @@ export function useMessages() {
 
     try {
       await matrixService.sendPollResponse(roomId, content);
-      // Optimistic: update vote locally
-      const roomMsgs = chatStore.messages[roomId];
-      const pollMsg = roomMsgs?.find(m => m.id === pollEventId);
-      if (pollMsg?.pollInfo) {
-        const authStore = useAuthStore();
-        const myAddr = authStore.address ?? "";
-        // Remove old vote
-        for (const key of Object.keys(pollMsg.pollInfo.votes)) {
-          pollMsg.pollInfo.votes[key] = pollMsg.pollInfo.votes[key].filter(v => v !== myAddr);
+      // Optimistic: persist vote to Dexie so liveQuery picks it up
+      const authStore = useAuthStore();
+      const myAddr = authStore.address ?? "";
+      try {
+        const dbKit = chatStore.getDbKit();
+        await dbKit.eventWriter.writePollVote(pollEventId, myAddr, optionId, true);
+      } catch {
+        // Dexie not ready — fall back to in-memory mutation
+        const roomMsgs = chatStore.messages[roomId];
+        const pollMsg = roomMsgs?.find(m => m.id === pollEventId);
+        if (pollMsg?.pollInfo) {
+          for (const key of Object.keys(pollMsg.pollInfo.votes)) {
+            pollMsg.pollInfo.votes[key] = pollMsg.pollInfo.votes[key].filter(v => v !== myAddr);
+          }
+          if (!pollMsg.pollInfo.votes[optionId]) pollMsg.pollInfo.votes[optionId] = [];
+          pollMsg.pollInfo.votes[optionId].push(myAddr);
+          pollMsg.pollInfo.myVote = optionId;
         }
-        // Add new vote
-        if (!pollMsg.pollInfo.votes[optionId]) pollMsg.pollInfo.votes[optionId] = [];
-        pollMsg.pollInfo.votes[optionId].push(myAddr);
-        pollMsg.pollInfo.myVote = optionId;
       }
     } catch (e) {
       console.error("Failed to vote on poll:", e);
@@ -1467,13 +1471,20 @@ export function useMessages() {
 
     try {
       await matrixService.sendPollEnd(roomId, content);
-      // Optimistic: mark as ended
-      const roomMsgs = chatStore.messages[roomId];
-      const pollMsg = roomMsgs?.find(m => m.id === pollEventId);
-      if (pollMsg?.pollInfo) {
-        const authStore = useAuthStore();
-        pollMsg.pollInfo.ended = true;
-        pollMsg.pollInfo.endedBy = authStore.address ?? "";
+      // Optimistic: persist poll end to Dexie so liveQuery picks it up
+      const authStore = useAuthStore();
+      const myAddr = authStore.address ?? "";
+      try {
+        const dbKit = chatStore.getDbKit();
+        await dbKit.eventWriter.writePollEnd(pollEventId, myAddr);
+      } catch {
+        // Dexie not ready — fall back to in-memory mutation
+        const roomMsgs = chatStore.messages[roomId];
+        const pollMsg = roomMsgs?.find(m => m.id === pollEventId);
+        if (pollMsg?.pollInfo) {
+          pollMsg.pollInfo.ended = true;
+          pollMsg.pollInfo.endedBy = myAddr;
+        }
       }
     } catch (e) {
       console.error("Failed to end poll:", e);
