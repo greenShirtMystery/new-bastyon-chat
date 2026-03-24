@@ -137,13 +137,18 @@ describe("WriteBuffer", () => {
     buf.dispose();
   });
 
-  it("dispose() stops pending timers", async () => {
+  it("dispose() flushes remaining items and stops timers", async () => {
     const buf = new WriteBuffer(onFlush, { delayMs: 200 });
 
     buf.enqueue(makeItem("!r1", "e1"));
-    buf.dispose();
+    await buf.dispose();
 
+    // Remaining item was flushed
+    expect(onFlush).toHaveBeenCalledTimes(1);
+    expect(onFlush.mock.calls[0][0]).toHaveLength(1);
+
+    // No additional flushes after dispose
     await vi.advanceTimersByTimeAsync(500);
-    expect(onFlush).not.toHaveBeenCalled();
+    expect(onFlush).toHaveBeenCalledTimes(1);
   });
 });

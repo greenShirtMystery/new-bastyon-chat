@@ -67,11 +67,13 @@ export class WriteBuffer {
     await this.flush();
   }
 
-  /** Stop all pending timers and discard queued items. */
-  dispose(): void {
+  /** Flush remaining items and stop all pending timers. */
+  async dispose(): Promise<void> {
     this.disposed = true;
     this.clearTimer();
-    this.buffer.length = 0;
+    if (this.buffer.length > 0) {
+      await this.flush();
+    }
   }
 
   // ---------------------------------------------------------------------------

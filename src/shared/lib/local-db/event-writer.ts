@@ -117,7 +117,7 @@ export class EventWriter {
    * Enable write batching. Creates an internal WriteBuffer that accumulates
    * messages and flushes them in a single Dexie transaction.
    */
-  enableBatching(myAddress: string, getActiveRoomId: () => string | null): void {
+  enableBatching(): void {
     this.disposeBuffer();
     this.writeBuffer = new WriteBuffer(
       (items) => this.flushBatch(items),
@@ -154,10 +154,10 @@ export class EventWriter {
     await this.writeBuffer?.flushNow();
   }
 
-  /** Dispose the write buffer and stop pending timers. */
-  disposeBuffer(): void {
+  /** Flush remaining items and dispose the write buffer. */
+  async disposeBuffer(): Promise<void> {
     if (this.writeBuffer) {
-      this.writeBuffer.dispose();
+      await this.writeBuffer.dispose();
       this.writeBuffer = null;
     }
   }
@@ -165,6 +165,10 @@ export class EventWriter {
   /**
    * Flush a batch of buffered writes in a single Dexie transaction.
    * Calls onChange() once per unique roomId (not per message).
+   *
+   * NOTE: Transaction scope must include all tables accessed by
+   * upsertFromServer, ensureRoomExists, and updateRoomPreview.
+   * Currently: messages + rooms.
    */
   private async flushBatch(items: BufferedWrite[]): Promise<void> {
     perfMark("flush-batch:start");

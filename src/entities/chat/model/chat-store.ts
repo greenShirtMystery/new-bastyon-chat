@@ -259,7 +259,8 @@ export const useChatStore = defineStore(NAMESPACE, () => {
   const replyingTo = ref<ReplyTo | null>(null);
   const isDetachedFromLatest = ref(false);
 
-  // Yield to main thread every 5 decryption calls to keep UI responsive
+  // Shared counter: yields to main thread every 5 decryption calls across ALL
+  // decrypt paths (edits, timeline events, etc.) to keep UI responsive.
   const maybeYieldDecrypt = yieldEveryN(5);
 
   /** True after the first refreshRoomsImmediate completes (rooms list is authoritative) */
@@ -516,8 +517,7 @@ export const useChatStore = defineStore(NAMESPACE, () => {
   const setChatDbKit = (kit: ChatDbKit) => {
     chatDbKitRef.value = kit;
     // Enable batched writes for background rooms
-    const myAddr = useAuthStore().address ?? "";
-    kit.eventWriter.enableBatching(myAddr, () => activeRoomId.value);
+    kit.eventWriter.enableBatching();
   };
 
   /** Get the Dexie kit (throws if not initialized) */
@@ -1639,7 +1639,9 @@ export const useChatStore = defineStore(NAMESPACE, () => {
 
   const setActiveRoom = (roomId: string | null) => {
     perfMark("setActiveRoom-start");
-    // Flush buffered background writes before switching rooms
+    // Flush buffered background writes before switching rooms.
+    // Fire-and-forget: setActiveRoom is synchronous, but flush is best-effort.
+    // The liveQuery will pick up any stragglers on the next Dexie notification.
     chatDbKitRef.value?.eventWriter.flushWriteBuffer();
     activeRoomId.value = roomId;
     messageWindowSize.value = 50; // Reset pagination window
