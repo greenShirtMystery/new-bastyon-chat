@@ -4,7 +4,6 @@ import android.app.AlertDialog
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import android.os.Build
 import android.util.Log
 import android.view.Gravity
 import android.widget.LinearLayout
@@ -195,23 +194,16 @@ object AppUpdater {
     // ---- UI ----
 
     private fun showUpdateDialog(context: Context, releaseInfo: GithubReleaseInfo) {
-        // If can't install APKs from this source — just offer to open releases page
-        val canInstall = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            context.packageManager.canRequestPackageInstalls()
-        } else {
-            true
-        }
-
         AlertDialog.Builder(context)
             .setTitle("Доступно обновление")
             .setMessage("Новая версия ${releaseInfo.versionName} доступна для загрузки. Обновить сейчас?")
             .setPositiveButton("Обновить") { _, _ ->
-                if (canInstall) {
-                    startDownloadWithProgressDialog(context, releaseInfo)
-                } else {
-                    // Open releases page in browser — user can download and install manually
-                    openReleasePage(context, releaseInfo.releasePageUrl)
-                }
+                // Always download and try to install — Android will prompt for
+                // "install from unknown sources" permission if needed
+                startDownloadWithProgressDialog(context, releaseInfo)
+            }
+            .setNeutralButton("Открыть в браузере") { _, _ ->
+                openReleasePage(context, releaseInfo.releasePageUrl)
             }
             .setNegativeButton("Позже", null)
             .show()
