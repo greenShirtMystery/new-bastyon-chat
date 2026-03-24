@@ -9,7 +9,7 @@ import { getCachedRooms, getCachedMessages, getCacheTimestamp } from "@/shared/l
 import { useAuthStore } from "@/entities/auth/model/stores";
 import { useUserStore } from "@/entities/user/model";
 import { defineStore } from "pinia";
-import { computed, ref, shallowRef, triggerRef } from "vue";
+import { computed, ref, shallowRef, triggerRef, watch } from "vue";
 import { perfMark, perfMeasure, perfCount } from "@/shared/lib/perf-markers";
 
 import type { ChatDbKit, ParsedMessage, LocalRoom } from "@/shared/lib/local-db";
@@ -628,25 +628,14 @@ export const useChatStore = defineStore(NAMESPACE, () => {
     return _cachedMediaMessages;
   });
 
-  // Structural sharing: skip full recompute when dexieRooms reference hasn't changed
-  let _prevDexieRef: LocalRoom[] | null = null;
-  let _prevPinnedKey: string | null = null;
-  let _prevSorted: ChatRoom[] | null = null;
-
-  const _pinnedKey = (s: ReadonlySet<string>) => [...s].sort().join(",");
-
-  const sortedRooms = computed(() => {
-    perfCount("sortedRooms:recompute");
-    // Use Dexie rooms when initialized (single source of truth), fallback to old shallowRef otherwise
+  // Pure sort logic extracted for throttled recomputation
+  const computeSortedRooms = (
+    dexie: LocalRoom[] | null,
+    fallback: ChatRoom[],
+    pinned: ReadonlySet<string>,
+  ): ChatRoom[] => {
     let source: ChatRoom[];
-    const dexie = chatDbKitRef.value ? dexieRooms.value : null;
-    const curPinnedKey = _pinnedKey(pinnedRoomIds.value);
-
     if (dexie) {
-      // Structural sharing: if dexieRooms reference AND pinnedRoomIds contents haven't changed, reuse result
-      if (dexie === _prevDexieRef && curPinnedKey === _prevPinnedKey && _prevSorted) {
-        return _prevSorted;
-      }
       source = dexie.map(lr => ({
         id: lr.id,
         name: lr.name,
@@ -673,13 +662,13 @@ export const useChatStore = defineStore(NAMESPACE, () => {
         lastMessageReaction: lr.lastMessageReaction ?? undefined,
       } as ChatRoom));
     } else {
-      source = rooms.value;
+      source = fallback;
     }
 
-    const result = [...source]
+    return [...source]
       .sort((a, b) => {
-        const aPinned = pinnedRoomIds.value.has(a.id) ? 1 : 0;
-        const bPinned = pinnedRoomIds.value.has(b.id) ? 1 : 0;
+        const aPinned = pinned.has(a.id) ? 1 : 0;
+        const bPinned = pinned.has(b.id) ? 1 : 0;
         if (aPinned !== bPinned) return bPinned - aPinned;
         // Tier 1: joined rooms ALWAYS above invites
         const aInvite = a.membership === "invite" ? 1 : 0;
@@ -690,13 +679,49 @@ export const useChatStore = defineStore(NAMESPACE, () => {
         const bTime = b.lastMessage?.timestamp ?? 0;
         return bTime - aTime;
       });
+  };
 
-    // Cache for structural sharing on next call
-    _prevDexieRef = dexie;
-    _prevPinnedKey = curPinnedKey;
-    _prevSorted = result;
-    return result;
-  });
+  // Throttled sortedRooms: dexieRooms changes are throttled (max once per 300ms),
+  // while rooms/pinnedRoomIds changes always recompute immediately.
+  const _sortedRoomsRef = shallowRef<ChatRoom[]>([]);
+  let _sortedThrottleTimer: ReturnType<typeof setTimeout> | null = null;
+  let _sortedDirty = false;
+
+  const _recomputeSorted = () => {
+    perfCount("sortedRooms:recompute");
+    _sortedDirty = false;
+    const dexie = chatDbKitRef.value ? dexieRooms.value : null;
+    _sortedRoomsRef.value = computeSortedRooms(dexie, rooms.value, pinnedRoomIds.value);
+  };
+
+  // Throttled watch for dexieRooms (high-frequency during sync)
+  watch(
+    () => dexieRooms.value,
+    () => {
+      if (!_sortedThrottleTimer) {
+        // Leading edge: fire immediately for first paint
+        _recomputeSorted();
+        _sortedThrottleTimer = setTimeout(() => {
+          _sortedThrottleTimer = null;
+          if (_sortedDirty) _recomputeSorted();
+        }, 300);
+      } else {
+        _sortedDirty = true;
+      }
+    },
+    { flush: "sync" },
+  );
+
+  // Immediate watch for rooms (fallback) and pinnedRoomIds — always recompute synchronously
+  watch(
+    [rooms, pinnedRoomIds],
+    () => {
+      _recomputeSorted();
+    },
+    { immediate: true, flush: "sync" },
+  );
+
+  const sortedRooms = computed(() => _sortedRoomsRef.value);
 
   const totalUnread = computed(() => {
     if (chatDbKitRef.value) {

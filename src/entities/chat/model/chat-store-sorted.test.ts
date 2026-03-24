@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import { setActivePinia } from "pinia";
 import { createTestingPinia } from "@pinia/testing";
 import { useChatStore } from "./chat-store";
@@ -62,5 +62,21 @@ describe("sortedRooms", () => {
     const sorted = store.sortedRooms;
     expect(sorted[0].id).toBe("!a:s");
     expect(sorted[1].id).toBe("!b:s");
+  });
+
+  it("recomputes synchronously on rooms fallback changes (no throttle)", () => {
+    // Verify that rooms (fallback path) changes are always reflected immediately
+    store.rooms = [makeRoom({ id: "!a:s", lastMessage: makeMsgField({ timestamp: 100 }) })];
+    expect(store.sortedRooms).toHaveLength(1);
+    expect(store.sortedRooms[0].id).toBe("!a:s");
+
+    // Rapid second update — should be reflected immediately (no throttle on fallback path)
+    store.rooms = [
+      makeRoom({ id: "!x:s", lastMessage: makeMsgField({ timestamp: 100 }) }),
+      makeRoom({ id: "!y:s", lastMessage: makeMsgField({ timestamp: 300 }) }),
+    ];
+    expect(store.sortedRooms).toHaveLength(2);
+    // !y:s (timestamp 300) sorts before !x:s (timestamp 100)
+    expect(store.sortedRooms.map(r => r.id)).toEqual(["!y:s", "!x:s"]);
   });
 });
