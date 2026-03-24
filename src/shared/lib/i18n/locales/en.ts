@@ -73,6 +73,8 @@ export const en = {
   "settings.torProxy": "Tor Proxy",
   "settings.torFailed": "Tor failed to start. Try toggling off and on again.",
   "settings.wallet": "PKOIN Wallet",
+  "settings.checkUpdates": "Check for updates",
+  "settings.checking": "Checking...",
   "settings.logout": "Logout",
   "settings.anonymous": "Anonymous",
   "settings.notifications": "Notifications",
