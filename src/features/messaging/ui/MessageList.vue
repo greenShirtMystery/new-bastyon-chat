@@ -1113,7 +1113,7 @@ defineExpose({ scrollToMessage, setSearchQuery });
         <div
           v-else-if="item.type === 'message' && item.message"
           v-track-read
-          v-memo="[item.id, item.message.timestamp, item.message.deleted, item.message.reactions, item.message.status, contextMenu.show && contextMenu.message?.id === item.message.id]"
+          v-memo="[item.id, item.message.timestamp, item.message.deleted, item.message.reactions, item.message.pollInfo, item.message.edited, item.message.status, contextMenu.show && contextMenu.message?.id === item.message.id]"
           :class="[getMsgEnterClass(item.message), { 'context-highlight': contextMenu.show && contextMenu.message?.id === item.message.id }]"
           :style="(item.index ?? 0) > 0 ? { paddingTop: 'var(--message-spacing)' } : {}"
           :data-message-id="item.message.id"

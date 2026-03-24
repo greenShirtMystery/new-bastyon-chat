@@ -30,6 +30,38 @@ function getRawEvent(matrixEvent: any): Record<string, unknown> | null {
   return null;
 }
 
+/** Shallow-compare reaction maps by emoji keys and counts (avoids deep equality on user arrays).
+ *  Returns true when both sides carry the same reaction set. */
+function reactionsShallowEqual(
+  a: Record<string, { count: number; users: string[]; myEventId?: string }> | undefined,
+  b: Record<string, { count: number; users: string[]; myEventId?: string }> | undefined,
+): boolean {
+  if (a === b) return true;
+  if (!a || !b) return a === b;
+  const keysA = Object.keys(a);
+  const keysB = Object.keys(b);
+  if (keysA.length !== keysB.length) return false;
+  for (const k of keysA) {
+    const ra = a[k], rb = b[k];
+    if (!rb || ra.count !== rb.count || ra.myEventId !== rb.myEventId) return false;
+  }
+  return true;
+}
+
+/** Shallow-compare poll info by vote counts and user vote. */
+function pollInfoShallowEqual(a: PollInfo | undefined, b: PollInfo | undefined): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  if (a.myVote !== b.myVote || a.ended !== b.ended) return false;
+  const aKeys = Object.keys(a.votes);
+  const bKeys = Object.keys(b.votes);
+  if (aKeys.length !== bKeys.length) return false;
+  for (const k of aKeys) {
+    if ((a.votes[k]?.length ?? 0) !== (b.votes[k]?.length ?? 0)) return false;
+  }
+  return true;
+}
+
 /** Convert a Matrix SDK room object into our ChatRoom type */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function matrixRoomToChatRoom(room: any, kit: MatrixKit, myUserId: string, nameHints?: Record<string, string>): ChatRoom {
@@ -594,8 +626,14 @@ export const useChatStore = defineStore(NAMESPACE, () => {
         const isOwnMessage = myAddr && local.senderId === myAddr;
         // Reuse if content unchanged AND status wouldn't change.
         // Own messages must be re-derived when watermark changes (read receipt arrived).
+        // Also invalidate when reactions or poll votes change — these update the LocalMessage
+        // in Dexie without changing its timestamp.
         if (prev && prev.timestamp === local.timestamp
-            && !(watermarkChanged && isOwnMessage)) {
+            && !(watermarkChanged && isOwnMessage)
+            && reactionsShallowEqual(prev.reactions, local.reactions)
+            && pollInfoShallowEqual(prev.pollInfo, local.pollInfo)
+            && prev.deleted === local.deleted
+            && prev.edited === local.edited) {
           return prev;
         }
         return localToMessages([local], watermark, myAddr)[0];
@@ -3427,45 +3465,41 @@ export const useChatStore = defineStore(NAMESPACE, () => {
     const emoji = relatesTo.key as string;
     if (!targetEventId || !emoji) return;
 
-    const roomMessages = messages.value[roomId];
-    if (!roomMessages) return;
-
-    const targetMsg = roomMessages.find(m => m.id === targetEventId);
-    if (!targetMsg) return;
-
-    if (!targetMsg.reactions) targetMsg.reactions = {};
-    if (!targetMsg.reactions[emoji]) {
-      targetMsg.reactions[emoji] = { count: 0, users: [] };
-    }
-
     const reactionSender = matrixIdToAddress(raw.sender as string);
-    const reactionData = targetMsg.reactions[emoji];
-    if (!reactionData.users.includes(reactionSender)) {
-      reactionData.users.push(reactionSender);
-      reactionData.count++;
-    }
-
-    // Update own reaction event ID — but only if the new ID is a real server ID ($...)
-    // The SDK fires timeline events with local IDs (~...) before server confirmation
     const matrixService = getMatrixClientService();
-    const incomingId = raw.event_id as string;
-    if (matrixService.isMe(raw.sender as string) && incomingId) {
-      const currentId = reactionData.myEventId;
-      // Only update if: no ID yet, current is optimistic/local, or incoming is a real server ID
-      if (!currentId || !currentId.startsWith("$") || incomingId.startsWith("$")) {
-        reactionData.myEventId = incomingId;
-      }
-    }
-    triggerRef(messages);
+    const isMine = matrixService.isMe(raw.sender as string);
 
-    // Dual-write: persist reaction to Dexie
+    // In-memory update (best-effort — messages may not be loaded in shallowRef)
+    const roomMessages = messages.value[roomId];
+    const targetMsg = roomMessages?.find(m => m.id === targetEventId);
+    if (targetMsg) {
+      if (!targetMsg.reactions) targetMsg.reactions = {};
+      if (!targetMsg.reactions[emoji]) {
+        targetMsg.reactions[emoji] = { count: 0, users: [] };
+      }
+      const reactionData = targetMsg.reactions[emoji];
+      if (!reactionData.users.includes(reactionSender)) {
+        reactionData.users.push(reactionSender);
+        reactionData.count++;
+      }
+      const incomingId = raw.event_id as string;
+      if (isMine && incomingId) {
+        const currentId = reactionData.myEventId;
+        if (!currentId || !currentId.startsWith("$") || incomingId.startsWith("$")) {
+          reactionData.myEventId = incomingId;
+        }
+      }
+      triggerRef(messages);
+    }
+
+    // Always persist to Dexie — even if message not in memory (e.g. other user's view)
     if (chatDbKitRef.value) {
       chatDbKitRef.value.eventWriter.writeReaction({
         eventId: raw.event_id as string,
         targetEventId,
         emoji,
-        senderAddress: matrixIdToAddress(raw.sender as string),
-        isMine: raw.sender === getMatrixClientService().getUserId(),
+        senderAddress: reactionSender,
+        isMine,
       }).catch((e) => {
         console.warn("[chat-store] writeReaction to Dexie failed:", e);
       });
@@ -3736,27 +3770,38 @@ export const useChatStore = defineStore(NAMESPACE, () => {
         const relatesTo = content["m.relates_to"] as Record<string, unknown> | undefined;
         const pollEventId = relatesTo?.event_id as string;
         if (!pollEventId) return;
-        const roomMsgs = messages.value[roomId];
-        const pollMsg = roomMsgs?.find(m => m.id === pollEventId);
-        if (!pollMsg?.pollInfo) return;
         const responseContent = (content["org.matrix.msc3381.poll.response"] ?? content) as Record<string, unknown>;
         const answers = (responseContent.answers as string[]) ?? [];
         const voterId = matrixIdToAddress(raw.sender as string);
-        // Remove previous vote
-        for (const optId of Object.keys(pollMsg.pollInfo.votes)) {
-          pollMsg.pollInfo.votes[optId] = pollMsg.pollInfo.votes[optId].filter(v => v !== voterId);
-        }
-        // Add new vote
-        if (answers.length > 0) {
-          const optionId = answers[0];
-          if (!pollMsg.pollInfo.votes[optionId]) pollMsg.pollInfo.votes[optionId] = [];
-          pollMsg.pollInfo.votes[optionId].push(voterId);
-        }
         const matrixService = getMatrixClientService();
-        if (matrixService.isMe(raw.sender as string) && answers.length > 0) {
-          pollMsg.pollInfo.myVote = answers[0];
+        const isMine = matrixService.isMe(raw.sender as string);
+
+        // In-memory update (best-effort — poll message may not be in shallowRef)
+        const roomMsgs = messages.value[roomId];
+        const pollMsg = roomMsgs?.find(m => m.id === pollEventId);
+        if (pollMsg?.pollInfo) {
+          for (const optId of Object.keys(pollMsg.pollInfo.votes)) {
+            pollMsg.pollInfo.votes[optId] = pollMsg.pollInfo.votes[optId].filter(v => v !== voterId);
+          }
+          if (answers.length > 0) {
+            const optionId = answers[0];
+            if (!pollMsg.pollInfo.votes[optionId]) pollMsg.pollInfo.votes[optionId] = [];
+            pollMsg.pollInfo.votes[optionId].push(voterId);
+          }
+          if (isMine && answers.length > 0) {
+            pollMsg.pollInfo.myVote = answers[0];
+          }
+          triggerRef(messages);
         }
-        triggerRef(messages);
+
+        // Always persist to Dexie — even if poll message not in memory
+        if (chatDbKitRef.value && answers.length > 0) {
+          chatDbKitRef.value.eventWriter.writePollVote(
+            pollEventId, voterId, answers[0], isMine,
+          ).catch((e) => {
+            console.warn("[chat-store] writePollVote to Dexie failed:", e);
+          });
+        }
         return;
       }
 
@@ -3766,12 +3811,23 @@ export const useChatStore = defineStore(NAMESPACE, () => {
         const relatesTo = content["m.relates_to"] as Record<string, unknown> | undefined;
         const pollEventId = relatesTo?.event_id as string;
         if (!pollEventId) return;
+        const endedBy = matrixIdToAddress(raw.sender as string);
+
+        // In-memory update (best-effort)
         const roomMsgs = messages.value[roomId];
         const pollMsg = roomMsgs?.find(m => m.id === pollEventId);
-        if (!pollMsg?.pollInfo) return;
-        pollMsg.pollInfo.ended = true;
-        pollMsg.pollInfo.endedBy = matrixIdToAddress(raw.sender as string);
-        triggerRef(messages);
+        if (pollMsg?.pollInfo) {
+          pollMsg.pollInfo.ended = true;
+          pollMsg.pollInfo.endedBy = endedBy;
+          triggerRef(messages);
+        }
+
+        // Always persist to Dexie
+        if (chatDbKitRef.value) {
+          chatDbKitRef.value.eventWriter.writePollEnd(pollEventId, endedBy).catch((e) => {
+            console.warn("[chat-store] writePollEnd to Dexie failed:", e);
+          });
+        }
         return;
       }
 
