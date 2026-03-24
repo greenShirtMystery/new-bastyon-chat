@@ -9,6 +9,8 @@ import {
   type PollInfo,
   type TransferInfo,
 } from "@/entities/chat/model/types";
+import { WriteBuffer, type BufferedWrite } from "./write-buffer";
+import { perfMark, perfMeasure } from "@/shared/lib/perf-markers";
 
 // ---------------------------------------------------------------------------
 // Types for parsed events coming from chat-store / Matrix SDK layer
@@ -103,6 +105,102 @@ export class EventWriter {
   /** Set the callback invoked after a DB write */
   setOnChange(cb: OnChangeCallback): void {
     this.onChange = cb;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Batched writes
+  // ---------------------------------------------------------------------------
+
+  private writeBuffer: WriteBuffer | null = null;
+
+  /**
+   * Enable write batching. Creates an internal WriteBuffer that accumulates
+   * messages and flushes them in a single Dexie transaction.
+   */
+  enableBatching(): void {
+    this.disposeBuffer();
+    this.writeBuffer = new WriteBuffer(
+      (items) => this.flushBatch(items),
+      { delayMs: 150, maxSize: 50 },
+    );
+  }
+
+  /**
+   * Enqueue a message for batched write. Falls back to writeMessage()
+   * if batching is not enabled.
+   */
+  async writeMessageBuffered(
+    parsed: ParsedMessage,
+    myAddress: string,
+    activeRoomId: string | null,
+  ): Promise<void> {
+    if (!this.writeBuffer) {
+      await this.writeMessage(parsed, myAddress, activeRoomId);
+      return;
+    }
+
+    const localMsg = this.toLocalMessage(parsed);
+    this.writeBuffer.enqueue({
+      roomId: parsed.roomId,
+      localMsg,
+      parsed,
+      myAddress,
+      activeRoomId,
+    });
+  }
+
+  /** Force-flush the write buffer immediately. No-op if batching not enabled. */
+  async flushWriteBuffer(): Promise<void> {
+    await this.writeBuffer?.flushNow();
+  }
+
+  /** Flush remaining items and dispose the write buffer. */
+  async disposeBuffer(): Promise<void> {
+    if (this.writeBuffer) {
+      await this.writeBuffer.dispose();
+      this.writeBuffer = null;
+    }
+  }
+
+  /**
+   * Flush a batch of buffered writes in a single Dexie transaction.
+   * Calls onChange() once per unique roomId (not per message).
+   *
+   * NOTE: Transaction scope must include all tables accessed by
+   * upsertFromServer, ensureRoomExists, and updateRoomPreview.
+   * Currently: messages + rooms.
+   */
+  private async flushBatch(items: BufferedWrite[]): Promise<void> {
+    perfMark("flush-batch:start");
+    const changedRooms = new Set<string>();
+
+    await this.db.transaction("rw", [this.db.messages, this.db.rooms], async () => {
+      for (const item of items) {
+        const result = await this.messageRepo.upsertFromServer(item.localMsg);
+
+        if (result === "inserted" || result === "updated") {
+          await this.ensureRoomExists(item.roomId);
+          await this.updateRoomPreview(item.parsed);
+        }
+
+        if (result === "inserted") {
+          // Increment unread for OTHER people's messages in NON-ACTIVE rooms
+          if (item.parsed.senderId !== item.myAddress && item.roomId !== item.activeRoomId) {
+            await this.db.rooms.where("id").equals(item.roomId)
+              .modify((room: import("./schema").LocalRoom) => { room.unreadCount++; });
+          }
+          changedRooms.add(item.roomId);
+        }
+      }
+    });
+
+    perfMark("flush-batch:end");
+    perfMeasure("flush-batch", "flush-batch:start", "flush-batch:end");
+
+    // Notify once per unique room (outside the transaction)
+    for (const roomId of changedRooms) {
+      this.onChange?.(roomId);
+    }
   }
 
   // ---------------------------------------------------------------------------

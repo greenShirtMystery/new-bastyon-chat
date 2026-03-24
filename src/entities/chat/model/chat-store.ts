@@ -9,8 +9,9 @@ import { getCachedRooms, getCachedMessages, getCacheTimestamp } from "@/shared/l
 import { useAuthStore } from "@/entities/auth/model/stores";
 import { useUserStore } from "@/entities/user/model";
 import { defineStore } from "pinia";
-import { computed, ref, shallowRef, triggerRef } from "vue";
+import { computed, ref, shallowRef, triggerRef, watch } from "vue";
 import { perfMark, perfMeasure, perfCount } from "@/shared/lib/perf-markers";
+import { yieldToMain, yieldEveryN } from "@/shared/lib/yield-to-main";
 
 import type { ChatDbKit, ParsedMessage, LocalRoom } from "@/shared/lib/local-db";
 import { useLiveQuery, localToMessages, localStatusToMessageStatus, deriveOutboundStatus } from "@/shared/lib/local-db";
@@ -257,6 +258,10 @@ export const useChatStore = defineStore(NAMESPACE, () => {
   const typing = ref<Record<string, string[]>>({});
   const replyingTo = ref<ReplyTo | null>(null);
   const isDetachedFromLatest = ref(false);
+
+  // Shared counter: yields to main thread every 5 decryption calls across ALL
+  // decrypt paths (edits, timeline events, etc.) to keep UI responsive.
+  const maybeYieldDecrypt = yieldEveryN(5);
 
   /** True after the first refreshRoomsImmediate completes (rooms list is authoritative) */
   const roomsInitialized = ref(false);
@@ -511,6 +516,8 @@ export const useChatStore = defineStore(NAMESPACE, () => {
 
   const setChatDbKit = (kit: ChatDbKit) => {
     chatDbKitRef.value = kit;
+    // Enable batched writes for background rooms
+    kit.eventWriter.enableBatching();
   };
 
   /** Get the Dexie kit (throws if not initialized) */
@@ -628,25 +635,14 @@ export const useChatStore = defineStore(NAMESPACE, () => {
     return _cachedMediaMessages;
   });
 
-  // Structural sharing: skip full recompute when dexieRooms reference hasn't changed
-  let _prevDexieRef: LocalRoom[] | null = null;
-  let _prevPinnedKey: string | null = null;
-  let _prevSorted: ChatRoom[] | null = null;
-
-  const _pinnedKey = (s: ReadonlySet<string>) => [...s].sort().join(",");
-
-  const sortedRooms = computed(() => {
-    perfCount("sortedRooms:recompute");
-    // Use Dexie rooms when initialized (single source of truth), fallback to old shallowRef otherwise
+  // Pure sort logic extracted for throttled recomputation
+  const computeSortedRooms = (
+    dexie: LocalRoom[] | null,
+    fallback: ChatRoom[],
+    pinned: ReadonlySet<string>,
+  ): ChatRoom[] => {
     let source: ChatRoom[];
-    const dexie = chatDbKitRef.value ? dexieRooms.value : null;
-    const curPinnedKey = _pinnedKey(pinnedRoomIds.value);
-
     if (dexie) {
-      // Structural sharing: if dexieRooms reference AND pinnedRoomIds contents haven't changed, reuse result
-      if (dexie === _prevDexieRef && curPinnedKey === _prevPinnedKey && _prevSorted) {
-        return _prevSorted;
-      }
       source = dexie.map(lr => ({
         id: lr.id,
         name: lr.name,
@@ -673,13 +669,13 @@ export const useChatStore = defineStore(NAMESPACE, () => {
         lastMessageReaction: lr.lastMessageReaction ?? undefined,
       } as ChatRoom));
     } else {
-      source = rooms.value;
+      source = fallback;
     }
 
-    const result = [...source]
+    return [...source]
       .sort((a, b) => {
-        const aPinned = pinnedRoomIds.value.has(a.id) ? 1 : 0;
-        const bPinned = pinnedRoomIds.value.has(b.id) ? 1 : 0;
+        const aPinned = pinned.has(a.id) ? 1 : 0;
+        const bPinned = pinned.has(b.id) ? 1 : 0;
         if (aPinned !== bPinned) return bPinned - aPinned;
         // Tier 1: joined rooms ALWAYS above invites
         const aInvite = a.membership === "invite" ? 1 : 0;
@@ -690,13 +686,49 @@ export const useChatStore = defineStore(NAMESPACE, () => {
         const bTime = b.lastMessage?.timestamp ?? 0;
         return bTime - aTime;
       });
+  };
 
-    // Cache for structural sharing on next call
-    _prevDexieRef = dexie;
-    _prevPinnedKey = curPinnedKey;
-    _prevSorted = result;
-    return result;
-  });
+  // Throttled sortedRooms: dexieRooms changes are throttled (max once per 300ms),
+  // while rooms/pinnedRoomIds changes always recompute immediately.
+  const _sortedRoomsRef = shallowRef<ChatRoom[]>([]);
+  let _sortedThrottleTimer: ReturnType<typeof setTimeout> | null = null;
+  let _sortedDirty = false;
+
+  const _recomputeSorted = () => {
+    perfCount("sortedRooms:recompute");
+    _sortedDirty = false;
+    const dexie = chatDbKitRef.value ? dexieRooms.value : null;
+    _sortedRoomsRef.value = computeSortedRooms(dexie, rooms.value, pinnedRoomIds.value);
+  };
+
+  // Throttled watch for dexieRooms (high-frequency during sync)
+  watch(
+    () => dexieRooms.value,
+    () => {
+      if (!_sortedThrottleTimer) {
+        // Leading edge: fire immediately for first paint
+        _recomputeSorted();
+        _sortedThrottleTimer = setTimeout(() => {
+          _sortedThrottleTimer = null;
+          if (_sortedDirty) _recomputeSorted();
+        }, 300);
+      } else {
+        _sortedDirty = true;
+      }
+    },
+    { flush: "sync" },
+  );
+
+  // Immediate watch for rooms (fallback) and pinnedRoomIds — always recompute synchronously
+  watch(
+    [rooms, pinnedRoomIds],
+    () => {
+      _recomputeSorted();
+    },
+    { immediate: true, flush: "sync" },
+  );
+
+  const sortedRooms = computed(() => _sortedRoomsRef.value);
 
   const totalUnread = computed(() => {
     if (chatDbKitRef.value) {
@@ -1405,48 +1437,48 @@ export const useChatStore = defineStore(NAMESPACE, () => {
     // Cap at 20 rooms per cycle to avoid blocking
     const capped = toDecrypt.slice(0, 20);
 
-    // Decrypt in small batches (5 at a time), collect results, apply once
-    const BATCH = 5;
+    // Decrypt sequentially with yield between each room to keep UI responsive.
+    // Previously used Promise.all(batch of 5) which ran 5 heavy ECDH+pbkdf2
+    // computations without yielding — causing 370ms+ long tasks.
     const decryptedResults: Array<{ roomId: string; body: string }> = [];
 
-    for (let i = 0; i < capped.length; i += BATCH) {
-      const batch = capped.slice(i, i + BATCH);
+    for (const { roomId, matrixRoom } of capped) {
+      try {
+        const roomCrypto = await ensureRoomCrypto(roomId);
+        if (!roomCrypto) continue;
 
-      await Promise.all(batch.map(async ({ roomId, matrixRoom }) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        let timelineEvents: unknown[] = [];
         try {
-          const roomCrypto = await ensureRoomCrypto(roomId);
-          if (!roomCrypto) return;
-
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          let timelineEvents: unknown[] = [];
+          const lt = (matrixRoom as any).getLiveTimeline?.();
+          if (lt) timelineEvents = lt.getEvents?.() ?? [];
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          if (!timelineEvents.length) timelineEvents = (matrixRoom as any).timeline ?? [];
+        } catch { /* ignore */ }
+
+        for (let j = timelineEvents.length - 1; j >= 0; j--) {
+          const raw = getRawEvent(timelineEvents[j]);
+          if (!raw?.content || raw.type !== "m.room.message") continue;
+          const content = raw.content as Record<string, unknown>;
+          if (content.msgtype !== "m.encrypted") continue;
+
           try {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const lt = (matrixRoom as any).getLiveTimeline?.();
-            if (lt) timelineEvents = lt.getEvents?.() ?? [];
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            if (!timelineEvents.length) timelineEvents = (matrixRoom as any).timeline ?? [];
-          } catch { /* ignore */ }
-
-          for (let j = timelineEvents.length - 1; j >= 0; j--) {
-            const raw = getRawEvent(timelineEvents[j]);
-            if (!raw?.content || raw.type !== "m.room.message") continue;
-            const content = raw.content as Record<string, unknown>;
-            if (content.msgtype !== "m.encrypted") continue;
-
-            try {
-              const decrypted = await roomCrypto.decryptEvent(raw);
-              if (decrypted.body) {
-                decryptedResults.push({ roomId, body: decrypted.body });
-              }
-            } catch {
-              decryptFailedRooms.set(roomId, { count: (decryptFailedRooms.get(roomId)?.count ?? 0) + 1, lastAttempt: Date.now() });
+            const decrypted = await roomCrypto.decryptEvent(raw);
+            if (decrypted.body) {
+              decryptedResults.push({ roomId, body: decrypted.body });
             }
-            break;
+          } catch {
+            decryptFailedRooms.set(roomId, { count: (decryptFailedRooms.get(roomId)?.count ?? 0) + 1, lastAttempt: Date.now() });
           }
-        } catch {
-          decryptFailedRooms.set(roomId, { count: (decryptFailedRooms.get(roomId)?.count ?? 0) + 1, lastAttempt: Date.now() });
+          break;
         }
-      }));
+      } catch {
+        decryptFailedRooms.set(roomId, { count: (decryptFailedRooms.get(roomId)?.count ?? 0) + 1, lastAttempt: Date.now() });
+      }
+
+      // Yield to main thread between each room decryption
+      await yieldToMain();
     }
 
     // Apply ALL decrypted results in one pass with a single triggerRef
@@ -1607,6 +1639,10 @@ export const useChatStore = defineStore(NAMESPACE, () => {
 
   const setActiveRoom = (roomId: string | null) => {
     perfMark("setActiveRoom-start");
+    // Flush buffered background writes before switching rooms.
+    // Fire-and-forget: setActiveRoom is synchronous, but flush is best-effort.
+    // The liveQuery will pick up any stragglers on the next Dexie notification.
+    chatDbKitRef.value?.eventWriter.flushWriteBuffer();
     activeRoomId.value = roomId;
     messageWindowSize.value = 50; // Reset pagination window
     if (roomId) {
@@ -3567,18 +3603,32 @@ export const useChatStore = defineStore(NAMESPACE, () => {
       encryptedRaw: isEncrypted ? raw : undefined,
     };
     const myAddr = useAuthStore().address ?? "";
-    chatDbKitRef.value.eventWriter.writeMessage(parsed, myAddr, activeRoomId.value).then(result => {
-      // Enqueue decryption retry if message couldn't be decrypted
-      if (isEncrypted && result !== "duplicate" && chatDbKitRef.value?.decryptionWorker) {
+    const isActiveRoom = roomId === activeRoomId.value;
+    if (isActiveRoom) {
+      // Active room: write immediately for instant UI feedback
+      chatDbKitRef.value.eventWriter.writeMessage(parsed, myAddr, activeRoomId.value).then(result => {
+        // Enqueue decryption retry if message couldn't be decrypted
+        if (isEncrypted && result !== "duplicate" && chatDbKitRef.value?.decryptionWorker) {
+          chatDbKitRef.value.decryptionWorker.enqueue(
+            raw.event_id as string,
+            roomId,
+            JSON.stringify(raw),
+          ).catch(() => {});
+        }
+      }).catch(e => {
+        console.warn("[chat-store] EventWriter.writeMessage failed:", e);
+      });
+    } else {
+      // Background room: batch writes to reduce liveQuery notifications
+      chatDbKitRef.value.eventWriter.writeMessageBuffered(parsed, myAddr, activeRoomId.value);
+      if (isEncrypted && chatDbKitRef.value?.decryptionWorker) {
         chatDbKitRef.value.decryptionWorker.enqueue(
           raw.event_id as string,
           roomId,
           JSON.stringify(raw),
         ).catch(() => {});
       }
-    }).catch(e => {
-      console.warn("[chat-store] EventWriter.writeMessage failed:", e);
-    });
+    }
   };
 
   /** Handle incoming timeline event from Matrix sync */
@@ -3741,6 +3791,7 @@ export const useChatStore = defineStore(NAMESPACE, () => {
           const roomCrypto = await ensureRoomCrypto(roomId);
           if (roomCrypto) {
             try {
+              await maybeYieldDecrypt();
               const decrypted = await roomCrypto.decryptEvent(raw);
               newBody = decrypted.body;
             } catch {
@@ -3853,9 +3904,15 @@ export const useChatStore = defineStore(NAMESPACE, () => {
         const roomCrypto = await ensureRoomCrypto(roomId);
         if (roomCrypto) {
           try {
+            await maybeYieldDecrypt();
+            perfMark("decrypt-event:start");
             const decrypted = await roomCrypto.decryptEvent(raw);
+            perfMark("decrypt-event:end");
+            perfMeasure("decrypt-event", "decrypt-event:start", "decrypt-event:end");
             body = decrypted.body;
           } catch (e) {
+            perfMark("decrypt-event:end");
+            perfMeasure("decrypt-event", "decrypt-event:start", "decrypt-event:end");
             console.warn("[chat-store] handleTimelineEvent decrypt failed:", e);
             body = "[encrypted]";
           }
@@ -4449,6 +4506,10 @@ export const useChatStore = defineStore(NAMESPACE, () => {
     /** Clear profile-requested flags for given rooms so loadProfilesForRoomIds retries them */
     clearProfileCache(roomIds: string[]) {
       for (const id of roomIds) profilesRequestedForRooms.delete(id);
+    },
+    /** Dispose write buffer (call on logout / cleanup) */
+    disposeWriteBuffer() {
+      chatDbKitRef.value?.eventWriter.disposeBuffer();
     },
   };
 });

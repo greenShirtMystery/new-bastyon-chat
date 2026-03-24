@@ -11,6 +11,8 @@ import pbkdf2 from "pbkdf2";
 // @ts-expect-error — no types for bn.js default export
 import BN from "bn.js";
 
+import { workerDecrypt, workerEncrypt } from "@/shared/lib/crypto-worker/bridge";
+
 import {
   sha224,
   md5,
@@ -306,19 +308,13 @@ export class Pcrypto {
     // ---- preparedUsersById — match of original lines 88-110 ----
     function preparedUsersById(ids: string[], v?: number): CryptoUserInfo[] {
       const ui: CryptoUserInfo[] = [];
-      const usersKeys = Object.keys(users);
       for (const u of Object.values(users)) {
         if (ids.indexOf(u.id) > -1) {
           const info = usersinfo[u.id];
           if (info && info.keys && info.keys.length >= m) {
             ui.push(info);
-          } else {
-            console.error("[preparedUsersById] SKIP id=" + u.id.slice(0,10) + " hasInfo=" + !!info + " keysLen=" + (info?.keys?.length ?? 0) + " needM=" + m);
           }
         }
-      }
-      if (ui.length === 0) {
-        console.error("[preparedUsersById] EMPTY result! requestedIds=" + ids.map(i => i.slice(0,10)).join(",") + " usersDict=" + usersKeys.map(k => k.slice(0,10)).join(",") + " usersinfoKeys=" + Object.keys(usersinfo).map(k => k.slice(0,10)).join(","));
       }
       if (v && v > 1) {
         // Original: _.sortBy(ui, u => u.source.id) — sort by Pocketnet numeric user ID
@@ -424,16 +420,12 @@ export class Pcrypto {
       for (const ui of _usersinfo) {
         usersinfo[ui.id] = ui;
       }
-      console.error("[getusersinfo] room=" + roomId.slice(0,15) + " requestedUsers=" + us.length + " loadedUsers=" + _usersinfo.length + " withKeys=" + _usersinfo.filter(u => u.keys?.length >= m).length + " details=" + _usersinfo.map(u => u.id.slice(0,10) + ":" + (u.keys?.length ?? 0) + "keys").join(","));
     }
 
     // ---- eaa object — EXACT match of original lines 405-527 ----
     const eaa = {
       cuhash: function (users: CryptoUserInfo[], num: number, block: number): Buffer {
         const input = users.map(function (u) { return u.keys[num]; }).join("") + (block || pcrypto.currentblock.height);
-        if (num === 0) {
-          console.error("[cuhash] num=0 input=" + input.slice(0, 40) + "..." + input.slice(-10) + " len=" + input.length + " nUsers=" + users.length);
-        }
         return pbkdf2.pbkdf2Sync(
           sha224(input).toString("hex"),
           salt,
@@ -524,9 +516,18 @@ export class Pcrypto {
         return sum;
       },
 
+      // LRU cache for derived AES keys — same (block, usersIds, v) tuple
+      // produces identical keys, so we skip the expensive ECDH + pbkdf2 work.
+      _aesKeyCache: new Map<string, Record<string, unknown>>(),
+      _AES_CACHE_MAX: 64,
+
       aeskeys: function (time: number, block: number, usersIds: string[] | null, v: number) {
+        // Build cache key from the parameters that determine the output
+        const cacheKey = `${time}|${block}|${usersIds ? usersIds.join(",") : ""}|${v}`;
+        const cached = eaa._aesKeyCache.get(cacheKey);
+        if (cached) return cached;
+
         const _users = usersIds ? preparedUsersById(usersIds, v) : preparedUsers(time, v);
-        console.error("[aeskeys] users=" + _users.length + " ids=" + _users.map(u => u.id.slice(0,10)).join(",") + " sourceIds=" + _users.map(u => (u.source as any)?.id ?? "none").join(",") + " keyCounts=" + _users.map(u => u.keys.length).join(",") + " block=" + block + " v=" + v);
 
         const us = eaa.userspublics(time, block, usersIds, v);
         const c = eaa.current(time, block, usersIds, v);
@@ -546,13 +547,32 @@ export class Pcrypto {
               32,
               "sha512"
             );
-            console.error("[aeskeys] derived key for " + id.slice(0,10) + " ecdhPoint=" + safeHex.slice(0,20) + " aesKey=" + Buffer.from(su[id]).toString("hex").slice(0,16) + " cScalar=" + c.toString("hex").slice(0,16) + " sPoint=" + s.toString("hex").slice(0,20));
           }
         }
+
+        // Evict oldest entries if cache is full
+        if (eaa._aesKeyCache.size >= eaa._AES_CACHE_MAX) {
+          const firstKey = eaa._aesKeyCache.keys().next().value;
+          if (firstKey !== undefined) eaa._aesKeyCache.delete(firstKey);
+        }
+        eaa._aesKeyCache.set(cacheKey, su);
 
         return su;
       },
     };
+
+    /** Prepare users data for Worker serialization (fast — no crypto, just filtering). */
+    function prepareWorkerUsers(usersIds: string[] | null, v: number): Array<{ id: string; keys: string[] }> {
+      const _users = usersIds ? preparedUsersById(usersIds, v) : preparedUsers(0, v);
+      return _users.map(u => ({ id: u.id, keys: [...u.keys] }));
+    }
+
+    /** Get current user's private keys as hex strings for Worker. */
+    function getPrivateKeysHex(): string[] {
+      return pcrypto.user!.private!.map(k =>
+        Buffer.isBuffer(k.private) ? k.private.toString("hex") : String(k.private),
+      );
+    }
 
     // ---- usershash — match of original lines 824-839 ----
     function usershash(): string {
@@ -755,7 +775,6 @@ export class Pcrypto {
         const bodyUserIds = Object.keys(body);
         const usersList = [...new Set([...bodyUserIds, sender])];
 
-        console.error("[decryptEvent] sender=" + sender.slice(0,10) + " me=" + me.slice(0,10) + " keyindex=" + (keyindex?.slice(0,10) ?? "?") + " bodyindex=" + (bodyindex?.slice(0,10) ?? "?") + " block=" + block + " version=" + eventVersion + " bodyKeys=" + bodyUserIds.map(k => k.slice(0,10)).join(",") + " usersList=" + usersList.map(u => u.slice(0,10)).join(","));
 
         // Try legacy approach first (null usersIds → preparedUsers), matching encrypt path.
         // If that fails, fall back to explicit usersList (preparedUsersById) for cases
@@ -808,7 +827,6 @@ export class Pcrypto {
         if (!commonKeyEvt) {
           throw new Error("No common key event found for hash=" + hash);
         }
-        console.error("[decryptEventGroup] sender=" + sender.slice(0,10) + " hash=" + hash.slice(0,10) + " commonKeyEvt.type=" + ((commonKeyEvt as any).type ?? "?") + " commonKeyEvt.sender=" + ((commonKeyEvt as any).sender ?? "?").slice(0,20));
         // Decrypt the common key (AES-SIV per-user encrypted key)
         let commonKey: string;
         commonKey = await room.decryptKey(commonKeyEvt);
@@ -898,8 +916,8 @@ export class Pcrypto {
         };
       },
 
-      // Internal decrypt — EXACT match of original self.decrypt (lines 529-556)
-      // Original: aeskeysls normalizes time/block, then tries once and throws on failure
+      // Internal decrypt — offloaded to Web Worker for zero main-thread blocking.
+      // All heavy crypto (ECDH, pbkdf2, AES-SIV) runs in a separate thread.
       async _decrypt(
         userid: string,
         encData: { encrypted: string; nonce: string },
@@ -908,7 +926,7 @@ export class Pcrypto {
         usersIds: string[] | null,
         v: number | undefined
       ): Promise<string> {
-        // aeskeysls normalization (original lines 352-362)
+        // aeskeysls normalization (original lines 352-362) — fast, stays on main thread
         let _time = time;
         let _block = block;
         if (!_time) _time = 0;
@@ -917,18 +935,24 @@ export class Pcrypto {
           _block = tetatet ? pcrypto.currentblock.height : 10;
         }
 
-        const keys = eaa.aeskeys(_time, _block, usersIds, v || version);
+        // Prepare serializable data for Worker (fast — no crypto, just array ops)
+        const workerUsers = prepareWorkerUsers(usersIds, v || version);
+        const myId = pcrypto.user!.userinfo!.id;
+        const privateKeys = getPrivateKeysHex();
 
-        console.error("[_decrypt] userid=" + userid.slice(0,10) + " rawBlock=" + block + " block=" + _block + " time=" + _time + " v=" + (v || version) + " hasKey=" + !!keys[userid] + " keyIds=" + Object.keys(keys).map(k => k.slice(0,10)).join(",") + " encLen=" + ((encData as any)?.encrypted?.length ?? 0));
-
-        if (keys[userid]) {
-          return await decrypt(keys[userid], encData);
-        }
-
-        throw new Error("emptykey");
+        // All heavy crypto (ECDH + pbkdf2 + AES-SIV) runs in Worker thread
+        return workerDecrypt({
+          users: workerUsers,
+          myId,
+          privateKeys,
+          targetUserId: userid,
+          encData,
+          time: _time,
+          block: _block,
+        });
       },
 
-      // Internal encrypt — match original self.encrypt (lines 558-572)
+      // Internal encrypt — offloaded to Web Worker.
       async _encrypt(
         userid: string,
         text: string,
@@ -943,13 +967,19 @@ export class Pcrypto {
           _block = pcrypto.currentblock.height;
         }
 
-        const keys = eaa.aeskeys(_time, _block, null, v || version);
+        const workerUsers = prepareWorkerUsers(null, v || version);
+        const myId = pcrypto.user!.userinfo!.id;
+        const privateKeys = getPrivateKeysHex();
 
-        if (keys[userid]) {
-          return await encrypt(text, keys[userid]);
-        }
-
-        throw new Error("emptykey");
+        return workerEncrypt({
+          users: workerUsers,
+          myId,
+          privateKeys,
+          targetUserId: userid,
+          text,
+          time: _time,
+          block: _block,
+        });
       },
 
       async encryptFile(file: Blob): Promise<{ file: File; secrets: Record<string, unknown> }> {
@@ -1062,8 +1092,6 @@ export class Pcrypto {
         if (!bodyindex || !body[bodyindex]) {
           throw new Error("emptyforme");
         }
-
-        console.error("[decryptKey] sender=" + sender.slice(0,10) + " me=" + me.slice(0,10) + " keyindex=" + (keyindex?.slice(0,10) ?? "?") + " bodyindex=" + (bodyindex?.slice(0,10) ?? "?") + " block=" + block + " v=" + v + " usersList=" + usersList.map(u => u.slice(0,10)).join(",") + " bodyUsers=" + bodyUsers.map(u => u.slice(0,10)).join(","));
 
         // Try legacy approach first (null usersIds), fall back to explicit usersList
         try {

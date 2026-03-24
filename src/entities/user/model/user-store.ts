@@ -55,13 +55,26 @@ export const useUserStore = defineStore(NAMESPACE, () => {
   const cached = readCachedUsers();
   const users = shallowRef<Record<string, User>>(cached);
 
+  // Coalesce rapid triggerRef calls into a single reactive notification.
+  // During first load, loadUsersBatch fires 10-13 times in quick succession —
+  // each triggerRef causes a full Vue re-render cascade (~370ms long task).
+  // This debounce collapses them into 1 trigger, eliminating the 2-minute freeze.
+  let _triggerTimer: ReturnType<typeof setTimeout> | null = null;
+  function debouncedTrigger(): void {
+    if (_triggerTimer) return; // already scheduled
+    _triggerTimer = setTimeout(() => {
+      _triggerTimer = null;
+      triggerRef(users);
+    }, 100);
+  }
+
   const getUser = (address: string): User | undefined => {
     return users.value[address];
   };
 
   const setUser = (address: string, user: User) => {
     users.value[address] = user;
-    triggerRef(users);
+    triggerRef(users); // immediate — single user updates are rare and should be instant
     debouncedCacheUsers(users.value);
   };
 
@@ -69,7 +82,7 @@ export const useUserStore = defineStore(NAMESPACE, () => {
     for (const user of userList) {
       users.value[user.address] = user;
     }
-    triggerRef(users);
+    debouncedTrigger();
     debouncedCacheUsers(users.value);
   };
 
@@ -94,7 +107,7 @@ export const useUserStore = defineStore(NAMESPACE, () => {
             language: userData.language ?? "",
             cachedAt: Date.now(),
           };
-          triggerRef(users);
+          debouncedTrigger();
           debouncedCacheUsers(users.value);
         }
       } catch {
@@ -132,7 +145,7 @@ export const useUserStore = defineStore(NAMESPACE, () => {
           }
         }
         if (updated) {
-          triggerRef(users);
+          debouncedTrigger();
           debouncedCacheUsers(users.value);
         }
       } catch {
@@ -181,7 +194,7 @@ export const useUserStore = defineStore(NAMESPACE, () => {
           }
         }
         if (updated) {
-          triggerRef(users);
+          debouncedTrigger();
           debouncedCacheUsers(users.value);
         }
       } catch {

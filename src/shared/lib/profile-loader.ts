@@ -16,10 +16,19 @@
  */
 
 /** How many addresses to send in one API batch */
-const BATCH_SIZE = 30;
+const BATCH_SIZE = 10;
 
 /** Pause between batches to yield to the event loop (ms) */
-const YIELD_MS = 16; // ~1 frame
+const YIELD_MS = 150;
+
+/** Schedule callback during idle time, falling back to setTimeout */
+function scheduleIdle(cb: () => void): void {
+  if (typeof requestIdleCallback === "function") {
+    requestIdleCallback(() => cb(), { timeout: 2000 });
+  } else {
+    setTimeout(cb, 50);
+  }
+}
 
 export class ProfileLoader {
   private pending = new Set<string>();
@@ -39,8 +48,8 @@ export class ProfileLoader {
     }
     if (!this.scheduled && this.pending.size > 0) {
       this.scheduled = true;
-      // Schedule flush on next microtick — collects all same-frame requests
-      queueMicrotask(() => this.flush());
+      // Schedule flush during idle time — doesn't compete with UI interactions
+      scheduleIdle(() => this.flush());
     }
   }
 
@@ -51,7 +60,7 @@ export class ProfileLoader {
     const all = [...this.pending];
     this.pending.clear();
 
-    // Process in batches with yielding
+    // Process in small batches with generous yielding between them
     for (let i = 0; i < all.length; i += BATCH_SIZE) {
       const batch = all.slice(i, i + BATCH_SIZE);
       try {
@@ -59,16 +68,16 @@ export class ProfileLoader {
       } catch {
         // Caller handles errors via store reactivity
       }
-      // Yield to event loop between batches so UI can repaint
+      // Yield generously between batches so UI stays responsive
       if (i + BATCH_SIZE < all.length) {
         await new Promise(r => setTimeout(r, YIELD_MS));
       }
     }
 
-    // If more requests accumulated during loading, flush again
+    // If more requests accumulated during loading, flush again via idle
     if (this.pending.size > 0) {
       this.scheduled = true;
-      queueMicrotask(() => this.flush());
+      scheduleIdle(() => this.flush());
     }
   }
 }
