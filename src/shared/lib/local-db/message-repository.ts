@@ -320,6 +320,17 @@ export class MessageRepository {
       .modify({ reactions });
   }
 
+  /** Update poll info on a message */
+  async updatePollInfo(
+    eventId: string,
+    pollInfo: LocalMessage["pollInfo"],
+  ): Promise<void> {
+    await this.db.messages
+      .where("eventId")
+      .equals(eventId)
+      .modify({ pollInfo });
+  }
+
   /** Update message status */
   async updateStatus(
     identifier: { eventId?: string; clientId?: string },

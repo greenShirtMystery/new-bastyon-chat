@@ -170,6 +170,8 @@ export const en = {
   "message.voiceMessage": "Voice message",
   "message.videoMessage": "Video message",
   "message.file": "File",
+  "message.poll": "Poll",
+  "message.transfer": "Transfer",
   "message.deleted": "This message was deleted",
   "message.retry": "Retry",
 

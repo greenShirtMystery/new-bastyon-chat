@@ -172,6 +172,8 @@ export const ru: Record<TranslationKey, string> = {
   "message.voiceMessage": "Голосовое сообщение",
   "message.videoMessage": "Видеосообщение",
   "message.file": "Файл",
+  "message.poll": "Опрос",
+  "message.transfer": "Перевод",
   "message.deleted": "Сообщение удалено",
   "message.retry": "Повторить",
 

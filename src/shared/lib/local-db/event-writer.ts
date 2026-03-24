@@ -336,6 +336,49 @@ export class EventWriter {
   }
 
   // ---------------------------------------------------------------------------
+  // Poll votes
+  // ---------------------------------------------------------------------------
+
+  /** Persist a poll vote to the local DB */
+  async writePollVote(
+    pollEventId: string,
+    voterAddress: string,
+    optionId: string,
+    isMine: boolean,
+  ): Promise<void> {
+    const msg = await this.messageRepo.getByEventId(pollEventId);
+    if (!msg?.pollInfo) return;
+
+    const pollInfo = { ...msg.pollInfo, votes: { ...msg.pollInfo.votes } };
+
+    // Remove previous vote by this voter
+    for (const key of Object.keys(pollInfo.votes)) {
+      pollInfo.votes[key] = pollInfo.votes[key].filter(v => v !== voterAddress);
+    }
+
+    // Add new vote
+    if (!pollInfo.votes[optionId]) pollInfo.votes[optionId] = [];
+    pollInfo.votes[optionId] = [...pollInfo.votes[optionId], voterAddress];
+
+    if (isMine) {
+      pollInfo.myVote = optionId;
+    }
+
+    await this.messageRepo.updatePollInfo(pollEventId, pollInfo);
+    this.onChange?.(msg.roomId);
+  }
+
+  /** Persist poll end to the local DB */
+  async writePollEnd(pollEventId: string, endedByAddress: string): Promise<void> {
+    const msg = await this.messageRepo.getByEventId(pollEventId);
+    if (!msg?.pollInfo) return;
+
+    const pollInfo = { ...msg.pollInfo, ended: true, endedBy: endedByAddress };
+    await this.messageRepo.updatePollInfo(pollEventId, pollInfo);
+    this.onChange?.(msg.roomId);
+  }
+
+  // ---------------------------------------------------------------------------
   // Edits
   // ---------------------------------------------------------------------------
 
