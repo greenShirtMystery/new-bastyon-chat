@@ -32,6 +32,8 @@ export type {
   ParsedRedaction,
   ParsedReceipt,
 } from "./event-writer";
+export { WriteBuffer } from "./write-buffer";
+export type { BufferedWrite, WriteBufferOptions } from "./write-buffer";
 
 // ---------------------------------------------------------------------------
 // Singleton management — one ChatDatabase instance per logged-in user
