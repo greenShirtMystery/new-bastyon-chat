@@ -13,6 +13,7 @@ import { hexDecode, hexEncode } from "@/shared/lib/matrix/functions";
 import { cleanMatrixIds, resolveSystemText, isUnresolvedName } from "@/entities/chat/lib/chat-helpers";
 import { useFormatPreview } from "@/shared/lib/utils/format-preview";
 import { isEncryptedPlaceholder } from "@/shared/lib/utils/is-encrypted-placeholder";
+import { getRoomTitleForUI, getMessagePreviewForUI, type DisplayResult } from "@/entities/chat/lib/display-result";
 import { useLongPress } from "@/shared/lib/gestures";
 import { ContextMenu } from "@/shared/ui/context-menu";
 import type { ContextMenuItem } from "@/shared/ui/context-menu";
@@ -152,6 +153,24 @@ function _resolveRoomName(room: ChatRoom, allUsers: Record<string, any>, myHexId
 const resolveRoomName = (room: ChatRoom): string => {
   return roomNameMap.value[room.id] ?? cleanMatrixIds(room.name);
 };
+
+/** Unified display state for room title: resolving → skeleton, failed → fallback, ready → text */
+function getRoomTitle(room: ChatRoom): DisplayResult {
+  return getRoomTitleForUI(
+    resolveRoomName(room),
+    { gaveUp: gaveUpRooms.value.has(room.id), roomId: room.id },
+  );
+}
+
+/** Unified display state for message preview: resolving → skeleton, failed → fallback, ready → text */
+function getPreview(room: ChatRoom): DisplayResult {
+  if (!room.lastMessage) return { state: "ready", text: t("contactList.noMessages") };
+  return getMessagePreviewForUI(
+    room.lastMessage.content,
+    room.lastMessage.decryptionStatus,
+    t("message.notDecrypted"),
+  );
+}
 
 // --- Retry unresolved room names (up to 5 attempts with exponential backoff) ---
 let nameRetryCount = 0;
@@ -491,9 +510,9 @@ const getRoomLongPress = (room: ChatRoom) => {
         >
           <!-- Avatar -->
           <div class="relative shrink-0">
-            <!-- Skeleton circle while name is unresolved -->
+            <!-- Skeleton circle while name is resolving -->
             <div
-              v-if="isRoomNameUnresolved(item as ChatRoom)"
+              v-if="getRoomTitle(item as ChatRoom).state === 'resolving'"
               class="h-10 w-10 animate-pulse rounded-full bg-neutral-grad-2"
             />
             <UserAvatar
@@ -525,9 +544,9 @@ const getRoomLongPress = (room: ChatRoom) => {
           <div class="min-w-0 flex-1">
             <!-- Name row: name + timestamp + pin/mute icons -->
             <div class="flex items-center justify-between gap-2">
-              <span v-if="isRoomNameUnresolved(item as ChatRoom)" class="inline-block h-3.5 w-24 animate-pulse rounded bg-neutral-grad-2" />
+              <span v-if="getRoomTitle(item as ChatRoom).state === 'resolving'" class="inline-block h-3.5 w-24 animate-pulse rounded bg-neutral-grad-2" />
               <span v-else class="flex items-center gap-1 truncate text-[15px] font-medium text-text-color">
-                {{ resolveRoomName(item as ChatRoom) }}
+                {{ getRoomTitle(item as ChatRoom).text }}
                 <svg v-if="chatStore.pinnedRoomIds.has((item as ChatRoom).id)" width="12" height="12" viewBox="0 0 24 24" fill="currentColor" class="shrink-0 text-text-on-main-bg-color">
                   <path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z" />
                 </svg>
@@ -568,11 +587,18 @@ const getRoomLongPress = (room: ChatRoom) => {
               <span v-else-if="(item as ChatRoom).membership === 'invite'" class="truncate text-sm italic text-color-bg-ac">
                 {{ t("contactList.inviteToChat") }}
               </span>
-              <!-- Shimmer skeleton while encrypted message is being decrypted (must be before type-specific checks) -->
+              <!-- Skeleton while encrypted message is being decrypted -->
               <span
-                v-else-if="isEncryptedPlaceholder((item as ChatRoom).lastMessage?.content)"
+                v-else-if="getPreview(item as ChatRoom).state === 'resolving'"
                 class="inline-block h-3 w-32 animate-pulse rounded bg-neutral-grad-2"
               />
+              <!-- Decryption permanently failed — show human-readable fallback -->
+              <span
+                v-else-if="getPreview(item as ChatRoom).state === 'failed'"
+                class="truncate text-sm italic text-text-on-main-bg-color"
+              >
+                {{ getPreview(item as ChatRoom).text }}
+              </span>
               <span
                 v-else-if="(item as ChatRoom).lastMessage?.callInfo"
                 class="truncate text-sm"
