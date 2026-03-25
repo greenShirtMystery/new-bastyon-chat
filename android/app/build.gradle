@@ -65,6 +65,9 @@ dependencies {
     // Native WebRTC — hardware-accelerated video/audio for calls
     implementation 'io.github.webrtc-sdk:android:144.7559.01'
 
+    // Firebase Cloud Messaging — for native push handling when app is killed
+    implementation 'com.google.firebase:firebase-messaging:25.0.1'
+
     testImplementation "junit:junit:$junitVersion"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"

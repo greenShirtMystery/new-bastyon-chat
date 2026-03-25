@@ -10,6 +10,7 @@ import com.forta.chat.plugins.calls.CallPlugin
 import com.forta.chat.plugins.filetransfer.TorFilePlugin
 import com.forta.chat.plugins.webrtc.WebRTCPlugin
 import com.forta.chat.plugins.updater.UpdaterPlugin
+import com.forta.chat.plugins.push.PushDataPlugin
 import com.forta.chat.updater.AppUpdater
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -26,6 +27,7 @@ class MainActivity : BridgeActivity() {
         registerPlugin(TorFilePlugin::class.java)
         registerPlugin(WebRTCPlugin::class.java)
         registerPlugin(UpdaterPlugin::class.java)
+        registerPlugin(PushDataPlugin::class.java)
         super.onCreate(savedInstanceState)
 
         // Auto-check for updates (respects 1-hour cache)

@@ -1,22 +1,28 @@
 {
   "project_info": {
-    "project_number": "REPLACE_ME",
-    "project_id": "bastyon-chat",
-    "storage_bucket": "bastyon-chat.appspot.com"
+    "project_number": "606208981751",
+    "project_id": "forta-chat",
+    "storage_bucket": "forta-chat.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:000000000000:android:0000000000000000",
+        "mobilesdk_app_id": "1:606208981751:android:62e63afa91258fca22f1f2",
         "android_client_info": {
           "package_name": "com.forta.chat"
         }
       },
+      "oauth_client": [],
       "api_key": [
         {
-          "current_key": "REPLACE_WITH_REAL_API_KEY"
+          "current_key": "AIzaSyAP4sPk-He6rTlBc5yXGtzQr21thf5nqFg"
         }
-      ]
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
     }
   ],
   "configuration_version": "1"

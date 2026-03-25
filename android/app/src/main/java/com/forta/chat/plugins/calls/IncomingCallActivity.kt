@@ -1,29 +1,70 @@
 package com.forta.chat.plugins.calls
 
+import android.animation.AnimatorSet
+import android.animation.ObjectAnimator
 import android.app.Activity
 import android.app.KeyguardManager
 import android.content.Context
+import android.content.Intent
 import android.media.AudioAttributes
-import android.media.AudioManager
 import android.media.RingtoneManager
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
-import android.view.Gravity
+import android.view.View
 import android.view.WindowManager
-import android.widget.Button
-import android.widget.LinearLayout
+import android.view.animation.AccelerateDecelerateInterpolator
+import android.util.Log
+import android.widget.ImageButton
 import android.widget.TextView
+import com.forta.chat.MainActivity
+import com.forta.chat.R
 
 class IncomingCallActivity : Activity() {
 
+    companion object {
+        private const val TAG = "IncomingCallActivity"
+        private const val AUTO_REJECT_TIMEOUT_MS = 30_000L
+
+        /** Static reference so FCM service can dismiss on call cancel/hangup */
+        var currentInstance: IncomingCallActivity? = null
+
+        fun dismissIfShowing() {
+            currentInstance?.let {
+                Log.d(TAG, "Dismissing incoming call screen (remote hangup)")
+                it.handler.post { it.dismissByRemote() }
+            }
+        }
+    }
+
     private var ringtone: android.media.Ringtone? = null
     private var vibrator: Vibrator? = null
+    private var pulseAnimator: AnimatorSet? = null
+
+    private val handler = Handler(Looper.getMainLooper())
+    private var countdownSeconds = 30
+
+    private val countdownRunnable = object : Runnable {
+        override fun run() {
+            countdownSeconds--
+            findViewById<TextView>(R.id.countdown_text)?.text = "${countdownSeconds}s"
+            if (countdownSeconds > 0) {
+                handler.postDelayed(this, 1000)
+            }
+        }
+    }
+
+    private val autoRejectRunnable = Runnable {
+        decline()
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        currentInstance = this
 
         // Show on lock screen
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
@@ -39,98 +80,108 @@ class IncomingCallActivity : Activity() {
                 WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD
             )
         }
-
-        // Keep screen on during incoming call
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
+        setContentView(R.layout.activity_incoming_call)
+
         val callerName = intent.getStringExtra("callerName") ?: "Unknown"
-        val callId = intent.getStringExtra("callId") ?: ""
         val hasVideo = intent.getBooleanExtra("hasVideo", false)
 
-        // Start ringtone
+        // Bind views
+        findViewById<TextView>(R.id.caller_name).text = callerName
+        findViewById<TextView>(R.id.call_type).text =
+            if (hasVideo) "Входящий видеозвонок" else "Входящий аудиозвонок"
+        findViewById<TextView>(R.id.countdown_text).text = "${countdownSeconds}s"
+
+        // Avatar initials
+        val initials = callerName.take(2).uppercase()
+        findViewById<TextView>(R.id.avatar_text).text = initials
+
+        // Buttons
+        findViewById<ImageButton>(R.id.btn_accept).setOnClickListener { accept() }
+        findViewById<ImageButton>(R.id.btn_decline).setOnClickListener { decline() }
+
+        // Start ringtone + vibration
         startRingtone()
-        // Start vibration
         startVibration()
 
-        // Build UI
-        val layout = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
-            setPadding(64, 200, 64, 200)
-            setBackgroundColor(0xFF1a1a2e.toInt())
-        }
+        // Start pulse animation
+        startPulseAnimation()
 
-        val callTypeText = TextView(this).apply {
-            text = if (hasVideo) "Video Call" else "Voice Call"
-            textSize = 16f
-            gravity = Gravity.CENTER
-            setTextColor(0xFFaaaaaa.toInt())
-        }
+        // Start 30s auto-reject timer
+        handler.postDelayed(autoRejectRunnable, AUTO_REJECT_TIMEOUT_MS)
+        handler.postDelayed(countdownRunnable, 1000)
+    }
 
-        val nameText = TextView(this).apply {
-            text = callerName
-            textSize = 32f
-            gravity = Gravity.CENTER
-            setTextColor(0xFFffffff.toInt())
-        }
+    private fun accept() {
+        Log.d(TAG, "Accept pressed")
+        cleanup()
 
-        val statusText = TextView(this).apply {
-            text = "Incoming call..."
-            textSize = 18f
-            gravity = Gravity.CENTER
-            setTextColor(0xFFcccccc.toInt())
-        }
+        // Try ConnectionService first
+        CallConnectionService.currentConnection?.onAnswer()
 
-        val spacer = TextView(this).apply {
-            text = ""
-            textSize = 48f
+        // Open app — JS handles the actual WebRTC answer via Matrix SDK
+        val mainIntent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra("push_call_accept", true)
+            putExtra("callId", intent.getStringExtra("callId"))
+            putExtra("roomId", intent.getStringExtra("roomId"))
         }
+        startActivity(mainIntent)
+        CallConnectionService.dismissIncomingCallNotification(this)
+        finish()
+    }
 
-        val declineBtn = Button(this).apply {
-            text = "Decline"
-            textSize = 18f
-            setBackgroundColor(0xFFe74c3c.toInt())
-            setTextColor(0xFFffffff.toInt())
-            setPadding(48, 24, 48, 24)
-            setOnClickListener {
-                stopRingtone()
-                stopVibration()
-                CallConnectionService.currentConnection?.onReject()
-                finish()
-            }
+    private fun decline() {
+        Log.d(TAG, "Decline pressed")
+        cleanup()
+
+        // Try ConnectionService if available
+        CallConnectionService.currentConnection?.onReject()
+
+        // Just close — caller will see "no answer" / timeout
+        CallConnectionService.dismissIncomingCallNotification(this)
+        finish()
+    }
+
+    /** Called when remote party cancels/hangs up */
+    private fun dismissByRemote() {
+        Log.d(TAG, "Remote hangup — dismissing")
+        cleanup()
+        CallConnectionService.dismissIncomingCallNotification(this)
+        finish()
+    }
+
+    private fun cleanup() {
+        stopRingtone()
+        stopVibration()
+        handler.removeCallbacks(autoRejectRunnable)
+        handler.removeCallbacks(countdownRunnable)
+    }
+
+    private fun startPulseAnimation() {
+        val outerRing = findViewById<View>(R.id.pulse_ring_outer) ?: return
+        val innerRing = findViewById<View>(R.id.pulse_ring_inner) ?: return
+
+        val outerScaleX = ObjectAnimator.ofFloat(outerRing, "scaleX", 1f, 1.3f, 1f)
+        val outerScaleY = ObjectAnimator.ofFloat(outerRing, "scaleY", 1f, 1.3f, 1f)
+        val outerAlpha = ObjectAnimator.ofFloat(outerRing, "alpha", 0.15f, 0.0f, 0.15f)
+
+        val innerScaleX = ObjectAnimator.ofFloat(innerRing, "scaleX", 1f, 1.15f, 1f)
+        val innerScaleY = ObjectAnimator.ofFloat(innerRing, "scaleY", 1f, 1.15f, 1f)
+        val innerAlpha = ObjectAnimator.ofFloat(innerRing, "alpha", 0.25f, 0.1f, 0.25f)
+
+        pulseAnimator = AnimatorSet().apply {
+            playTogether(outerScaleX, outerScaleY, outerAlpha, innerScaleX, innerScaleY, innerAlpha)
+            duration = 2000
+            interpolator = AccelerateDecelerateInterpolator()
+            addListener(object : android.animation.AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: android.animation.Animator) {
+                    if (!isFinishing) animation.start()
+                }
+            })
+            start()
         }
-
-        val acceptBtn = Button(this).apply {
-            text = "Accept"
-            textSize = 18f
-            setBackgroundColor(0xFF2ecc71.toInt())
-            setTextColor(0xFFffffff.toInt())
-            setPadding(48, 24, 48, 24)
-            setOnClickListener {
-                stopRingtone()
-                stopVibration()
-                CallConnectionService.currentConnection?.onAnswer()
-                finish()
-            }
-        }
-
-        val buttonRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER
-            val params = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
-                marginStart = 16
-                marginEnd = 16
-            }
-            addView(declineBtn, params)
-            addView(acceptBtn, params)
-        }
-
-        layout.addView(callTypeText)
-        layout.addView(nameText)
-        layout.addView(statusText)
-        layout.addView(spacer)
-        layout.addView(buttonRow)
-        setContentView(layout)
     }
 
     private fun startRingtone() {
@@ -143,9 +194,7 @@ class IncomingCallActivity : Activity() {
                 .build()
             ringtone?.isLooping = true
             ringtone?.play()
-        } catch (e: Exception) {
-            // Ignore ringtone errors
-        }
+        } catch (e: Exception) { /* ignore */ }
     }
 
     private fun startVibration() {
@@ -157,11 +206,9 @@ class IncomingCallActivity : Activity() {
                 @Suppress("DEPRECATION")
                 getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
             }
-            val pattern = longArrayOf(0, 1000, 1000) // vibrate 1s, pause 1s
+            val pattern = longArrayOf(0, 1000, 1000)
             vibrator?.vibrate(VibrationEffect.createWaveform(pattern, 0))
-        } catch (e: Exception) {
-            // Ignore vibration errors
-        }
+        } catch (e: Exception) { /* ignore */ }
     }
 
     private fun stopRingtone() {
@@ -175,8 +222,9 @@ class IncomingCallActivity : Activity() {
     }
 
     override fun onDestroy() {
-        stopRingtone()
-        stopVibration()
+        cleanup()
+        pulseAnimator?.cancel()
+        currentInstance = null
         super.onDestroy()
     }
 }
