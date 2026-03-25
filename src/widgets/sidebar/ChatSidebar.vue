@@ -62,17 +62,15 @@ const cancelLoading = () => {
 stopWatch = watch(
   [() => chatStore.sortedRooms.length, () => chatStore.namesReady],
   ([len, names]) => {
-    // Show list as soon as rooms are available — inline skeletons handle unresolved names
-    if (len > 0) cancelLoading();
-    // Also cancel when names are ready (even if list was already shown)
+    // Wait for rooms AND names before showing list — prevents blank screen flash
     if (len > 0 && names) cancelLoading();
   },
   { immediate: true },
 );
-// Fallback: if rooms loaded but namesReady never fires (API fail) — show after 15s
+// Fallback: if namesReady never fires but rooms are available — show after 5s
 setTimeout(() => {
   if (chatStore.sortedRooms.length > 0) cancelLoading();
-}, 15000);
+}, 5000);
 // Absolute fallback: 60s (user truly has no chats, or everything failed)
 setTimeout(cancelLoading, 60000);
 
