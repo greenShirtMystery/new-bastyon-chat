@@ -537,7 +537,17 @@ export class EventWriter {
       parsed.senderId,
       parsed.type,
       parsed.eventId,
+      parsed.callInfo,
+      parsed.systemMeta,
     );
+
+    // Set decryption status on room preview for encrypted messages
+    const isEncryptedPreview = parsed.content === "[encrypted]" && parsed.encryptedRaw;
+    if (isEncryptedPreview) {
+      await this.db.rooms.update(parsed.roomId, {
+        lastMessageDecryptionStatus: "pending",
+      });
+    }
   }
 
   /** Update room preview from an existing LocalMessage (used after deletion) */

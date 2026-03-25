@@ -149,6 +149,16 @@ export class DecryptionWorker {
             decryptionStatus: "failed",
           });
         }
+
+        // Update room preview status to "failed" so UI shows fallback instead of infinite skeleton
+        try {
+          const room = await this.db.rooms.where("id").equals(job.roomId).first();
+          if (room && room.lastMessageEventId === job.eventId) {
+            await this.db.rooms.update(job.roomId, {
+              lastMessageDecryptionStatus: "failed",
+            });
+          }
+        } catch { /* non-critical */ }
       }
     }
   }

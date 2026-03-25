@@ -15,6 +15,7 @@ import { ref, inject, onMounted, onBeforeUnmount } from "vue";
 import { useLongPress, useSwipeGesture } from "@/shared/lib/gestures";
 import { useThemeStore } from "@/entities/theme";
 import { hexDecode } from "@/shared/lib/matrix/functions";
+import { getUserDisplayNameForUI } from "@/entities/chat";
 
 // Responsive max image width: clamp to ~78% of viewport on small screens
 const viewportW = ref(typeof window !== "undefined" ? window.innerWidth : 800);
@@ -117,6 +118,11 @@ const onForwardAction = () => { emit("forward", props.message); };
 const chatStore = useChatStore();
 const themeStore = useThemeStore();
 const isSelected = computed(() => chatStore.selectedMessageIds.has(props.message.id));
+
+const senderDisplayResult = computed(() => {
+  const raw = chatStore.getDisplayName(props.message.senderId);
+  return getUserDisplayNameForUI(raw, t("common.unknownUser"));
+});
 
 /** Compute image placeholder/display styles using known dimensions */
 const imagePlaceholderStyle = computed(() => {
@@ -686,10 +692,11 @@ const replyPreviewSender = computed(() => {
         <div
           v-if="props.isGroup && !props.isOwn && props.isFirstInGroup"
           class="mb-0.5 cursor-pointer text-sm font-semibold"
+          :class="{ 'italic opacity-70': senderDisplayResult.state === 'failed' }"
           :style="{ color: senderColor }"
           @click.stop="openUserProfile?.(message.senderId)"
         >
-          {{ chatStore.getDisplayName(message.senderId) }}
+          {{ senderDisplayResult.text }}
         </div>
         <PollCard
           :message="message"
@@ -713,10 +720,11 @@ const replyPreviewSender = computed(() => {
         <div
           v-if="props.isGroup && !props.isOwn && props.isFirstInGroup"
           class="mb-0.5 cursor-pointer text-sm font-semibold"
+          :class="{ 'italic opacity-70': senderDisplayResult.state === 'failed' }"
           :style="{ color: senderColor }"
           @click.stop="openUserProfile?.(message.senderId)"
         >
-          {{ chatStore.getDisplayName(message.senderId) }}
+          {{ senderDisplayResult.text }}
         </div>
         <TransferCard :message="message" :is-own="props.isOwn" />
         <div v-if="themeStore.showTimestamps" class="mt-1 flex items-center justify-end gap-1" :class="props.isOwn ? 'text-white/60' : 'text-text-on-main-bg-color'">
@@ -736,10 +744,11 @@ const replyPreviewSender = computed(() => {
         <div
           v-if="props.isGroup && !props.isOwn && props.isFirstInGroup"
           class="mb-0.5 cursor-pointer text-sm font-semibold"
+          :class="{ 'italic opacity-70': senderDisplayResult.state === 'failed' }"
           :style="{ color: senderColor }"
           @click.stop="openUserProfile?.(message.senderId)"
         >
-          {{ chatStore.getDisplayName(message.senderId) }}
+          {{ senderDisplayResult.text }}
         </div>
 
         <!-- Forwarded indicator -->

@@ -100,6 +100,8 @@ export interface Message {
   linkPreview?: LinkPreview;
   /** Upload progress 0-100 (only during media upload, undefined when not uploading) */
   uploadProgress?: number;
+  /** Decryption status — only set for encrypted messages (absence = ok/not encrypted) */
+  decryptionStatus?: "pending" | "failed";
   /** Whether this message has been deleted/redacted */
   deleted?: boolean;
   /** For system messages: i18n template key + addresses for dynamic name resolution at render time */

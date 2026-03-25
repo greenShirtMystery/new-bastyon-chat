@@ -43,6 +43,8 @@ export function localToMessage(
     deleted: isDeleted,
     systemMeta: local.systemMeta,
     uploadProgress: local.uploadProgress,
+    decryptionStatus: (local.decryptionStatus === "pending" || local.decryptionStatus === "failed")
+      ? local.decryptionStatus : undefined,
   };
 }
 

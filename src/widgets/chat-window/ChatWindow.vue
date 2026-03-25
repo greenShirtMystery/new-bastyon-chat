@@ -26,7 +26,7 @@ import { hexEncode, hexDecode } from "@/shared/lib/matrix/functions";
 import DropOverlay from "@/features/messaging/ui/DropOverlay.vue";
 import { usePasteDrop } from "@/features/messaging/model/use-paste-drop";
 import { useResolvedRoomName } from "@/entities/chat/lib/use-resolved-room-name";
-import { isUnresolvedName } from "@/entities/chat/lib/chat-helpers";
+import { getRoomTitleForUI, type DisplayResult } from "@/entities/chat";
 const chatStore = useChatStore();
 const authStore = useAuthStore();
 const userStore = useUserStore();
@@ -98,13 +98,13 @@ function _ensureActiveMembers(room: NonNullable<typeof chatStore.activeRoom>): v
   }
 }
 
-const activeRoomName = computed(() => {
+const activeRoomTitle = computed<DisplayResult>(() => {
   const room = chatStore.activeRoom;
-  if (!room) return "";
+  if (!room) return { state: "ready", text: "" };
   _ensureActiveMembers(room);
-  return resolveRoomName(room);
+  const resolved = resolveRoomName(room);
+  return getRoomTitleForUI(resolved, { gaveUp: false, roomId: room.id, fallbackPrefix: t("common.encryptedChat") });
 });
-const activeRoomNameLoading = computed(() => isUnresolvedName(activeRoomName.value));
 
 const showForwardPicker = ref(false);
 const showSearch = ref(false);
@@ -302,7 +302,7 @@ onUnmounted(() => {
       <!-- Room avatar + info (clickable to open info panel) -->
       <button
         class="flex min-w-0 flex-1 cursor-pointer items-center gap-3 text-left"
-        :aria-label="activeRoomName + ' — ' + t('info.title')"
+        :aria-label="activeRoomTitle.text + ' — ' + t('info.title')"
         @click="showInfoPanel = true"
       >
         <UserAvatar
@@ -310,11 +310,11 @@ onUnmounted(() => {
           :address="chatStore.activeRoom.avatar.replace('__pocketnet__:', '')"
           size="sm"
         />
-        <Avatar v-else :src="chatStore.activeRoom.avatar" :name="activeRoomName" size="sm" />
+        <Avatar v-else :src="chatStore.activeRoom.avatar" :name="activeRoomTitle.text" size="sm" />
         <div class="min-w-0 flex-1">
-          <div v-if="activeRoomNameLoading" class="h-4 w-28 animate-pulse rounded bg-neutral-grad-2" />
+          <div v-if="activeRoomTitle.state === 'resolving'" class="h-4 w-28 animate-pulse rounded bg-neutral-grad-2" />
           <div v-else class="truncate text-[15px] font-medium text-text-color">
-            {{ activeRoomName }}
+            {{ activeRoomTitle.text }}
           </div>
           <div
             class="text-xs"
@@ -420,12 +420,12 @@ onUnmounted(() => {
           </h3>
           <p class="mt-1 text-sm text-text-on-main-bg-color">
             <template v-if="chatStore.activeRoom?.isGroup">
-              {{ t("chat.inviteGroup", { name: activeRoomName }) }}
+              {{ t("chat.inviteGroup", { name: activeRoomTitle.text }) }}
               <br />
               <span class="text-xs">{{ t("chat.members", { count: chatStore.activeRoom.members.length }) }}</span>
             </template>
             <template v-else>
-              {{ t("chat.invitePersonal", { name: activeRoomName }) }}
+              {{ t("chat.invitePersonal", { name: activeRoomTitle.text }) }}
             </template>
           </p>
         </div>

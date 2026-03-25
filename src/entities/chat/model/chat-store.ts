@@ -686,6 +686,7 @@ export const useChatStore = defineStore(NAMESPACE, () => {
     preview: string | null | undefined;
     localStatus: string | null | undefined;
     readOutboundTs: number;
+    lastMsgDecryptionStatus: string | undefined;
     room: ChatRoom;
   }>();
 
@@ -708,6 +709,7 @@ export const useChatStore = defineStore(NAMESPACE, () => {
 
         const localStatus = lr.lastMessageLocalStatus;
         const readOutboundTs = lr.lastReadOutboundTs ?? 0;
+        const lastMsgDecryptionStatus = lr.lastMessageDecryptionStatus;
         const cached = _chatRoomFromDexieCache.get(lr.id);
         if (
           cached &&
@@ -718,7 +720,8 @@ export const useChatStore = defineStore(NAMESPACE, () => {
           cached.room.avatar === lr.avatar &&
           cached.preview === effectivePreview &&
           cached.localStatus === localStatus &&
-          cached.readOutboundTs === readOutboundTs
+          cached.readOutboundTs === readOutboundTs &&
+          cached.lastMsgDecryptionStatus === lastMsgDecryptionStatus
         ) {
           return cached.room;
         }
@@ -744,10 +747,13 @@ export const useChatStore = defineStore(NAMESPACE, () => {
                 lr.lastReadOutboundTs ?? 0,
               ),
             type: lr.lastMessageType ?? MessageType.text,
+            decryptionStatus: lr.lastMessageDecryptionStatus,
+            callInfo: lr.lastMessageCallInfo,
+            systemMeta: lr.lastMessageSystemMeta,
           } as Message : undefined,
           lastMessageReaction: lr.lastMessageReaction ?? undefined,
         } as ChatRoom;
-        _chatRoomFromDexieCache.set(lr.id, { ts, unread: lr.unreadCount, name: lr.name, membership: lr.membership, preview: effectivePreview, localStatus, readOutboundTs, room });
+        _chatRoomFromDexieCache.set(lr.id, { ts, unread: lr.unreadCount, name: lr.name, membership: lr.membership, preview: effectivePreview, localStatus, readOutboundTs, lastMsgDecryptionStatus, room });
         return room;
       });
 

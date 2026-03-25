@@ -68,6 +68,12 @@ export interface LocalRoom {
   } | null;
   /** Transport status of last message (pending/syncing/synced/failed — NOT read/delivered) */
   lastMessageLocalStatus?: LocalMessageStatus;
+  /** Decryption status of last message preview */
+  lastMessageDecryptionStatus?: "pending" | "failed";
+  /** Call metadata for last message (if it was a call event) */
+  lastMessageCallInfo?: { callType: "voice" | "video"; missed: boolean; duration?: number };
+  /** System message metadata for last message (for i18n resolution in previews) */
+  lastMessageSystemMeta?: { template: string; senderAddr: string; targetAddr?: string; extra?: Record<string, string> };
 
   // Tombstone (soft-delete for cross-device sync)
   isDeleted: boolean;            // true = user left/was kicked — hidden from UI
