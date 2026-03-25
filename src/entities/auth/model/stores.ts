@@ -288,6 +288,12 @@ export const useAuthStore = defineStore(NAMESPACE, () => {
         onSync: (state) => {
           if (state === "PREPARED" || state === "SYNCING") {
             chatStore.refreshRooms(state);
+            // Sync room names to native for push notification display
+            if (isNative && state === "PREPARED") {
+              import('@/shared/lib/push').then(({ pushService }) => {
+                pushService.syncRoomNamesToNative();
+              }).catch(() => {});
+            }
           }
           _onSyncStatusCallback?.(state);
         },
@@ -389,37 +395,65 @@ export const useAuthStore = defineStore(NAMESPACE, () => {
           console.warn("[auth] Failed to init call tab lock:", err);
         });
 
-        // Wire native push notifications and call bridge on Capacitor
-        if (isNative) {
-          const { pushService } = await import('@/shared/lib/push');
-          const { nativeCallBridge } = await import('@/shared/lib/native-calls');
+        // Init push notifications FIRST (before call bridge which steals focus for audio permission)
+        if (isNative && matrixService.client) {
+          try {
+            const { pushService } = await import('@/shared/lib/push');
 
-          // Wire native call bridge to existing call service
-          const callService = useCallService();
-          await nativeCallBridge.wire(callService);
+            pushService.setActiveRoomGetter(() => chatStore.activeRoomId);
 
-          // Wire push — call handler routes to native call UI
-          pushService.setCallHandler((data) => {
-            nativeCallBridge.reportIncomingCall(data);
-          });
+            pushService.setRoomInfoGetter((roomId) => {
+              // Use Dexie-backed store (has resolved names) instead of Matrix SDK (may return hash)
+              const chatRoom = chatStore.rooms.find(r => r.id === roomId);
+              if (chatRoom?.name) return { roomName: chatRoom.name };
+              // Fallback to Matrix SDK
+              const room = matrixService.client?.getRoom(roomId);
+              if (!room) return null;
+              return { roomName: room.name || 'Forta Chat' };
+            });
 
-          // Wire push — decrypt handler fetches and decrypts events locally
-          pushService.setDecryptHandler(async (roomId, eventId) => {
-            try {
-              if (!matrixService.client) return null;
-              const event = await matrixService.client.fetchRoomEvent(roomId, eventId);
-              return {
-                senderName: event.sender || 'Unknown',
-                body: event.content?.body || 'New message',
-              };
-            } catch {
-              return null;
-            }
-          });
+            pushService.setAllRoomNamesGetter(() => {
+              const map: Record<string, string> = {};
+              for (const room of chatStore.rooms) {
+                if (room.name) map[room.id] = room.name;
+              }
+              return map;
+            });
 
-          // Init push with matrix client
-          if (matrixService.client) {
+            // Navigate to room when push notification is tapped
+            window.addEventListener('push:openRoom', ((e: CustomEvent) => {
+              const roomId = e.detail?.roomId;
+              if (roomId) {
+                console.log('[auth] Push tap: navigating to room', roomId);
+                chatStore.setActiveRoom(roomId);
+              }
+            }) as EventListener);
+
+            console.log('[auth] Initializing push service...');
             await pushService.init(matrixService.client);
+
+            // Wire call handler after push init (needs nativeCallBridge)
+            try {
+              const { nativeCallBridge } = await import('@/shared/lib/native-calls');
+              pushService.setCallHandler((data) => {
+                nativeCallBridge.reportIncomingCall(data);
+              });
+            } catch (err) {
+              console.warn("[auth] Failed to wire push call handler:", err);
+            }
+          } catch (err) {
+            console.error("[auth] Failed to init push service:", err);
+          }
+        }
+
+        // Wire native call bridge on Capacitor (isolated from push)
+        if (isNative) {
+          try {
+            const { nativeCallBridge } = await import('@/shared/lib/native-calls');
+            const callService = useCallService();
+            await nativeCallBridge.wire(callService);
+          } catch (err) {
+            console.warn("[auth] Failed to init native call bridge:", err);
           }
         }
 
