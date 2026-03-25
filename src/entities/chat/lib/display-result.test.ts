@@ -16,9 +16,14 @@ describe("getRoomTitleForUI", () => {
     expect(result).toEqual({ state: "resolving", text: "" });
   });
 
-  it('returns failed with "Чат #XXXX" when gave up', () => {
+  it("returns failed with fallback prefix when gave up", () => {
+    const result = getRoomTitleForUI("a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4", { gaveUp: true, roomId: "!WXYZ:server", fallbackPrefix: "Chat" });
+    expect(result).toEqual({ state: "failed", text: "Chat #WXYZ" });
+  });
+
+  it("uses default 'Chat' prefix when fallbackPrefix not provided", () => {
     const result = getRoomTitleForUI("a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4", { gaveUp: true, roomId: "!WXYZ:server" });
-    expect(result).toEqual({ state: "failed", text: "Чат #WXYZ" });
+    expect(result).toEqual({ state: "failed", text: "Chat #WXYZ" });
   });
 
   it("returns ready for names starting with @", () => {
@@ -32,8 +37,8 @@ describe("getRoomTitleForUI", () => {
   });
 
   it("returns failed for truncated hex when gave up", () => {
-    const result = getRoomTitleForUI("a1b2c3d4\u2026", { gaveUp: true, roomId: "!RSTU:server" });
-    expect(result).toEqual({ state: "failed", text: "Чат #RSTU" });
+    const result = getRoomTitleForUI("a1b2c3d4\u2026", { gaveUp: true, roomId: "!RSTU:server", fallbackPrefix: "Chat" });
+    expect(result).toEqual({ state: "failed", text: "Chat #RSTU" });
   });
 
   it("returns resolving for Matrix room IDs (!abc:server)", () => {

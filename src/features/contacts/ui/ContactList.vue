@@ -12,8 +12,7 @@ import { stripMentionAddresses, stripBastyonLinks } from "@/shared/lib/message-f
 import { hexDecode, hexEncode } from "@/shared/lib/matrix/functions";
 import { cleanMatrixIds, resolveSystemText, isUnresolvedName } from "@/entities/chat/lib/chat-helpers";
 import { useFormatPreview } from "@/shared/lib/utils/format-preview";
-import { isEncryptedPlaceholder } from "@/shared/lib/utils/is-encrypted-placeholder";
-import { getRoomTitleForUI, getMessagePreviewForUI, type DisplayResult } from "@/entities/chat/lib/display-result";
+import { getRoomTitleForUI, getMessagePreviewForUI, type DisplayResult } from "@/entities/chat";
 import { useLongPress } from "@/shared/lib/gestures";
 import { ContextMenu } from "@/shared/ui/context-menu";
 import type { ContextMenuItem } from "@/shared/ui/context-menu";
@@ -135,7 +134,6 @@ const unresolvedRoomSet = computed(() => {
   return set;
 });
 
-const isRoomNameUnresolved = (room: ChatRoom): boolean => unresolvedRoomSet.value.has(room.id);
 
 function _resolveRoomName(room: ChatRoom, allUsers: Record<string, any>, myHexId: string): string {
   if (!room.isGroup) {
@@ -158,7 +156,7 @@ const resolveRoomName = (room: ChatRoom): string => {
 function getRoomTitle(room: ChatRoom): DisplayResult {
   return getRoomTitleForUI(
     resolveRoomName(room),
-    { gaveUp: gaveUpRooms.value.has(room.id), roomId: room.id },
+    { gaveUp: gaveUpRooms.value.has(room.id), roomId: room.id, fallbackPrefix: t("common.encryptedChat") },
   );
 }
 
@@ -520,7 +518,7 @@ const getRoomLongPress = (room: ChatRoom) => {
               :address="(item as ChatRoom).avatar!.replace('__pocketnet__:', '')"
               size="md"
             />
-            <Avatar v-else :src="(item as ChatRoom).avatar" :name="resolveRoomName(item as ChatRoom)" size="md" />
+            <Avatar v-else :src="(item as ChatRoom).avatar" :name="getRoomTitle(item as ChatRoom).text" size="md" />
             <!-- Invite badge -->
             <div
               v-if="(item as ChatRoom).membership === 'invite'"

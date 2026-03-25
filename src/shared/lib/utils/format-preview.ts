@@ -3,8 +3,7 @@ import type { ChatRoom, Message } from "@/entities/chat";
 import { MessageType } from "@/entities/chat";
 import { useAuthStore } from "@/entities/auth";
 import { stripMentionAddresses, stripBastyonLinks } from "@/shared/lib/message-format";
-import { cleanMatrixIds, resolveSystemText } from "@/entities/chat/lib/chat-helpers";
-import { getUserDisplayNameForUI } from "@/entities/chat/lib/display-result";
+import { cleanMatrixIds, resolveSystemText, isUnresolvedName } from "@/entities/chat/lib/chat-helpers";
 import { isEncryptedPlaceholder } from "./is-encrypted-placeholder";
 
 /**
@@ -79,8 +78,9 @@ export function useFormatPreview() {
     if (room.isGroup && msg.senderId) {
       const myAddr = authStore.address ?? "";
       const rawName = chatStore.getDisplayName(msg.senderId);
-      const senderDisplay = getUserDisplayNameForUI(rawName, t("common.unknownUser"));
-      const senderName = msg.senderId === myAddr ? t("contactList.you") : senderDisplay.text;
+      const senderName = msg.senderId === myAddr
+        ? t("contactList.you")
+        : (isUnresolvedName(rawName) ? t("common.unknownUser") : rawName);
       preview = `${senderName}: ${preview}`;
     }
     return preview;
