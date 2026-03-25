@@ -90,6 +90,23 @@ describe("sortedRooms", () => {
     });
   });
 
+  it("recompute after single room change preserves other room references", () => {
+    const r1 = makeRoom({ id: "!a:s", lastMessage: makeMsgField({ timestamp: 200 }) });
+    const r2 = makeRoom({ id: "!b:s", lastMessage: makeMsgField({ timestamp: 100 }) });
+    store.rooms = [r1, r2];
+    const first = store.sortedRooms;
+    expect(first).toHaveLength(2);
+
+    store.rooms = [
+      makeRoom({ id: "!a:s", lastMessage: makeMsgField({ timestamp: 300 }) }),
+      r2,
+    ];
+    const second = store.sortedRooms;
+    expect(second).toHaveLength(2);
+    expect(second[0].id).toBe("!a:s");
+    expect(second[0].lastMessage!.timestamp).toBe(300);
+  });
+
   it("recomputes synchronously on rooms fallback changes (no throttle)", () => {
     // Verify that rooms (fallback path) changes are always reflected immediately
     store.rooms = [makeRoom({ id: "!a:s", lastMessage: makeMsgField({ timestamp: 100 }) })];

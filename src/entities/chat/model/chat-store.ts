@@ -674,6 +674,16 @@ export const useChatStore = defineStore(NAMESPACE, () => {
     return _cachedMediaMessages;
   });
 
+  // Cache: reuse ChatRoom objects when LocalRoom hasn't changed (reduces GC pressure).
+  // Invalidated by fields that affect display: timestamp, unread, name, membership.
+  const _chatRoomFromDexieCache = new Map<string, {
+    ts: number;
+    unread: number;
+    name: string;
+    membership: string;
+    room: ChatRoom;
+  }>();
+
   // Pure sort logic extracted for throttled recomputation
   const computeSortedRooms = (
     dexie: LocalRoom[] | null,
@@ -682,31 +692,54 @@ export const useChatStore = defineStore(NAMESPACE, () => {
   ): ChatRoom[] => {
     let source: ChatRoom[];
     if (dexie) {
-      source = dexie.map(lr => ({
-        id: lr.id,
-        name: lr.name,
-        avatar: lr.avatar,
-        isGroup: lr.isGroup,
-        members: lr.members,
-        membership: lr.membership as "join" | "invite",
-        unreadCount: lr.unreadCount,
-        topic: lr.topic,
-        updatedAt: lr.updatedAt,
-        lastMessage: lr.lastMessagePreview != null ? {
-          id: "",
-          roomId: lr.id,
-          senderId: lr.lastMessageSenderId ?? "",
-          content: lr.lastMessagePreview,
-          timestamp: lr.lastMessageTimestamp ?? 0,
-          status: deriveOutboundStatus(
-              lr.lastMessageLocalStatus ?? "synced",
-              lr.lastMessageTimestamp ?? 0,
-              lr.lastReadOutboundTs ?? 0,
-            ),
-          type: lr.lastMessageType ?? MessageType.text,
-        } as Message : undefined,
-        lastMessageReaction: lr.lastMessageReaction ?? undefined,
-      } as ChatRoom));
+      source = dexie.map(lr => {
+        const ts = lr.lastMessageTimestamp ?? 0;
+        const cached = _chatRoomFromDexieCache.get(lr.id);
+        if (
+          cached &&
+          cached.ts === ts &&
+          cached.unread === lr.unreadCount &&
+          cached.name === lr.name &&
+          cached.membership === lr.membership
+        ) {
+          return cached.room;
+        }
+        const room: ChatRoom = {
+          id: lr.id,
+          name: lr.name,
+          avatar: lr.avatar,
+          isGroup: lr.isGroup,
+          members: lr.members,
+          membership: lr.membership as "join" | "invite",
+          unreadCount: lr.unreadCount,
+          topic: lr.topic,
+          updatedAt: lr.updatedAt,
+          lastMessage: lr.lastMessagePreview != null ? {
+            id: "",
+            roomId: lr.id,
+            senderId: lr.lastMessageSenderId ?? "",
+            content: lr.lastMessagePreview,
+            timestamp: ts,
+            status: deriveOutboundStatus(
+                lr.lastMessageLocalStatus ?? "synced",
+                ts,
+                lr.lastReadOutboundTs ?? 0,
+              ),
+            type: lr.lastMessageType ?? MessageType.text,
+          } as Message : undefined,
+          lastMessageReaction: lr.lastMessageReaction ?? undefined,
+        } as ChatRoom;
+        _chatRoomFromDexieCache.set(lr.id, { ts, unread: lr.unreadCount, name: lr.name, membership: lr.membership, room });
+        return room;
+      });
+
+      // Prune stale cache entries when cache grows beyond 1.5x current room count
+      if (_chatRoomFromDexieCache.size > dexie.length * 1.5) {
+        const activeIds = new Set(dexie.map(lr => lr.id));
+        for (const key of _chatRoomFromDexieCache.keys()) {
+          if (!activeIds.has(key)) _chatRoomFromDexieCache.delete(key);
+        }
+      }
     } else {
       source = fallback;
     }
