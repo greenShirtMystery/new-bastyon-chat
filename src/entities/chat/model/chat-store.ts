@@ -748,6 +748,8 @@ export const useChatStore = defineStore(NAMESPACE, () => {
               ),
             type: lr.lastMessageType ?? MessageType.text,
             decryptionStatus: lr.lastMessageDecryptionStatus,
+            callInfo: lr.lastMessageCallInfo,
+            systemMeta: lr.lastMessageSystemMeta,
           } as Message : undefined,
           lastMessageReaction: lr.lastMessageReaction ?? undefined,
         } as ChatRoom;

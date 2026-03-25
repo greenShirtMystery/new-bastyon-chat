@@ -224,6 +224,8 @@ export class RoomRepository {
     senderId: string,
     type?: MessageType,
     eventId?: string,
+    callInfo?: { callType: "voice" | "video"; missed: boolean; duration?: number },
+    systemMeta?: { template: string; senderAddr: string; targetAddr?: string; extra?: Record<string, string> },
   ): Promise<void> {
     // Monotonic guard — never roll back to an older preview
     const existing = await this.db.rooms.get(roomId);
@@ -240,6 +242,8 @@ export class RoomRepository {
       // New last message = clear old reaction (no double DB write)
       lastMessageReaction: null,
       lastMessageDecryptionStatus: undefined,
+      lastMessageCallInfo: callInfo ?? undefined,
+      lastMessageSystemMeta: systemMeta ?? undefined,
     };
     if (eventId !== undefined) {
       changes.lastMessageEventId = eventId;

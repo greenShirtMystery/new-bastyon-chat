@@ -50,6 +50,16 @@ describe("getRoomTitleForUI", () => {
     const result = getRoomTitleForUI("PPbNqCweRt12345AbCdE", { gaveUp: false, roomId: "!abcd:server" });
     expect(result).toEqual({ state: "resolving", text: "" });
   });
+
+  it("returns resolving for hex-encoded room alias (#hex)", () => {
+    const result = getRoomTitleForUI("#312313abcdef", { gaveUp: false, roomId: "!abcd:server" });
+    expect(result).toEqual({ state: "resolving", text: "" });
+  });
+
+  it("returns resolving for hex-encoded room alias with server (#hex:server)", () => {
+    const result = getRoomTitleForUI("#726f6f6d31:matrix.org", { gaveUp: false, roomId: "!abcd:server" });
+    expect(result).toEqual({ state: "resolving", text: "" });
+  });
 });
 
 describe("getUserDisplayNameForUI", () => {

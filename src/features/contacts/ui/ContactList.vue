@@ -162,7 +162,11 @@ function getRoomTitle(room: ChatRoom): DisplayResult {
 
 /** Unified display state for message preview: resolving → skeleton, failed → fallback, ready → text */
 function getPreview(room: ChatRoom): DisplayResult {
-  if (!room.lastMessage) return { state: "ready", text: t("contactList.noMessages") };
+  if (!room.lastMessage) {
+    // During initial sync, rooms appear before messages load → show skeleton, not "no messages"
+    if (!chatStore.namesReady) return { state: "resolving", text: "" };
+    return { state: "ready", text: t("contactList.noMessages") };
+  }
   return getMessagePreviewForUI(
     room.lastMessage.content,
     room.lastMessage.decryptionStatus,

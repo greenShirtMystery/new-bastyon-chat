@@ -537,6 +537,8 @@ export class EventWriter {
       parsed.senderId,
       parsed.type,
       parsed.eventId,
+      parsed.callInfo,
+      parsed.systemMeta,
     );
 
     // Set decryption status on room preview for encrypted messages
