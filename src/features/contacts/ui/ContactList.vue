@@ -139,7 +139,7 @@ function _resolveRoomName(room: ChatRoom, allUsers: Record<string, any>, myHexId
   if (!room.isGroup) {
     const names = _resolveMemberNames(room, allUsers, myHexId);
     if (names.length > 0) return names.join(", ");
-    return room.name;
+    return cleanMatrixIds(room.name);
   }
   if (room.name?.startsWith("@")) return room.name.slice(1);
   if (!isUnresolvedName(room.name)) return cleanMatrixIds(room.name);
