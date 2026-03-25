@@ -13,6 +13,7 @@ import { computed, ref, shallowRef, triggerRef, watch } from "vue";
 import { perfMark, perfMeasure, perfCount } from "@/shared/lib/perf-markers";
 import { yieldToMain, yieldEveryN } from "@/shared/lib/yield-to-main";
 
+
 import type { ChatDbKit, ParsedMessage, LocalRoom } from "@/shared/lib/local-db";
 import { useLiveQuery, localToMessages, localStatusToMessageStatus, deriveOutboundStatus } from "@/shared/lib/local-db";
 import type { ChatRoom, FileInfo, LinkPreview, Message, PollInfo, ReplyTo, TransferInfo } from "./types";
@@ -681,6 +682,9 @@ export const useChatStore = defineStore(NAMESPACE, () => {
     unread: number;
     name: string;
     membership: string;
+    preview: string | null | undefined;
+    localStatus: string | null | undefined;
+    readOutboundTs: number;
     room: ChatRoom;
   }>();
 
@@ -694,6 +698,15 @@ export const useChatStore = defineStore(NAMESPACE, () => {
     if (dexie) {
       source = dexie.map(lr => {
         const ts = lr.lastMessageTimestamp ?? 0;
+        // Resolve effective preview: prefer decrypted cache over raw Dexie value
+        let effectivePreview = lr.lastMessagePreview;
+        if (effectivePreview != null && (effectivePreview === "[encrypted]" || effectivePreview === "m.bad.encrypted" || effectivePreview.startsWith("** Unable to decrypt"))) {
+          const decrypted = decryptedPreviewCache.get(lr.id);
+          if (decrypted) effectivePreview = decrypted;
+        }
+
+        const localStatus = lr.lastMessageLocalStatus;
+        const readOutboundTs = lr.lastReadOutboundTs ?? 0;
         const cached = _chatRoomFromDexieCache.get(lr.id);
         if (
           cached &&
@@ -701,7 +714,10 @@ export const useChatStore = defineStore(NAMESPACE, () => {
           cached.unread === lr.unreadCount &&
           cached.name === lr.name &&
           cached.membership === lr.membership &&
-          cached.room.avatar === lr.avatar
+          cached.room.avatar === lr.avatar &&
+          cached.preview === effectivePreview &&
+          cached.localStatus === localStatus &&
+          cached.readOutboundTs === readOutboundTs
         ) {
           return cached.room;
         }
@@ -715,11 +731,11 @@ export const useChatStore = defineStore(NAMESPACE, () => {
           unreadCount: lr.unreadCount,
           topic: lr.topic,
           updatedAt: lr.updatedAt,
-          lastMessage: lr.lastMessagePreview != null ? {
+          lastMessage: effectivePreview != null ? {
             id: "",
             roomId: lr.id,
             senderId: lr.lastMessageSenderId ?? "",
-            content: lr.lastMessagePreview,
+            content: effectivePreview,
             timestamp: ts,
             status: deriveOutboundStatus(
                 lr.lastMessageLocalStatus ?? "synced",
@@ -730,7 +746,7 @@ export const useChatStore = defineStore(NAMESPACE, () => {
           } as Message : undefined,
           lastMessageReaction: lr.lastMessageReaction ?? undefined,
         } as ChatRoom;
-        _chatRoomFromDexieCache.set(lr.id, { ts, unread: lr.unreadCount, name: lr.name, membership: lr.membership, room });
+        _chatRoomFromDexieCache.set(lr.id, { ts, unread: lr.unreadCount, name: lr.name, membership: lr.membership, preview: effectivePreview, localStatus, readOutboundTs, room });
         return room;
       });
 
