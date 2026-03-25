@@ -15,7 +15,7 @@ import { ref, inject, onMounted, onBeforeUnmount } from "vue";
 import { useLongPress, useSwipeGesture } from "@/shared/lib/gestures";
 import { useThemeStore } from "@/entities/theme";
 import { hexDecode } from "@/shared/lib/matrix/functions";
-import { getUserDisplayNameForUI } from "@/entities/chat/lib/display-result";
+import { getUserDisplayNameForUI } from "@/entities/chat";
 
 // Responsive max image width: clamp to ~78% of viewport on small screens
 const viewportW = ref(typeof window !== "undefined" ? window.innerWidth : 800);

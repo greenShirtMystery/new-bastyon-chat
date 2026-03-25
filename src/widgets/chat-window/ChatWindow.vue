@@ -26,7 +26,7 @@ import { hexEncode, hexDecode } from "@/shared/lib/matrix/functions";
 import DropOverlay from "@/features/messaging/ui/DropOverlay.vue";
 import { usePasteDrop } from "@/features/messaging/model/use-paste-drop";
 import { useResolvedRoomName } from "@/entities/chat/lib/use-resolved-room-name";
-import { getRoomTitleForUI, type DisplayResult } from "@/entities/chat/lib/display-result";
+import { getRoomTitleForUI, type DisplayResult } from "@/entities/chat";
 const chatStore = useChatStore();
 const authStore = useAuthStore();
 const userStore = useUserStore();
@@ -103,7 +103,7 @@ const activeRoomTitle = computed<DisplayResult>(() => {
   if (!room) return { state: "ready", text: "" };
   _ensureActiveMembers(room);
   const resolved = resolveRoomName(room);
-  return getRoomTitleForUI(resolved, { gaveUp: false, roomId: room.id });
+  return getRoomTitleForUI(resolved, { gaveUp: false, roomId: room.id, fallbackPrefix: t("common.encryptedChat") });
 });
 
 const showForwardPicker = ref(false);

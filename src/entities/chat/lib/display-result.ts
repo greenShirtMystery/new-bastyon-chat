@@ -16,14 +16,15 @@ export interface DisplayResult {
  */
 export function getRoomTitleForUI(
   resolvedName: string,
-  opts: { gaveUp: boolean; roomId: string },
+  opts: { gaveUp: boolean; roomId: string; fallbackPrefix?: string },
 ): DisplayResult {
   if (!isUnresolvedName(resolvedName)) {
     return { state: "ready", text: resolvedName };
   }
   if (opts.gaveUp) {
     const suffix = opts.roomId.slice(1, 5).toUpperCase();
-    return { state: "failed", text: `Чат #${suffix}` };
+    const prefix = opts.fallbackPrefix ?? "Chat";
+    return { state: "failed", text: `${prefix} #${suffix}` };
   }
   return { state: "resolving", text: "" };
 }
