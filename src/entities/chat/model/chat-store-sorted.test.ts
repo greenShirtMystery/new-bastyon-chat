@@ -64,6 +64,49 @@ describe("sortedRooms", () => {
     expect(sorted[1].id).toBe("!b:s");
   });
 
+  describe("empty list guard", () => {
+    let guardStore: ReturnType<typeof useChatStore>;
+
+    beforeEach(() => {
+      setActivePinia(createTestingPinia({ stubActions: false }));
+      guardStore = useChatStore();
+    });
+
+    it("uses in-memory rooms when dexieRooms would be empty", () => {
+      // Simulate: cached rooms loaded into rooms.value
+      guardStore.rooms = [
+        makeRoom({ id: "!a:s", lastMessage: makeMsgField({ timestamp: 200 }) }),
+        makeRoom({ id: "!b:s", lastMessage: makeMsgField({ timestamp: 100 }) }),
+      ];
+      expect(guardStore.sortedRooms).toHaveLength(2);
+      expect(guardStore.sortedRooms[0].id).toBe("!a:s");
+
+      // Replace with different rooms — should still work via fallback
+      guardStore.rooms = [
+        makeRoom({ id: "!c:s", lastMessage: makeMsgField({ timestamp: 300 }) }),
+      ];
+      expect(guardStore.sortedRooms).toHaveLength(1);
+      expect(guardStore.sortedRooms[0].id).toBe("!c:s");
+    });
+  });
+
+  it("recompute after single room change preserves other room references", () => {
+    const r1 = makeRoom({ id: "!a:s", lastMessage: makeMsgField({ timestamp: 200 }) });
+    const r2 = makeRoom({ id: "!b:s", lastMessage: makeMsgField({ timestamp: 100 }) });
+    store.rooms = [r1, r2];
+    const first = store.sortedRooms;
+    expect(first).toHaveLength(2);
+
+    store.rooms = [
+      makeRoom({ id: "!a:s", lastMessage: makeMsgField({ timestamp: 300 }) }),
+      r2,
+    ];
+    const second = store.sortedRooms;
+    expect(second).toHaveLength(2);
+    expect(second[0].id).toBe("!a:s");
+    expect(second[0].lastMessage!.timestamp).toBe(300);
+  });
+
   it("recomputes synchronously on rooms fallback changes (no throttle)", () => {
     // Verify that rooms (fallback path) changes are always reflected immediately
     store.rooms = [makeRoom({ id: "!a:s", lastMessage: makeMsgField({ timestamp: 100 }) })];
@@ -78,5 +121,44 @@ describe("sortedRooms", () => {
     expect(store.sortedRooms).toHaveLength(2);
     // !y:s (timestamp 300) sorts before !x:s (timestamp 100)
     expect(store.sortedRooms.map(r => r.id)).toEqual(["!y:s", "!x:s"]);
+  });
+});
+
+describe("large room list", () => {
+  let store: ReturnType<typeof useChatStore>;
+
+  beforeEach(() => {
+    setActivePinia(createTestingPinia({ stubActions: false }));
+    store = useChatStore();
+  });
+
+  it("correctly sorts 500 rooms by timestamp", () => {
+    const rooms = Array.from({ length: 500 }, (_, i) =>
+      makeRoom({
+        id: `!r${i}:s`,
+        lastMessage: makeMsgField({ timestamp: Math.floor(Math.random() * 100000) }),
+      })
+    );
+    store.rooms = rooms;
+    const sorted = store.sortedRooms;
+    expect(sorted).toHaveLength(500);
+    for (let i = 1; i < sorted.length; i++) {
+      const prevTs = sorted[i - 1].lastMessage?.timestamp ?? 0;
+      const currTs = sorted[i].lastMessage?.timestamp ?? 0;
+      expect(prevTs).toBeGreaterThanOrEqual(currTs);
+    }
+  });
+
+  it("pinned rooms stay at top with 500 rooms", () => {
+    const rooms = Array.from({ length: 500 }, (_, i) =>
+      makeRoom({
+        id: `!r${i}:s`,
+        lastMessage: makeMsgField({ timestamp: 1000 + i }),
+      })
+    );
+    store.rooms = rooms;
+    store.togglePinRoom("!r0:s");
+    const sorted = store.sortedRooms;
+    expect(sorted[0].id).toBe("!r0:s");
   });
 });

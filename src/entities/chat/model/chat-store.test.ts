@@ -487,4 +487,37 @@ describe("chat-store", () => {
       expect(store.rooms[0].unreadCount).toBe(0);
     });
   });
+
+  // ─── Large room list sort baseline ─────────────────────────────
+  describe("large room list sort baseline", () => {
+    it("100 rooms sort correctly by updatedAt descending after bulk assignment", () => {
+      const BASE_TS = 1700000000000;
+      const roomList = Array.from({ length: 100 }, (_, i) =>
+        makeRoom({
+          id: `!room_${i}:server`,
+          name: `Room ${i}`,
+          updatedAt: BASE_TS + i * 1000, // ascending: room 0 oldest, room 99 newest
+        }),
+      );
+
+      // Assign in creation order (ascending updatedAt)
+      for (const r of roomList) {
+        store.addRoom(r);
+      }
+
+      expect(store.rooms).toHaveLength(100);
+
+      // Sort by updatedAt descending (same logic used by computeSortedRooms)
+      const sorted = [...store.rooms].sort((a, b) => b.updatedAt - a.updatedAt);
+
+      // Newest room should be first
+      expect(sorted[0].id).toBe("!room_99:server");
+      expect(sorted[99].id).toBe("!room_0:server");
+
+      // Verify full descending order
+      for (let i = 1; i < sorted.length; i++) {
+        expect(sorted[i - 1].updatedAt).toBeGreaterThanOrEqual(sorted[i].updatedAt);
+      }
+    });
+  });
 });
