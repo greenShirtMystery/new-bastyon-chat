@@ -13,6 +13,7 @@ import { computed, ref, shallowRef, triggerRef, watch } from "vue";
 import { perfMark, perfMeasure, perfCount } from "@/shared/lib/perf-markers";
 import { yieldToMain, yieldEveryN } from "@/shared/lib/yield-to-main";
 
+
 import type { ChatDbKit, ParsedMessage, LocalRoom } from "@/shared/lib/local-db";
 import { useLiveQuery, localToMessages, localStatusToMessageStatus, deriveOutboundStatus } from "@/shared/lib/local-db";
 import type { ChatRoom, FileInfo, LinkPreview, Message, PollInfo, ReplyTo, TransferInfo } from "./types";
@@ -312,6 +313,7 @@ export const useChatStore = defineStore(NAMESPACE, () => {
   let lastFullRefresh = 0;
   const FULL_REFRESH_INTERVAL = 60_000; // Reconciliation fallback
   let membersLoadedOnce = false; // One-time member loading for stale lazy-load cache
+  let fullRefreshInFlight = false; // Re-entrancy guard for async fullRoomRefresh
 
   /** Schedule a callback during browser idle time, with setTimeout fallback */
   const scheduleIdle = (cb: () => void, fallbackMs = 200) => {
@@ -673,6 +675,19 @@ export const useChatStore = defineStore(NAMESPACE, () => {
     return _cachedMediaMessages;
   });
 
+  // Cache: reuse ChatRoom objects when LocalRoom hasn't changed (reduces GC pressure).
+  // Invalidated by fields that affect display: timestamp, unread, name, membership.
+  const _chatRoomFromDexieCache = new Map<string, {
+    ts: number;
+    unread: number;
+    name: string;
+    membership: string;
+    preview: string | null | undefined;
+    localStatus: string | null | undefined;
+    readOutboundTs: number;
+    room: ChatRoom;
+  }>();
+
   // Pure sort logic extracted for throttled recomputation
   const computeSortedRooms = (
     dexie: LocalRoom[] | null,
@@ -681,31 +696,67 @@ export const useChatStore = defineStore(NAMESPACE, () => {
   ): ChatRoom[] => {
     let source: ChatRoom[];
     if (dexie) {
-      source = dexie.map(lr => ({
-        id: lr.id,
-        name: lr.name,
-        avatar: lr.avatar,
-        isGroup: lr.isGroup,
-        members: lr.members,
-        membership: lr.membership as "join" | "invite",
-        unreadCount: lr.unreadCount,
-        topic: lr.topic,
-        updatedAt: lr.updatedAt,
-        lastMessage: lr.lastMessagePreview != null ? {
-          id: "",
-          roomId: lr.id,
-          senderId: lr.lastMessageSenderId ?? "",
-          content: lr.lastMessagePreview,
-          timestamp: lr.lastMessageTimestamp ?? 0,
-          status: deriveOutboundStatus(
-              lr.lastMessageLocalStatus ?? "synced",
-              lr.lastMessageTimestamp ?? 0,
-              lr.lastReadOutboundTs ?? 0,
-            ),
-          type: lr.lastMessageType ?? MessageType.text,
-        } as Message : undefined,
-        lastMessageReaction: lr.lastMessageReaction ?? undefined,
-      } as ChatRoom));
+      source = dexie.map(lr => {
+        const ts = lr.lastMessageTimestamp ?? 0;
+        // Resolve effective preview: prefer decrypted cache over raw Dexie value
+        let effectivePreview = lr.lastMessagePreview;
+        if (effectivePreview != null && (effectivePreview === "[encrypted]" || effectivePreview === "m.bad.encrypted" || effectivePreview.startsWith("** Unable to decrypt"))) {
+          const decrypted = decryptedPreviewCache.get(lr.id);
+          if (decrypted) effectivePreview = decrypted;
+        }
+
+        const localStatus = lr.lastMessageLocalStatus;
+        const readOutboundTs = lr.lastReadOutboundTs ?? 0;
+        const cached = _chatRoomFromDexieCache.get(lr.id);
+        if (
+          cached &&
+          cached.ts === ts &&
+          cached.unread === lr.unreadCount &&
+          cached.name === lr.name &&
+          cached.membership === lr.membership &&
+          cached.room.avatar === lr.avatar &&
+          cached.preview === effectivePreview &&
+          cached.localStatus === localStatus &&
+          cached.readOutboundTs === readOutboundTs
+        ) {
+          return cached.room;
+        }
+        const room: ChatRoom = {
+          id: lr.id,
+          name: lr.name,
+          avatar: lr.avatar,
+          isGroup: lr.isGroup,
+          members: lr.members,
+          membership: lr.membership as "join" | "invite",
+          unreadCount: lr.unreadCount,
+          topic: lr.topic,
+          updatedAt: lr.updatedAt,
+          lastMessage: effectivePreview != null ? {
+            id: "",
+            roomId: lr.id,
+            senderId: lr.lastMessageSenderId ?? "",
+            content: effectivePreview,
+            timestamp: ts,
+            status: deriveOutboundStatus(
+                lr.lastMessageLocalStatus ?? "synced",
+                ts,
+                lr.lastReadOutboundTs ?? 0,
+              ),
+            type: lr.lastMessageType ?? MessageType.text,
+          } as Message : undefined,
+          lastMessageReaction: lr.lastMessageReaction ?? undefined,
+        } as ChatRoom;
+        _chatRoomFromDexieCache.set(lr.id, { ts, unread: lr.unreadCount, name: lr.name, membership: lr.membership, preview: effectivePreview, localStatus, readOutboundTs, room });
+        return room;
+      });
+
+      // Prune stale cache entries when cache grows beyond 1.5x current room count
+      if (_chatRoomFromDexieCache.size > dexie.length * 1.5) {
+        const activeIds = new Set(dexie.map(lr => lr.id));
+        for (const key of _chatRoomFromDexieCache.keys()) {
+          if (!activeIds.has(key)) _chatRoomFromDexieCache.delete(key);
+        }
+      }
     } else {
       source = fallback;
     }
@@ -735,7 +786,13 @@ export const useChatStore = defineStore(NAMESPACE, () => {
   const _recomputeSorted = () => {
     perfCount("sortedRooms:recompute");
     _sortedDirty = false;
-    const dexie = chatDbKitRef.value ? dexieRooms.value : null;
+    let dexie = chatDbKitRef.value ? dexieRooms.value : null;
+    // Guard: if Dexie is initialized but empty while in-memory rooms have data,
+    // use the in-memory fallback. This prevents the "empty list flash" when
+    // chatDbKitRef is set but bulkSyncRooms hasn't populated Dexie yet.
+    if (dexie && dexie.length === 0 && rooms.value.length > 0) {
+      dexie = null;
+    }
     _sortedRoomsRef.value = computeSortedRooms(dexie, rooms.value, pinnedRoomIds.value);
   };
 
@@ -903,11 +960,14 @@ export const useChatStore = defineStore(NAMESPACE, () => {
   };
 
   /** Full room rebuild — used for initial sync and periodic reconciliation */
-  const fullRoomRefresh = (
+  const fullRoomRefresh = async (
     matrixRooms: any[],
     kit: MatrixKit,
     myUserId: string,
   ) => {
+    if (fullRefreshInFlight) return;
+    fullRefreshInFlight = true;
+    try {
     perfMark("fullRoomRefresh-start");
     // Retry previously failed decryptions on full refresh
     decryptFailedRooms.clear();
@@ -920,27 +980,54 @@ export const useChatStore = defineStore(NAMESPACE, () => {
     const prevActiveRoom = activeRoomId.value ? getRoomById(activeRoomId.value) : undefined;
 
     const interactiveRooms = filterInteractiveRooms(matrixRooms);
+    if (import.meta.env.DEV) {
+      console.log(`[perf] fullRoomRefresh: ${interactiveRooms.length} rooms to process`);
+    }
+    const prevActiveIsExternal = prevActiveRoom && !interactiveRooms.some((r: any) => (r.roomId as string) === prevActiveRoom.id);
 
-    const newRooms = interactiveRooms
-      .map((r) => {
+    const ROOM_CHUNK = 50;
+    const newRooms: ChatRoom[] = [];
+
+    for (let i = 0; i < interactiveRooms.length; i += ROOM_CHUNK) {
+      const slice = interactiveRooms.slice(i, i + ROOM_CHUNK);
+      for (const r of slice) {
         const room = buildChatRoom(r, kit, myUserId, prevNameMap, prevLastMessageMap);
-        // Preserve cached members if Matrix SDK returned fewer (lazy-load issue)
         const prevMembers = prevMembersMap.get(room.id);
         if (prevMembers && prevMembers.length > room.members.length) {
           room.members = prevMembers;
           const prevAvatar = prevAvatarMap.get(room.id);
           if (prevAvatar) room.avatar = prevAvatar;
         }
-        return room;
-      });
+        newRooms.push(room);
+      }
 
-    // Ensure active room is in the list before assigning (prevents "no chat selected" flash)
-    if (prevActiveRoom && !newRooms.some(r => r.id === prevActiveRoom.id)) {
-      newRooms.push(prevActiveRoom);
+      if (i === 0) {
+        // First chunk — publish immediately for early first-paint.
+        // prevActiveRoom is NOT injected here to avoid duplicates when it
+        // appears in a later chunk; the final block handles it instead.
+        rooms.value = [...newRooms];
+        rebuildRoomsMap();
+        perfMark("fullRoomRefresh-firstChunk");
+        perfMeasure("fullRoomRefresh:firstChunk", "fullRoomRefresh-start", "fullRoomRefresh-firstChunk");
+      }
+
+      // Yield between chunks (skip after first chunk if that was the only one)
+      if (i + ROOM_CHUNK < interactiveRooms.length) {
+        await yieldToMain();
+      }
     }
 
-    rooms.value = newRooms;
-    rebuildRoomsMap();
+    // Final assignment with the complete list (skip if only one chunk)
+    if (interactiveRooms.length > ROOM_CHUNK) {
+      if (prevActiveRoom && !newRooms.some(r => r.id === prevActiveRoom.id)) {
+        newRooms.push(prevActiveRoom);
+      }
+      rooms.value = newRooms;
+      rebuildRoomsMap();
+    }
+
+    perfMark("fullRoomRefresh-allBuilt");
+    perfMeasure("fullRoomRefresh:allBuilt", "fullRoomRefresh-start", "fullRoomRefresh-allBuilt");
 
     // Dual-write: sync room metadata to Dexie in a single transaction.
     // Single transaction = single liveQuery notification (instead of N).
@@ -949,7 +1036,10 @@ export const useChatStore = defineStore(NAMESPACE, () => {
     if (chatDbKitRef.value) {
       const dbKit = chatDbKitRef.value;
       const now = Date.now();
-      const updates = newRooms.map(r => ({
+      const dexieSourceRooms = prevActiveIsExternal
+        ? newRooms.filter(r => r.id !== prevActiveRoom!.id)
+        : newRooms;
+      const updates = dexieSourceRooms.map(r => ({
         id: r.id,
         name: r.name,
         avatar: r.avatar,
@@ -975,9 +1065,21 @@ export const useChatStore = defineStore(NAMESPACE, () => {
           : "synced"
         ) as import("@/shared/lib/local-db").LocalMessageStatus,
       }));
-      dbKit.rooms.bulkSyncRooms(updates).catch(e =>
-        console.warn("[chat-store] Dexie room sync failed:", e)
-      );
+      const DB_CHUNK = 100;
+      (async () => {
+        for (let i = 0; i < updates.length; i += DB_CHUNK) {
+          const chunk = updates.slice(i, i + DB_CHUNK);
+          try {
+            await dbKit.rooms.bulkSyncRooms(chunk);
+          } catch (e) {
+            console.warn("[chat-store] Dexie room sync chunk failed:", e);
+            if (!chatDbKitRef.value) break; // DB torn down — abort remaining
+          }
+          if (i + DB_CHUNK < updates.length) {
+            await yieldToMain();
+          }
+        }
+      })();
     }
 
     // Build user display name cache from room members (sync — no API calls)
@@ -1021,6 +1123,15 @@ export const useChatStore = defineStore(NAMESPACE, () => {
     perfMark("fullRoomRefresh-end");
     perfMeasure("fullRoomRefresh", "fullRoomRefresh-start", "fullRoomRefresh-end");
     debouncedCacheRooms();
+    } finally {
+      fullRefreshInFlight = false;
+      // Flush any room changes that accumulated while the chunked refresh was running.
+      // Without this, changedRoomIds pile up because refreshRoomsImmediate() returns
+      // early during fullRefreshInFlight, and no subsequent trigger may arrive to drain them.
+      if (changedRoomIds.size > 0) {
+        refreshRooms();
+      }
+    }
   };
 
   /** One-time: load members from server for rooms with only self as member.
@@ -1400,6 +1511,10 @@ export const useChatStore = defineStore(NAMESPACE, () => {
     if (!matrixService.isReady() || !kit) {
       return;
     }
+
+    // Skip if a chunked full refresh is still running — changedRoomIds
+    // will accumulate and be processed when the next refresh fires.
+    if (fullRefreshInFlight) return;
 
     const myUserId = matrixService.getUserId() ?? "";
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

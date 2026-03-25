@@ -395,6 +395,7 @@ let dateHideTimer: ReturnType<typeof setTimeout> | undefined;
 // invocation has started and this one should bail. Handles both different-room
 // switches AND same-room re-invocations (e.g. during store init).
 let watchVersion = 0;
+let scrollThrottleRaf: number | null = null;
 
 // Load messages when active room changes
 watch(
@@ -799,8 +800,6 @@ const doLoadNewer = async (roomId: string) => {
     loadingNewer.value = false;
   }
 };
-
-let scrollThrottleRaf: number | null = null;
 
 const onScroll = () => {
   if (switching.value) return;

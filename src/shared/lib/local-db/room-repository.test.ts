@@ -153,6 +153,48 @@ describe("RoomRepository", () => {
       expect(updated!.updatedAt).toBe(9000);
       expect(updated!.lastMessageTimestamp).toBe(8000);
     });
+
+    it("chunked calls produce same result as single call", async () => {
+      const updates = Array.from({ length: 150 }, (_, i) => ({
+        id: `!r${i}:s`,
+        name: `Room ${i}`,
+        membership: "join" as const,
+        lastMessageTimestamp: 1000 + i,
+      }));
+
+      const CHUNK = 100;
+      for (let i = 0; i < updates.length; i += CHUNK) {
+        await repo.bulkSyncRooms(updates.slice(i, i + CHUNK));
+      }
+
+      const rooms = await repo.getAllRooms();
+      expect(rooms).toHaveLength(150);
+      expect(rooms[0].id).toBe("!r149:s");
+      expect(rooms[149].id).toBe("!r0:s");
+    });
+
+    it("chunked updates correctly patch existing rooms", async () => {
+      await repo.bulkSyncRooms([
+        { id: "!a:s", name: "Room A", membership: "join", lastMessageTimestamp: 1000 },
+        { id: "!b:s", name: "Room B", membership: "join", lastMessageTimestamp: 2000 },
+      ]);
+
+      await repo.updateLastMessage("!a:s", "Hello!", 1000, "sender1");
+
+      await repo.bulkSyncRooms([
+        { id: "!a:s", name: "Updated A", membership: "join", lastMessageTimestamp: 1000 },
+      ]);
+      await repo.bulkSyncRooms([
+        { id: "!b:s", name: "Updated B", membership: "join", lastMessageTimestamp: 2000 },
+      ]);
+
+      const a = await repo.getRoom("!a:s");
+      expect(a!.name).toBe("Updated A");
+      expect(a!.lastMessagePreview).toBe("Hello!");
+
+      const b = await repo.getRoom("!b:s");
+      expect(b!.name).toBe("Updated B");
+    });
   });
 
   // ── getAllRooms sorting ──────────────────────────────────────────
