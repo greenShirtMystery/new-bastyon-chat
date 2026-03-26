@@ -8,7 +8,6 @@ const scriptsToLoad = {
     "/js/widgets",
     "/js/buildChat",
     "/js/media",
-    "/js/lib/bastyonCalls/bastyonCalls.min.js",
     "/js/vendor/unmute",
     "/js/vendor/joypixels",
     "/js/vendor/hammer.min.js",
@@ -55,9 +54,10 @@ async function _loadChatScriptsImpl(): Promise<void> {
       return name;
     };
 
-    // Fire-and-forget scripts (no dependency chain)
+    // Fire-and-forget scripts (no dependency chain) — swallow errors
+    // to prevent unhandled rejections from triggering boot error UI
     for (const script of scriptsToLoad.async) {
-      loadScript(normalizeScriptName(script));
+      loadScript(normalizeScriptName(script)).catch(() => {});
     }
 
     // Sequential dependency chain
@@ -66,5 +66,6 @@ async function _loadChatScriptsImpl(): Promise<void> {
     }
   } catch (error) {
     console.error("Failed to load chat scripts", error);
+    throw error;
   }
 }
