@@ -183,7 +183,7 @@ onUnmounted(() => {
               </span>
               <span
                 v-if="channel.lastContent"
-                class="shrink-0 text-xs text-text-on-main-bg-color"
+                class="flex shrink-0 items-center gap-0.5 text-xs text-text-on-main-bg-color"
               >
                 {{ getPreviewTime(channel) }}
               </span>

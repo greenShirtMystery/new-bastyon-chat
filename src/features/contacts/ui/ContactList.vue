@@ -466,7 +466,7 @@ const getRoomLongPress = (room: ChatRoom) => {
       class="h-full"
     >
       <template #default="{ item }">
-        <!-- Channel item -->
+        <!-- Channel item (same layout as chat room) -->
         <button
           v-if="isChannel(item)"
           class="flex h-[68px] w-full cursor-pointer items-center gap-3 px-3 py-2.5 transition-colors hover:bg-neutral-grad-0 active:bg-neutral-grad-0"
@@ -483,12 +483,17 @@ const getRoomLongPress = (room: ChatRoom) => {
             </div>
           </div>
           <div class="min-w-0 flex-1">
+            <!-- Name row -->
             <div class="flex items-center justify-between gap-2">
               <span class="truncate text-[15px] font-medium text-text-color">{{ (item as Channel).name }}</span>
-              <span v-if="(item as Channel).lastContent" class="shrink-0 text-xs text-text-on-main-bg-color">
+              <span
+                v-if="(item as Channel).lastContent"
+                class="flex shrink-0 items-center gap-0.5 text-xs text-text-on-main-bg-color"
+              >
                 {{ formatRelativeTime(new Date((item as Channel).lastContent!.time * 1000)) }}
               </span>
             </div>
+            <!-- Preview row -->
             <div class="mt-0.5 flex items-center justify-between gap-2">
               <span class="truncate text-sm text-text-on-main-bg-color">
                 {{ getChannelPreview(item as Channel) }}
