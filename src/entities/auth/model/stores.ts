@@ -19,6 +19,8 @@ import { convertToHexString } from "@/shared/lib/convert-to-hex-string";
 import { mergeObjects } from "@/shared/lib/merge-objects";
 
 import { useAsyncOperation } from "@/shared/use";
+import { bootStatus } from "@/app/model/boot-status";
+import { withTimeout } from "@/shared/lib/with-timeout";
 import { defineStore } from "pinia";
 import { computed, ref, shallowRef } from "vue";
 
@@ -258,7 +260,7 @@ export const useAuthStore = defineStore(NAMESPACE, () => {
           matrixKit.value?.chatIsPublic(room as Record<string, unknown>) ?? false,
         matrixId: (id: string) => matrixService.matrixId(id),
       });
-      await cryptoInstance.prepare();
+      await withTimeout(cryptoInstance.prepare(), 10_000, "Pcrypto storage init");
       pcrypto.value = cryptoInstance;
 
       // Step 7: Wire Matrix events → chat store
@@ -365,9 +367,11 @@ export const useAuthStore = defineStore(NAMESPACE, () => {
       }
 
       matrixError.value = "Connecting to Matrix server...";
-      await matrixService.init();
+      bootStatus.setStep("matrix");
+      await withTimeout(matrixService.init(), 45_000, "Matrix server connection");
 
       if (matrixService.isReady()) {
+        bootStatus.setStep("sync");
         matrixReady.value = true;
         matrixError.value = null;
 

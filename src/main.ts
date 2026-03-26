@@ -5,4 +5,7 @@ import { Buffer } from "buffer";
 
 import { app } from "./app";
 
-app.then(app => app.mount("#app"));
+app.then(app => {
+  // On boot failure app is null — AppLoading stays mounted with error UI
+  if (app) app.mount("#app");
+});

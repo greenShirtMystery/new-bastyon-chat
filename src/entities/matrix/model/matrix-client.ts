@@ -15,6 +15,7 @@ import * as sdk from "matrix-js-sdk-bastyon/lib/browser-index.js";
 import { MATRIX_SERVER } from "@/shared/config";
 import { createChatStorage, type ChatStorageInstance } from "@/shared/lib/matrix/chat-storage";
 import { getmatrixid } from "@/shared/lib/matrix/functions";
+import { withTimeout } from "@/shared/lib/with-timeout";
 
 import type { MatrixCredentials, MatrixClient, MatrixSDK } from "./types";
 
@@ -203,7 +204,7 @@ export class MatrixClientService {
     const userClient = this.createMtrxClient(userClientData);
 
     try {
-      await indexedDBStore.startup();
+      await withTimeout(indexedDBStore.startup(), 10_000, "Matrix IndexedDB startup");
     } catch (e) {
       console.error("Matrix IndexedDB startup error:", e);
     }

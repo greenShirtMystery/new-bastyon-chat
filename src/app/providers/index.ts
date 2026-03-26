@@ -11,9 +11,13 @@ import { initTransport } from "@/shared/lib/transport/init-transport";
 import { useTorStore } from "@/entities/tor";
 import { useLocaleStore } from "@/entities/locale";
 import { isElectron, isNative } from "@/shared/lib/platform";
+import { bootStatus } from "@/app/model/boot-status";
+import { withTimeout } from "@/shared/lib/with-timeout";
 
 export const setupProviders = async (app: App) => {
   setupAssets();
+
+  bootStatus.setStep("scripts");
 
   // Start loading chat scripts early — runs in parallel with Pinia/theme/locale.
   const scriptsReady = setupChatScripts();
@@ -53,15 +57,17 @@ export const setupProviders = async (app: App) => {
     watch(() => themeStore.isDarkMode, syncStatusBar);
 
     // Start Tor daemon and reverse proxy before Matrix client connects
+    bootStatus.setStep("tor");
     const { torService } = await import('@/shared/lib/tor');
-    await torService.init('always');
+    await withTimeout(torService.init('always'), 30_000, "Tor init");
     // Wire store to native torService reactive state
     useTorStore().init();
   }
 
   // Scripts must finish before router mounts the app — components
   // need API globals (sdk, actions, etc.) available in onMounted.
-  await scriptsReady;
+  await withTimeout(scriptsReady, 30_000, "Chat scripts loading");
+  bootStatus.setStep("auth");
   await setupRouter(app);
 };
 
