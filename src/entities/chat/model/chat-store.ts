@@ -337,7 +337,7 @@ export const useChatStore = defineStore(NAMESPACE, () => {
   const changedRoomIds = new Set<string>();
   let lastSyncState: "PREPARED" | "SYNCING" | null = null;
   let lastFullRefresh = 0;
-  const FULL_REFRESH_INTERVAL = 300_000; // Reconciliation fallback (5 min — incremental is sufficient)
+  const FULL_REFRESH_INTERVAL = 900_000; // 15 min — incremental + delta handles normal updates
   let membersLoadedOnce = false; // One-time member loading for stale lazy-load cache
   let fullRefreshInFlight = false; // Re-entrancy guard for async fullRoomRefresh
 
@@ -1321,7 +1321,27 @@ export const useChatStore = defineStore(NAMESPACE, () => {
       const dexieSourceRooms = prevActiveIsExternal
         ? newRooms.filter(r => r.id !== prevActiveRoom!.id)
         : newRooms;
-      const updates = dexieSourceRooms.map(r => ({
+
+      // OPTIMIZATION: Only write rooms with display-relevant changes to Dexie
+      const changedForDexie: ChatRoom[] = [];
+      for (const r of dexieSourceRooms) {
+        const prev = dexieRoomMap.get(r.id);
+        if (!prev
+          || prev.name !== r.name
+          || prev.unreadCount !== r.unreadCount
+          || (r.lastMessage?.timestamp ?? 0) !== (prev.lastMessageTimestamp ?? 0)
+          || prev.membership !== (r.membership ?? "join")
+          || prev.avatar !== r.avatar
+        ) {
+          changedForDexie.push(r);
+        }
+      }
+
+      if (import.meta.env.DEV) {
+        console.log(`[perf] fullRoomRefresh: ${dexieSourceRooms.length} total, ${changedForDexie.length} changed, ${dexieSourceRooms.length - changedForDexie.length} skipped`);
+      }
+
+      const updates = changedForDexie.map(r => ({
         id: r.id,
         name: r.name,
         avatar: r.avatar,
@@ -1508,38 +1528,29 @@ export const useChatStore = defineStore(NAMESPACE, () => {
     namesReady.value = true;
   };
 
-  /** Incremental room refresh — only processes changed rooms */
+  /** Incremental room refresh — only processes changed rooms.
+   *  Fetches individual rooms by ID from SDK instead of scanning all rooms (O(changed) not O(n)). */
   const incrementalRoomRefresh = (
-    matrixRooms: any[],
     kit: MatrixKit,
     myUserId: string,
     changed: Set<string>,
   ) => {
-    const matrixRoomMap = new Map<string, any>();
-    for (const mr of matrixRooms) matrixRoomMap.set(mr.roomId as string, mr);
-
-    // Detect new rooms (not in our map yet)
-    for (const mr of matrixRooms) {
-      if (!roomsMap.has(mr.roomId as string)) changed.add(mr.roomId as string);
-    }
-
-    // Remove rooms that no longer exist in Matrix
-    const matrixRoomIds = new Set(matrixRooms.map((r: any) => r.roomId as string));
+    const matrixService = getMatrixClientService();
     let removed = false;
-    rooms.value = rooms.value.filter(r => {
-      if (!matrixRoomIds.has(r.id)) {
-        roomsMap.delete(r.id);
-        removed = true;
-        return false;
-      }
-      return true;
-    });
 
-    // Rebuild only changed rooms
+    // Rebuild only changed rooms — fetch each individually from SDK
     const changedMatrixRooms: any[] = [];
     for (const roomId of changed) {
-      const matrixRoom = matrixRoomMap.get(roomId);
-      if (!matrixRoom) continue;
+      const matrixRoom = matrixService.getRoom(roomId) as any;
+      if (!matrixRoom) {
+        // Room gone from SDK — remove from our list
+        if (roomsMap.has(roomId)) {
+          roomsMap.delete(roomId);
+          rooms.value = rooms.value.filter(r => r.id !== roomId);
+          removed = true;
+        }
+        continue;
+      }
 
       // Check this room is still interactive
       const membership = matrixRoom.selfMembership ?? matrixRoom.getMyMembership?.();
@@ -1807,8 +1818,6 @@ export const useChatStore = defineStore(NAMESPACE, () => {
     if (fullRefreshInFlight) return;
 
     const myUserId = matrixService.getUserId() ?? "";
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const matrixRooms = matrixService.getRooms() as any[];
 
     // Determine if we need a full rebuild or incremental update
     const isInitial = lastSyncState === "PREPARED" || !roomsInitialized.value;
@@ -1818,9 +1827,13 @@ export const useChatStore = defineStore(NAMESPACE, () => {
 
     if (isInitial || forceFullRefresh) {
       lastFullRefresh = Date.now();
+      // Full refresh needs all rooms from SDK
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const matrixRooms = matrixService.getRooms() as any[];
       fullRoomRefresh(matrixRooms, kit, myUserId);
     } else {
-      incrementalRoomRefresh(matrixRooms, kit, myUserId, changed);
+      // Incremental: only process changed room IDs, don't scan all rooms
+      incrementalRoomRefresh(kit, myUserId, changed);
     }
 
     // Mark rooms as initialized (first sync-based refresh complete)
