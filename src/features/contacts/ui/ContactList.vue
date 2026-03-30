@@ -455,6 +455,7 @@ const loadMoreRooms = () => {
 
 /** Track current viewport generation — incremented on each scroll, previous batch stops. */
 let viewportGeneration = 0;
+let _layoutRetries = 0;
 
 /** Calculate which rooms are visible, load profiles + messages for them.
  *  On scroll: cancels previous batch, loads only new visible rooms. */
@@ -462,6 +463,14 @@ const loadVisibleRooms = () => {
   const el = scrollerRef.value?.$el as HTMLElement | undefined;
   if (!el) return;
   const { scrollTop, clientHeight } = el;
+
+  // During tab transition clientHeight may be 0 — retry when layout settles
+  if (clientHeight === 0 && _layoutRetries < 10) {
+    _layoutRetries++;
+    requestAnimationFrame(loadVisibleRooms);
+    return;
+  }
+  _layoutRetries = 0;
 
   // Only the actual viewport + small overscan (1 above, 2 below)
   const firstIdx = Math.max(0, Math.floor(scrollTop / ITEM_HEIGHT) - 1);
