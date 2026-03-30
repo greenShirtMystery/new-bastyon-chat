@@ -121,3 +121,13 @@ export async function getCachedMessages(roomId: string): Promise<unknown[]> {
   }
 }
 
+/** Delete the entire legacy chat-cache IndexedDB database */
+export function deleteLegacyCache(): void {
+  // Close any open connection first
+  if (dbPromise) {
+    dbPromise.then(db => db.close()).catch(() => {});
+    dbPromise = null;
+  }
+  indexedDB.deleteDatabase(DB_NAME);
+}
+

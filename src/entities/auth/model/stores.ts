@@ -3,6 +3,9 @@ import {
   PocketnetInstanceConfigurator
 } from "@/app/providers";
 import { useChatStore } from "@/entities/chat";
+import { useUserStore } from "@/entities/user/model";
+import { useCallStore } from "@/entities/call/model/call-store";
+import { useChannelStore } from "@/entities/channel/model/channel-store";
 import {
   getMatrixClientService,
   resetMatrixClientService,
@@ -12,7 +15,11 @@ import {
 import type { UserWithPrivateKeys } from "@/entities/matrix/model/matrix-crypto";
 import { useCallService } from "@/features/video-calls/model/call-service";
 import { getmatrixid } from "@/shared/lib/matrix/functions";
-import { initChatDb } from "@/shared/lib/local-db";
+import { initChatDb, deleteChatDb } from "@/shared/lib/local-db";
+import { clearAllDrafts } from "@/shared/lib/drafts";
+import { clearQueue } from "@/shared/lib/offline-queue";
+import { deleteLegacyCache } from "@/shared/lib/cache/chat-cache";
+import { clearAccountLocalStorage } from "@/shared/lib/clear-account-storage";
 import { isNative } from "@/shared/lib/platform";
 import { useLocalStorage } from "@/shared/lib/browser";
 import { convertToHexString } from "@/shared/lib/convert-to-hex-string";
@@ -518,6 +525,25 @@ export const useAuthStore = defineStore(NAMESPACE, () => {
   );
 
   const logout = () => {
+    // ── Clean up all account data ──
+
+    // 1. Reset Pinia stores (in-memory state)
+    useChatStore().cleanup();
+    useUserStore().cleanup();
+    useCallStore().clearCall();
+    useChannelStore().cleanup();
+
+    // 2. Delete Dexie local-first database
+    deleteChatDb().catch(() => {});
+
+    // 3. Clear localStorage account data
+    clearAllDrafts();
+    clearQueue();
+    clearAccountLocalStorage();
+
+    // 4. Delete legacy IndexedDB cache
+    deleteLegacyCache();
+
     // Destroy cross-tab call lock
     import("@/features/video-calls/model/call-tab-lock").then(({ destroyCallTabLock }) => {
       destroyCallTabLock();

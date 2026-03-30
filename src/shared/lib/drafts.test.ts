@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { getDraft, saveDraft, clearDraft, _resetMigration } from "./drafts";
+import { getDraft, saveDraft, clearDraft, clearAllDrafts, _resetMigration } from "./drafts";
 
 describe("drafts", () => {
   beforeEach(() => {
@@ -61,5 +61,17 @@ describe("drafts", () => {
     saveDraft("!room1:server", "first");
     saveDraft("!room1:server", "second");
     expect(getDraft("!room1:server")).toBe("second");
+  });
+
+  it("clearAllDrafts removes all draft keys", () => {
+    saveDraft("!room1:mx", "hello");
+    saveDraft("!room2:mx", "world");
+    localStorage.setItem("unrelated-key", "keep");
+
+    clearAllDrafts();
+
+    expect(getDraft("!room1:mx")).toBe("");
+    expect(getDraft("!room2:mx")).toBe("");
+    expect(localStorage.getItem("unrelated-key")).toBe("keep");
   });
 });

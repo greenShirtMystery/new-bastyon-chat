@@ -232,7 +232,17 @@ export const useUserStore = defineStore(NAMESPACE, () => {
 
   startBackgroundRefresh();
 
+  const cleanup = () => {
+    users.value = {};
+    triggerRef(users);
+    if (_triggerTimer) { clearTimeout(_triggerTimer); _triggerTimer = null; }
+    if (_cacheTimer) { clearTimeout(_cacheTimer); _cacheTimer = null; }
+    if (_refreshTimer) { clearInterval(_refreshTimer); _refreshTimer = null; }
+    localStorage.removeItem(LS_KEY);
+  };
+
   return {
+    cleanup,
     enqueueProfiles,
     getUser,
     loadUserIfMissing,
