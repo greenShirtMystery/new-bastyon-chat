@@ -237,6 +237,7 @@ export class MatrixClientService {
               "m.room.create",
               "m.room.topic",
               "m.room.history_visibility",
+              "m.room.tombstone",
             ],
           },
           ephemeral: {
@@ -264,7 +265,7 @@ export class MatrixClientService {
     // on-demand when a room is opened (loadAllMessages).
     await userClient.startClient({
       pollTimeout: 60000,
-      resolveInvitesToProfiles: true,
+      resolveInvitesToProfiles: false,
       initialSyncLimit: 1,
       disablePresence: true,
       lazyLoadMembers: true,
