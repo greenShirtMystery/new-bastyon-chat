@@ -162,6 +162,7 @@ export function closeChatDb(): void {
  */
 export async function deleteChatDb(): Promise<void> {
   if (currentKit) {
+    currentKit.decryptionWorker.dispose();
     await currentKit.db.delete();
     currentKit = null;
     currentUserId = null;

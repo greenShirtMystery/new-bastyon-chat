@@ -524,7 +524,7 @@ export const useAuthStore = defineStore(NAMESPACE, () => {
     }
   );
 
-  const logout = () => {
+  const logout = async () => {
     // ── Clean up all account data ──
 
     // 1. Reset Pinia stores (in-memory state)
@@ -533,8 +533,8 @@ export const useAuthStore = defineStore(NAMESPACE, () => {
     useCallStore().clearCall();
     useChannelStore().cleanup();
 
-    // 2. Delete Dexie local-first database
-    deleteChatDb().catch(() => {});
+    // 2. Delete Dexie local-first database (await to prevent race with re-login)
+    await deleteChatDb().catch(() => {});
 
     // 3. Clear localStorage account data
     clearAllDrafts();
