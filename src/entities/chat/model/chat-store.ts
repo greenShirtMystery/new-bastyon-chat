@@ -5024,6 +5024,44 @@ export const useChatStore = defineStore(NAMESPACE, () => {
     return 0;
   };
 
+  /** Reset all in-memory state and account-specific localStorage (called on logout) */
+  const cleanup = () => {
+    rooms.value = [];
+    roomsMap.clear();
+    activeRoomId.value = null;
+    messages.value = {};
+    typing.value = {};
+    replyingTo.value = null;
+    isDetachedFromLatest.value = false;
+    roomsInitialized.value = false;
+    namesReady.value = false;
+    editingMessage.value = null;
+    deletingMessage.value = null;
+    userDisplayNames.value = {};
+    selectionMode.value = false;
+    selectedMessageIds.value = new Set();
+    forwardingMessages.value = false;
+    pinnedMessages.value = [];
+    pinnedMessageIndex.value = 0;
+    pinnedRoomIds.value = new Set();
+    mutedRoomIds.value = new Set();
+    matrixKitRef.value = null;
+    pcryptoRef.value = null;
+    chatDbKitRef.value = null;
+    decryptedPreviewCache.clear();
+    changedRoomIds.clear();
+    decryptFailedRooms.clear();
+    matrixRoomAddresses.clear();
+    profilesRequestedForRooms.clear();
+    roomFetchStates.clear();
+    _sortedRoomsRef.value = [];
+    messageWindowSize.value = 50;
+
+    // Clear localStorage account data
+    localStorage.removeItem("chat_pinned_rooms");
+    localStorage.removeItem("chat_muted_rooms");
+  };
+
   return {
     activeMediaMessages,
     activeMessages,
@@ -5032,6 +5070,7 @@ export const useChatStore = defineStore(NAMESPACE, () => {
     addMessage,
     addRoom,
     advanceInboundWatermark,
+    cleanup,
     clearDeletedRoom,
     deletingMessage,
     editingMessage,

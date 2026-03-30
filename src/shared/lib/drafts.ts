@@ -40,3 +40,14 @@ export function saveDraft(roomId: string, text: string) {
 export function clearDraft(roomId: string) {
   localStorage.removeItem(DRAFT_PREFIX + roomId);
 }
+
+export function clearAllDrafts() {
+  const toRemove: string[] = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (key?.startsWith(DRAFT_PREFIX)) toRemove.push(key);
+  }
+  for (const key of toRemove) localStorage.removeItem(key);
+  // Also remove legacy key if somehow still present
+  localStorage.removeItem(LEGACY_KEY);
+}

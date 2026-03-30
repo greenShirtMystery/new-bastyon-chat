@@ -190,6 +190,21 @@ export const useChannelStore = defineStore("channel", () => {
     activeChannelAddress.value = null;
   }
 
+  const cleanup = () => {
+    channels.value = [];
+    activeChannelAddress.value = null;
+    posts.value = new Map();
+    isLoadingChannels.value = false;
+    isLoadingPosts.value = false;
+    channelsPage.value = 0;
+    hasMoreChannels.value = true;
+    postsStartTxid.value = new Map();
+    hasMorePosts.value = new Map();
+    blockHeight.value = 0;
+    channelError.value = null;
+    postsError.value = null;
+  };
+
   return {
     channels,
     activeChannelAddress,
@@ -210,5 +225,6 @@ export const useChannelStore = defineStore("channel", () => {
     fetchPosts,
     setActiveChannel,
     clearActiveChannel,
+    cleanup,
   };
 });
