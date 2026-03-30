@@ -233,11 +233,16 @@ function getPreview(room: ChatRoom): DisplayResult {
       t("message.notDecrypted"),
     );
   }
-  // During initial sync, rooms appear before messages load → show skeleton, not "no messages"
+  // Show skeleton while data is still loading — not "no messages"
+  // 1. Initial sync not complete — rooms from Dexie cache but lastMessage not yet populated
+  if (!chatStore.roomsInitialized) return { state: "resolving", text: "" };
+  // 2. Names/profiles still loading (first sync display names phase)
   if (!chatStore.namesReady) return { state: "resolving", text: "" };
-  // Check if viewport-fetch is still loading this room
+  // 3. Viewport-fetch is actively loading messages for this room
   const fetchState = chatStore.roomFetchStates.get(room.id);
   if (fetchState?.status === "loading") return { state: "resolving", text: "" };
+  // 4. Room has recent activity but no lastMessage — likely still syncing
+  if (room.updatedAt && room.updatedAt > Date.now() - 60_000) return { state: "resolving", text: "" };
   return { state: "ready", text: t("contactList.noMessages") };
 }
 
