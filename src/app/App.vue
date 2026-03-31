@@ -12,6 +12,7 @@ import QuickSearchModal from "@/features/search/ui/QuickSearchModal.vue";
 import { handleSdkSync } from "@/features/sync-status";
 import { isNative } from "@/shared/lib/platform";
 import { useRouter } from "vue-router";
+import { initAndroidBackListener, useAndroidBackHandler } from "@/shared/lib/composables/use-android-back-handler";
 
 import { AppPages, AppRoutes, EAppProviders } from "./providers";
 
@@ -131,6 +132,13 @@ const onResize = () => { isMobile.value = window.innerWidth < 768; };
 
 const showQuickSearch = ref(false);
 
+// Android back: close quick search
+useAndroidBackHandler("quick-search", 95, () => {
+  if (!showQuickSearch.value) return false;
+  showQuickSearch.value = false;
+  return true;
+});
+
 const handleGlobalKeydown = (e: KeyboardEvent) => {
   if ((e.metaKey || e.ctrlKey) && e.key === "k") {
     e.preventDefault();
@@ -144,6 +152,9 @@ const handleGlobalKeydown = (e: KeyboardEvent) => {
 onMounted(async () => {
   window.addEventListener("resize", onResize);
   window.addEventListener("keydown", handleGlobalKeydown);
+
+  // Initialize Android hardware back button handler
+  initAndroidBackListener();
 
   // Mark Electron mode on <html> for CSS adjustments (drag regions, traffic light padding)
   if ((window as any).electronAPI?.isElectron) {

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { useDrawerStore } from "../model";
+import { useAndroidBackHandler } from "@/shared/lib/composables/use-android-back-handler";
 
 interface Props {
   id: string;
@@ -29,6 +30,13 @@ const onAfterLeaveTransition = () => {
 };
 
 onUnmounted(closeDrawer);
+
+// Android back: close drawer when shown
+useAndroidBackHandler(`drawer-${props.id}`, 85, () => {
+  if (!isDisplayCurrentDrawer.value) return false;
+  closeDrawer();
+  return true;
+});
 </script>
 
 <template>

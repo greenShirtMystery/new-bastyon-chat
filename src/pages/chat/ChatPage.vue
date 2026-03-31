@@ -7,6 +7,7 @@ import { useChatStore } from "@/entities/chat";
 import { useAuthStore } from "@/entities/auth";
 import { useI18n } from "@/shared/lib/i18n";
 import { useSidebarTab } from "@/widgets/sidebar/model/use-sidebar-tab";
+import { useAndroidBackHandler } from "@/shared/lib/composables/use-android-back-handler";
 
 const chatStore = useChatStore();
 const authStore = useAuthStore();
@@ -75,6 +76,25 @@ const onGroupCreated = () => {
 const onCloseGroupCreation = () => {
   showGroupCreation.value = false;
 };
+
+// Android back: close overlays or go back to sidebar
+useAndroidBackHandler("chat-group-creation", 70, () => {
+  if (!isMobile.value || !showGroupCreation.value) return false;
+  showGroupCreation.value = false;
+  return true;
+});
+
+useAndroidBackHandler("chat-settings-content", 70, () => {
+  if (!isMobile.value || !settingsSubView.value) return false;
+  closeSettingsContent();
+  return true;
+});
+
+useAndroidBackHandler("chat-back-to-sidebar", 60, () => {
+  if (!isMobile.value || showSidebar.value) return false;
+  onBackToSidebar();
+  return true;
+});
 </script>
 
 <template>

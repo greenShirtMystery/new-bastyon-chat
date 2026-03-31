@@ -4,10 +4,16 @@ import { useThemeStore } from "@/entities/theme";
 import { useTorStore } from "@/entities/tor";
 import { Toggle } from "@/shared/ui/toggle";
 import { isNative } from "@/shared/lib/platform";
+import { useAndroidBackHandler } from "@/shared/lib/composables/use-android-back-handler";
 
 const themeStore = useThemeStore();
 const torStore = useTorStore();
 const router = useRouter();
+
+useAndroidBackHandler("settings-page", 50, () => {
+  router.push({ name: "ChatPage" });
+  return true;
+});
 
 const isElectron = !!(window as any).electronAPI?.isElectron;
 const showTor = isElectron || isNative;

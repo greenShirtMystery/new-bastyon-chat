@@ -3,6 +3,7 @@ import { ref, computed, watch } from "vue";
 import type { Message } from "@/entities/chat";
 import { useChatStore, MessageType } from "@/entities/chat";
 import { useFileDownload } from "../model/use-file-download";
+import { useAndroidBackHandler } from "@/shared/lib/composables/use-android-back-handler";
 
 interface Props {
   show: boolean;
@@ -14,6 +15,13 @@ const emit = defineEmits<{ close: [] }>();
 
 const chatStore = useChatStore();
 const { getState, download } = useFileDownload();
+
+// Android back: close media viewer (highest overlay priority)
+useAndroidBackHandler("media-viewer", 100, () => {
+  if (!props.show) return false;
+  emit("close");
+  return true;
+});
 
 const currentIndex = ref(0);
 const scale = ref(1);

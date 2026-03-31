@@ -8,9 +8,15 @@ import { Toggle } from "@/shared/ui/toggle";
 import Modal from "@/shared/ui/modal/Modal.vue";
 import EmojiPicker from "@/features/messaging/ui/EmojiPicker.vue";
 import { ref } from "vue";
+import { useAndroidBackHandler } from "@/shared/lib/composables/use-android-back-handler";
 
 const themeStore = useThemeStore();
 const router = useRouter();
+
+useAndroidBackHandler("appearance-page", 50, () => {
+  router.back();
+  return true;
+});
 
 // --- Custom accent color ---
 const showCustomAccent = ref(false);

@@ -5,6 +5,7 @@ import { formatDuration } from "@/shared/lib/format";
 import { useCallService } from "../model/call-service";
 import CallControls from "./CallControls.vue";
 import VideoTile from "./VideoTile.vue";
+import { useAndroidBackHandler } from "@/shared/lib/composables/use-android-back-handler";
 
 const callStore = useCallStore();
 const callService = useCallService();
@@ -33,6 +34,13 @@ const show = computed(() => {
 const minimize = () => {
   callStore.minimized = true;
 };
+
+// Android back: minimize call window instead of closing
+useAndroidBackHandler("call-window", 100, () => {
+  if (!show.value) return false;
+  minimize();
+  return true;
+});
 
 const isVideoCall = computed(
   () => callStore.activeCall?.type === "video",
