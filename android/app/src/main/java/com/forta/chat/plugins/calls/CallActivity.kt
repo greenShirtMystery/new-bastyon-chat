@@ -20,9 +20,11 @@ import android.util.Rational
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
+import android.widget.FrameLayout
 import android.widget.ImageButton
 import android.widget.TextView
 import com.forta.chat.R
+import com.forta.chat.utils.WindowInsetsHelper
 import com.forta.chat.plugins.webrtc.NativeWebRTCManager
 import com.forta.chat.plugins.webrtc.WebRTCPlugin
 import org.webrtc.RendererCommon
@@ -141,6 +143,18 @@ class CallActivity : Activity(), SensorEventListener {
         setContentView(R.layout.activity_call)
         bindViews()
         setupListeners()
+
+        // Apply real system bar insets instead of hardcoded 48dp
+        WindowInsetsHelper.setupEdgeToEdge(
+            activity = this,
+            topView = topBar,
+            bottomView = controlsBar,
+            onInsets = { top, _, _, _ ->
+                val lp = localVideoView.layoutParams as FrameLayout.LayoutParams
+                lp.topMargin = top + (16 * resources.displayMetrics.density).toInt()
+                localVideoView.layoutParams = lp
+            }
+        )
 
         // Read extras
         val callerName = intent.getStringExtra(EXTRA_CALLER_NAME) ?: "Unknown"
