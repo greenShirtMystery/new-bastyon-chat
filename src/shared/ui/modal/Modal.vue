@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useAndroidBackHandler } from "@/shared/lib/composables/use-android-back-handler";
+
 interface Props {
   show: boolean;
   /** Optional accessible label for the dialog */
@@ -9,6 +11,14 @@ const props = defineProps<Props>();
 const emit = defineEmits<{ close: [] }>();
 
 const dialogRef = ref<HTMLElement>();
+
+// Android back: close modal when shown
+const modalId = `modal-${Math.random().toString(36).slice(2, 8)}`;
+useAndroidBackHandler(modalId, 90, () => {
+  if (!props.show) return false;
+  emit("close");
+  return true;
+});
 
 const onOverlayClick = () => {
   emit("close");

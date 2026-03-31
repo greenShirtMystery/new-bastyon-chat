@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref } from "vue";
+import { useAndroidBackHandler } from "@/shared/lib/composables/use-android-back-handler";
 
 interface Props {
   show: boolean;
@@ -13,6 +14,14 @@ const props = withDefaults(defineProps<Props>(), {
   dragDismiss: true,
 });
 const emit = defineEmits<{ close: [] }>();
+
+// Android back: close bottom sheet when shown
+const bsId = `bottomsheet-${Math.random().toString(36).slice(2, 8)}`;
+useAndroidBackHandler(bsId, 90, () => {
+  if (!props.show) return false;
+  emit("close");
+  return true;
+});
 
 const sheetRef = ref<HTMLElement>();
 let startY = 0;

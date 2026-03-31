@@ -3,6 +3,7 @@ package com.forta.chat
 import android.os.Bundle
 import android.view.View
 import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import com.getcapacitor.BridgeActivity
 import com.forta.chat.plugins.tor.TorPlugin
@@ -29,6 +30,9 @@ class MainActivity : BridgeActivity() {
         registerPlugin(UpdaterPlugin::class.java)
         registerPlugin(PushDataPlugin::class.java)
         super.onCreate(savedInstanceState)
+
+        // Enable edge-to-edge: content draws behind system bars, insets are non-zero
+        WindowCompat.setDecorFitsSystemWindows(window, false)
 
         // Auto-check for updates (respects 1-hour cache)
         activityScope.launch {

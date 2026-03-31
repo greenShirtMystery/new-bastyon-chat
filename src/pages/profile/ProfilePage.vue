@@ -1,8 +1,14 @@
 <script setup lang="ts">
 import MainLayout from "@/widgets/layouts/MainLayout.vue";
 import { UserProfileInfo } from "@/features/user-profile";
+import { useAndroidBackHandler } from "@/shared/lib/composables/use-android-back-handler";
 
 const router = useRouter();
+
+useAndroidBackHandler("profile-page", 50, () => {
+  router.push({ name: "ChatPage" });
+  return true;
+});
 
 const goToEdit = () => {
   router.push({ name: "ProfileEditPage" });

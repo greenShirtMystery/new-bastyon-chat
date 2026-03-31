@@ -27,6 +27,7 @@ import DropOverlay from "@/features/messaging/ui/DropOverlay.vue";
 import { usePasteDrop } from "@/features/messaging/model/use-paste-drop";
 import { useResolvedRoomName } from "@/entities/chat/lib/use-resolved-room-name";
 import { getRoomTitleForUI, type DisplayResult } from "@/entities/chat";
+import { useAndroidBackHandler } from "@/shared/lib/composables/use-android-back-handler";
 const chatStore = useChatStore();
 const authStore = useAuthStore();
 const userStore = useUserStore();
@@ -161,6 +162,32 @@ const showMoreMenu = ref(false);
 const callService = useCallService();
 const { isAvailable: walletAvailable } = useWallet();
 const showDonateModal = ref(false);
+
+// Android back: close overlays in ChatWindow
+useAndroidBackHandler("chat-forward-picker", 90, () => {
+  if (!showForwardPicker.value) return false;
+  showForwardPicker.value = false;
+  chatStore.exitSelectionMode();
+  return true;
+});
+
+useAndroidBackHandler("chat-donate-modal", 90, () => {
+  if (!showDonateModal.value) return false;
+  showDonateModal.value = false;
+  return true;
+});
+
+useAndroidBackHandler("chat-search", 80, () => {
+  if (!showSearch.value) return false;
+  showSearch.value = false;
+  return true;
+});
+
+useAndroidBackHandler("chat-info-panel", 80, () => {
+  if (!showInfoPanel.value) return false;
+  showInfoPanel.value = false;
+  return true;
+});
 
 const profileAddress = ref("");
 const showUserProfile = ref(false);
