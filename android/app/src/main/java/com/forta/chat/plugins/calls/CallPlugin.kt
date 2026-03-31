@@ -84,16 +84,35 @@ class CallPlugin : Plugin() {
 
         Log.d(TAG, "reportOutgoingCall: $callerName ($callId)")
 
-        // For self-managed ConnectionService, create connection directly
-        val connection = CallConnection(context, callId)
-        connection.setCallerDisplayName(callerName, TelecomManager.PRESENTATION_ALLOWED)
-        connection.setAddress(
-            android.net.Uri.fromParts("sip", callerName, null),
-            TelecomManager.PRESENTATION_ALLOWED
-        )
-        connection.setDialing()
-        CallConnectionService.currentConnection = connection
-        call.resolve()
+        try {
+            val telecomManager = context.getSystemService(TelecomManager::class.java)
+            val handle = CallConnectionService.getPhoneAccountHandle(context)
+
+            val extras = Bundle().apply {
+                putString("callId", callId)
+                putString("callerName", callerName)
+                putBoolean("hasVideo", hasVideo)
+                putParcelable(TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE, handle)
+            }
+
+            telecomManager.placeCall(
+                android.net.Uri.fromParts("sip", callerName, null),
+                extras
+            )
+            call.resolve()
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to place outgoing call via TelecomManager, falling back", e)
+            // Fallback: create connection directly (won't get system audio routing)
+            val connection = CallConnection(context, callId)
+            connection.setCallerDisplayName(callerName, TelecomManager.PRESENTATION_ALLOWED)
+            connection.setAddress(
+                android.net.Uri.fromParts("sip", callerName, null),
+                TelecomManager.PRESENTATION_ALLOWED
+            )
+            connection.setDialing()
+            CallConnectionService.currentConnection = connection
+            call.resolve()
+        }
     }
 
     @PluginMethod
