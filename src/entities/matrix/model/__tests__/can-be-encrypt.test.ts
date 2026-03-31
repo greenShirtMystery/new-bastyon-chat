@@ -23,3 +23,19 @@ describe("canBeEncrypt peer key check", () => {
     expect(section).not.toMatch(/return usersinfoArray\.length > 1 && usersinfoArray\.length < 50;/);
   });
 });
+
+describe("decrypt graceful degradation", () => {
+  it("decryptEvent should check for missing body entries", () => {
+    const source = getSource();
+    const start = source.indexOf("async decryptEvent(event");
+    const section = source.slice(start, start + 4000);
+    expect(section).toContain("no encrypted payload for");
+  });
+
+  it("encryptEvent should warn when members missing keys", () => {
+    const source = getSource();
+    const start = source.indexOf("async encryptEvent(text");
+    const section = source.slice(start, start + 1000);
+    expect(section).toContain("missing encryption keys");
+  });
+});
