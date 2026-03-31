@@ -832,18 +832,48 @@ export const useAuthStore = defineStore(NAMESPACE, () => {
     }
   };
 
-  /** Resume polling on page reload if registration was pending */
-  const resumeRegistrationPoll = () => {
-    if (registrationPending.value && !registrationPollTimer) {
-      // Ensure POCKETNETINSTANCE has user address set (might not be if fetchUserInfo failed)
-      if (address.value && privateKey.value) {
-        PocketnetInstanceConfigurator.setUserAddress(address.value);
-        PocketnetInstanceConfigurator.setUserGetKeyPairFc(() =>
-          createKeyPair(privateKey.value!)
-        );
-      }
-      startRegistrationPoll();
+  /** Resume polling on page reload if registration was pending.
+   *  First verifies via blockchain RPC that keys are actually missing —
+   *  registrationPending may be stale from a previous failed attempt. */
+  const resumeRegistrationPoll = async () => {
+    if (!registrationPending.value || registrationPollTimer) return;
+
+    // Ensure POCKETNETINSTANCE has user address set
+    if (address.value && privateKey.value) {
+      PocketnetInstanceConfigurator.setUserAddress(address.value);
+      PocketnetInstanceConfigurator.setUserGetKeyPairFc(() =>
+        createKeyPair(privateKey.value!)
+      );
     }
+
+    // Before resuming poll, check if keys are already on blockchain
+    // (registrationPending may be stale from a previous session)
+    if (address.value) {
+      try {
+        const rawProfiles = await appInitializer.loadUsersInfoRaw([address.value]);
+        const rawProfile = rawProfiles[0];
+        if (rawProfile) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const rawKeys = (rawProfile as any).k ?? (rawProfile as any).keys ?? "";
+          let blockchainKeys: string[] = [];
+          if (Array.isArray(rawKeys)) {
+            blockchainKeys = rawKeys.filter((k: string) => k);
+          } else if (typeof rawKeys === "string" && rawKeys) {
+            blockchainKeys = rawKeys.split(",").filter((k: string) => k);
+          }
+          if (blockchainKeys.length >= 12) {
+            console.log("[auth] resumeRegistrationPoll: keys already on blockchain (" + blockchainKeys.length + "), clearing pending state");
+            setRegistrationPending(false);
+            setPendingRegProfile(null);
+            return;
+          }
+        }
+      } catch (e) {
+        console.warn("[auth] resumeRegistrationPoll: RPC check failed, resuming poll:", e);
+      }
+    }
+
+    startRegistrationPoll();
   };
 
   const clearRegistrationState = () => {
