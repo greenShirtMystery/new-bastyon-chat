@@ -202,7 +202,7 @@ class CallActivity : Activity(), SensorEventListener {
         // Register for call end
         onCallEnded = { runOnUiThread { finish() } }
         // Register for call connected
-        onCallConnected = { runOnUiThread { onCallConnected() } }
+        onCallConnected = { runOnUiThread { handleCallConnected() } }
 
         Log.d(TAG, "CallActivity created: $callerName, type=$callType")
     }
@@ -350,7 +350,7 @@ class CallActivity : Activity(), SensorEventListener {
     // Call state updates (called from WebRTCPlugin / bridge)
     // -----------------------------------------------------------------------
 
-    fun onCallConnected() {
+    fun handleCallConnected() {
         runOnUiThread {
             isConnected = true
             callStatusText.text = "00:00"
