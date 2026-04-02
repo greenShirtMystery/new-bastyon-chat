@@ -21,6 +21,8 @@ import { useUserStore } from "@/entities/user/model";
 import { RecycleScroller } from "vue-virtual-scroller";
 import "vue-virtual-scroller/dist/vue-virtual-scroller.css";
 import { getDraft } from "@/shared/lib/drafts";
+import { useSelectionStore } from "@/features/selection";
+import { hapticImpact } from "@/shared/lib/haptics";
 
 interface Props {
   filter?: "all" | "personal" | "groups" | "invites" | "channels";
@@ -34,10 +36,15 @@ const channelStore = useChannelStore();
 const userStore = useUserStore();
 const { t } = useI18n();
 const { formatPreview } = useFormatPreview();
+const selectionStore = useSelectionStore();
 const emit = defineEmits<{ selectRoom: [roomId: string]; selectChannel: [address: string] }>();
 
 const handleSelect = (room: ChatRoom) => {
   if (ctxMenu.value.show) return;
+  if (selectionStore.isSelectionMode) {
+    selectionStore.toggle(room.id);
+    return;
+  }
   chatStore.setActiveRoom(room.id);
   channelStore.clearActiveChannel();
   emit("selectRoom", room.id);
@@ -624,7 +631,11 @@ const getRoomLongPress = (room: ChatRoom) => {
   let handlers = longPressCache.get(room.id);
   if (!handlers) {
     handlers = useLongPress({
-      onTrigger: (e) => openCtxMenu(e, room),
+      onTrigger: (e) => {
+        if (selectionStore.isSelectionMode) return;
+        selectionStore.activate(room.id);
+        hapticImpact("MEDIUM");
+      },
     });
     longPressCache.set(room.id, handlers);
   }
@@ -695,7 +706,10 @@ const getRoomLongPress = (room: ChatRoom) => {
         <button
           v-else
           class="flex h-[68px] w-full cursor-pointer items-center gap-3 px-3 py-2.5 transition-colors hover:bg-neutral-grad-0 active:bg-neutral-grad-0"
-          :class="(item as ChatRoom).id === chatStore.activeRoomId ? 'bg-color-bg-ac/10' : ''"
+          :class="[
+            selectionStore.isSelected((item as ChatRoom).id) ? 'bg-color-bg-ac/8' :
+            (item as ChatRoom).id === chatStore.activeRoomId ? 'bg-color-bg-ac/10' : ''
+          ]"
           :aria-label="`${item._title?.text || ''}${(item as ChatRoom).unreadCount ? `, ${(item as ChatRoom).unreadCount} unread` : ''}`"
           @click="handleSelect(item as ChatRoom)"
           @contextmenu.prevent="(e: MouseEvent) => { ctxMenu = { show: true, x: e.clientX, y: e.clientY, roomId: (item as ChatRoom).id }; }"
@@ -707,6 +721,24 @@ const getRoomLongPress = (room: ChatRoom) => {
           <!-- Avatar — always rendered, decoupled from name resolution to avoid
                remounting (which re-requests images on every fullRoomRefresh cycle) -->
           <div class="relative shrink-0">
+            <transition name="check-pop">
+              <div
+                v-if="selectionStore.isSelectionMode"
+                class="absolute inset-0 z-10 flex items-center justify-center rounded-full"
+                :class="selectionStore.isSelected((item as ChatRoom).id)
+                  ? 'bg-color-bg-ac'
+                  : 'bg-black/30'"
+              >
+                <svg
+                  v-if="selectionStore.isSelected((item as ChatRoom).id)"
+                  width="22" height="22" viewBox="0 0 24 24"
+                  fill="none" stroke="white" stroke-width="3"
+                  stroke-linecap="round" stroke-linejoin="round"
+                >
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+              </div>
+            </transition>
             <UserAvatar
               v-if="(item as ChatRoom).avatar?.startsWith('__pocketnet__:')"
               :address="(item as ChatRoom).avatar!.replace('__pocketnet__:', '')"
@@ -899,4 +931,12 @@ const getRoomLongPress = (room: ChatRoom) => {
   60%  { transform: scale(1.2); }
   100% { transform: scale(1); }
 }
+.check-pop-enter-active {
+  transition: transform 0.15s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.1s ease;
+}
+.check-pop-enter-from { transform: scale(0); opacity: 0; }
+.check-pop-leave-active {
+  transition: transform 0.1s ease-in, opacity 0.1s ease-in;
+}
+.check-pop-leave-to { transform: scale(0); opacity: 0; }
 </style>
