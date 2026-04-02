@@ -629,20 +629,30 @@ const confirmDeleteRoom = () => {
 
 // Per-room long press: cache a single useLongPress instance per room
 const longPressCache = new Map<string, ReturnType<typeof useLongPress>>();
+// Suppress contextmenu right after selection activation (same gesture)
+let suppressContextMenu = false;
 
 const getRoomLongPress = (room: ChatRoom) => {
   let handlers = longPressCache.get(room.id);
   if (!handlers) {
     handlers = useLongPress({
-      onTrigger: (e) => {
+      onTrigger: () => {
         if (selectionStore.isSelectionMode) return;
+        suppressContextMenu = true;
         selectionStore.activate(room.id);
         hapticImpact("MEDIUM").catch(() => {});
+        // Reset after contextmenu event has had a chance to fire
+        setTimeout(() => { suppressContextMenu = false; }, 50);
       },
     });
     longPressCache.set(room.id, handlers);
   }
   return handlers;
+};
+
+const onRoomContextMenu = (e: MouseEvent, room: ChatRoom) => {
+  if (suppressContextMenu || selectionStore.isSelectionMode) return;
+  ctxMenu.value = { show: true, x: e.clientX, y: e.clientY, roomId: room.id };
 };
 </script>
 
@@ -715,7 +725,7 @@ const getRoomLongPress = (room: ChatRoom) => {
           ]"
           :aria-label="`${item._title?.text || ''}${(item as ChatRoom).unreadCount ? `, ${(item as ChatRoom).unreadCount} unread` : ''}`"
           @click="handleSelect(item as ChatRoom)"
-          @contextmenu.prevent="(e: MouseEvent) => { ctxMenu = { show: true, x: e.clientX, y: e.clientY, roomId: (item as ChatRoom).id }; }"
+          @contextmenu.prevent="(e: MouseEvent) => onRoomContextMenu(e, item as ChatRoom)"
           @pointerdown="(e: PointerEvent) => getRoomLongPress(item as ChatRoom).onPointerdown(e)"
           @pointermove="(e: PointerEvent) => getRoomLongPress(item as ChatRoom).onPointermove(e)"
           @pointerup="() => getRoomLongPress(item as ChatRoom).onPointerup()"
@@ -748,18 +758,18 @@ const getRoomLongPress = (room: ChatRoom) => {
               size="md"
             />
             <Avatar v-else :src="(item as ChatRoom).avatar" :name="item._title?.text || ''" size="md" />
-            <!-- Invite badge -->
+            <!-- Invite badge (hidden in selection mode) -->
             <div
-              v-if="(item as ChatRoom).membership === 'invite'"
+              v-if="!selectionStore.isSelectionMode && (item as ChatRoom).membership === 'invite'"
               class="absolute -bottom-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-color-bg-ac"
             >
               <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" class="text-white">
                 <path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4-8 5-8-5V6l8 5 8-5v2z" />
               </svg>
             </div>
-            <!-- Group indicator -->
+            <!-- Group indicator (hidden in selection mode) -->
             <div
-              v-else-if="(item as ChatRoom).isGroup"
+              v-else-if="!selectionStore.isSelectionMode && (item as ChatRoom).isGroup"
               class="absolute -bottom-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-background-total-theme"
             >
               <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" class="text-text-on-main-bg-color">
