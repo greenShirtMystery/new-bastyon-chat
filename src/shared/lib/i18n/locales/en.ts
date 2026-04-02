@@ -258,10 +258,12 @@ export const en = {
   "drop.subtitle": "Images and videos will open in preview",
 
   // ── Selection bar ──
-  "selection.selected": "{count} selected",
+  "selection.selected": "Selected: {count}",
   "selection.forward": "Forward",
   "selection.copy": "Copy",
   "selection.delete": "Delete",
+  "selection.deleteTitle": "Delete chats",
+  "selection.deleteConfirm": "Delete {count} selected chats? This cannot be undone.",
 
   // ── Group creation ──
   "group.newGroup": "New Group",
