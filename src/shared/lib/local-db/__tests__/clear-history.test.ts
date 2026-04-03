@@ -240,15 +240,16 @@ describe("clear-history", () => {
       const updated = await db.rooms.get(ROOM_ID);
       expect(updated).toBeDefined();
       expect(updated!.clearedAtTs).toBe(now);
-      expect(updated!.lastMessagePreview).toBeUndefined();
-      expect(updated!.lastMessageTimestamp).toBeUndefined();
-      expect(updated!.lastMessageSenderId).toBeUndefined();
-      expect(updated!.lastMessageType).toBeUndefined();
-      expect(updated!.lastMessageEventId).toBeUndefined();
+      // Dexie.update() ignores undefined values, so we use null to clear fields
+      expect(updated!.lastMessagePreview).toBeNull();
+      expect(updated!.lastMessageTimestamp).toBeNull();
+      expect(updated!.lastMessageSenderId).toBeNull();
+      expect(updated!.lastMessageType).toBeNull();
+      expect(updated!.lastMessageEventId).toBeNull();
       expect(updated!.lastMessageReaction).toBeNull();
-      expect(updated!.lastMessageLocalStatus).toBeUndefined();
-      expect(updated!.hasMoreHistory).toBe(true);
-      expect(updated!.paginationToken).toBeUndefined();
+      expect(updated!.lastMessageLocalStatus).toBeNull();
+      expect(updated!.hasMoreHistory).toBe(false);
+      expect(updated!.paginationToken).toBeNull();
     });
 
     it("preserves room membership and non-preview fields", async () => {

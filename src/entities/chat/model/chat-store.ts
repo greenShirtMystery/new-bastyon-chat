@@ -2581,7 +2581,11 @@ export const useChatStore = defineStore(NAMESPACE, () => {
       await chatDbKitRef.value.messages.purgeBeforeTimestamp(roomId, now);
     }
 
-    // 5. Clear in-memory messages for this room
+    // 5. Invalidate caches so room list rebuilds from fresh Dexie data
+    decryptedPreviewCache.delete(roomId);
+    _chatRoomFromDexieCache.delete(roomId);
+
+    // 6. Clear in-memory messages for this room
     messages.value[roomId] = [];
     triggerRef(messages);
 
@@ -5063,6 +5067,10 @@ export const useChatStore = defineStore(NAMESPACE, () => {
       chatDbKitRef.value.eventWriter.setClearedAtTs(roomId, clearedAtTs);
       await chatDbKitRef.value.rooms.clearHistory(roomId, clearedAtTs);
       await chatDbKitRef.value.messages.purgeBeforeTimestamp(roomId, clearedAtTs);
+
+      // Invalidate caches
+      decryptedPreviewCache.delete(roomId);
+      _chatRoomFromDexieCache.delete(roomId);
 
       // Clear in-memory messages if this room is active
       if (activeRoomId.value === roomId) {

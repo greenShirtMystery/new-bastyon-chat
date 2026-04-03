@@ -368,23 +368,24 @@ export class RoomRepository {
     }
   }
 
-  /** Clear chat history: set clearedAtTs marker and reset preview/pagination */
+  /** Clear chat history: set clearedAtTs marker and reset preview/pagination.
+   *  Uses null (not undefined) because Dexie.update() silently ignores undefined values. */
   async clearHistory(roomId: string, clearedAtTs: number): Promise<void> {
     await this.db.rooms.update(roomId, {
       clearedAtTs,
-      lastMessagePreview: undefined,
-      lastMessageTimestamp: undefined,
-      lastMessageSenderId: undefined,
-      lastMessageType: undefined,
-      lastMessageEventId: undefined,
+      lastMessagePreview: null as unknown as undefined,
+      lastMessageTimestamp: null as unknown as undefined,
+      lastMessageSenderId: null as unknown as undefined,
+      lastMessageType: null as unknown as undefined,
+      lastMessageEventId: null as unknown as undefined,
       lastMessageReaction: null,
-      lastMessageLocalStatus: undefined,
-      lastMessageDecryptionStatus: undefined,
-      lastMessageCallInfo: undefined,
-      lastMessageSystemMeta: undefined,
+      lastMessageLocalStatus: null as unknown as undefined,
+      lastMessageDecryptionStatus: null as unknown as undefined,
+      lastMessageCallInfo: null as unknown as undefined,
+      lastMessageSystemMeta: null as unknown as undefined,
       unreadCount: 0,
-      paginationToken: undefined,
-      hasMoreHistory: true,
+      paginationToken: null as unknown as undefined,
+      hasMoreHistory: false,
     });
   }
 
