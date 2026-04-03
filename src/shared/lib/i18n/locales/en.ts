@@ -81,6 +81,10 @@ export const en = {
   "settings.notifications": "Notifications",
   "settings.enabled": "Enabled",
   "settings.privacy": "Privacy",
+  "settings.addAccount": "Add Account",
+  "settings.removeAccount": "Log out",
+  "settings.removeAccountConfirm": "Log out of this account?",
+  "settings.switching": "Switching...",
 
   // ── Settings content / Appearance ──
   "settings.editProfile": "Edit Profile",
@@ -425,6 +429,9 @@ export const en = {
   "auth.show": "Show",
   "auth.hide": "Hide",
   "auth.howToFindKey": "How to find your private key?",
+  "auth.enterKeyOrMnemonic": "Enter private key or mnemonic phrase",
+  "auth.keyPlaceholder": "Private key or 12 words...",
+  "auth.login": "Log In",
 
   // ── Welcome ──
   "welcome.title": "Forta Chat",
@@ -577,6 +584,7 @@ export const en = {
 
   // ── Common ──
   "common.cancel": "Cancel",
+  "common.loading": "Loading...",
   "common.unknownUser": "User",
   "common.encryptedChat": "Chat",
   "message.notDecrypted": "Message not decrypted",

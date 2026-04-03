@@ -15,7 +15,7 @@ import {
 import type { UserWithPrivateKeys } from "@/entities/matrix/model/matrix-crypto";
 import { useCallService } from "@/features/video-calls/model/call-service";
 import { getmatrixid } from "@/shared/lib/matrix/functions";
-import { initChatDb, deleteChatDb } from "@/shared/lib/local-db";
+import { initChatDb, deleteChatDb, closeChatDb } from "@/shared/lib/local-db";
 import { clearAllDrafts } from "@/shared/lib/drafts";
 import { clearQueue } from "@/shared/lib/offline-queue";
 import { deleteLegacyCache } from "@/shared/lib/cache/chat-cache";
@@ -32,6 +32,8 @@ import { defineStore } from "pinia";
 import { computed, ref, shallowRef } from "vue";
 
 import type { AuthData, UserData } from "./types";
+import { SessionManager, type StoredSession } from "./session-manager";
+import { BackgroundSyncManager } from "./background-sync";
 
 import { getAddressFromPubKey } from "../lib";
 import { createKeyPair } from "./key-pair";
@@ -119,16 +121,34 @@ function extractErrorCode(err: unknown): number | null {
 // Store-level references for cleanup on logout
 let _onlineHandler: (() => void) | null = null;
 let _offlineHandler: (() => void) | null = null;
+let _appStateHandle: { remove: () => Promise<void> } | null = null;
 let _blockHeightInterval: ReturnType<typeof setInterval> | null = null;
 
 export const useAuthStore = defineStore(NAMESPACE, () => {
-  const { setLSValue: setLSAuthData, value: LSAuthData } =
-    useLocalStorage<AuthData>(NAMESPACE, { address: null, privateKey: null });
+  const sessionManager = new SessionManager();
+  const backgroundSyncManager = new BackgroundSyncManager();
+
+  // Reactive session list + active account
+  const sessions = ref<StoredSession[]>(sessionManager.getSessions());
+  const activeAddress = ref<string | null>(sessionManager.getActiveAddress());
+
+  // Current account credentials (derived from active session)
+  const address = computed(() => {
+    const s = activeAddress.value ? sessionManager.getSession(activeAddress.value) : null;
+    return s?.address ?? null;
+  });
+  const privateKey = computed(() => {
+    const s = activeAddress.value ? sessionManager.getSession(activeAddress.value) : null;
+    return s?.privateKey ?? null;
+  });
+
+  // Multi-account computed helpers
+  const isMultiAccount = computed(() => sessions.value.length > 1);
+  const inactiveAccounts = computed(() =>
+    sessions.value.filter(s => s.address !== activeAddress.value)
+  );
 
   const appInitializer = createAppInitializer();
-
-  const address = ref(LSAuthData.address);
-  const privateKey = ref(LSAuthData.privateKey);
   const userInfo = ref<UserData>();
 
   // Registration state
@@ -167,10 +187,21 @@ export const useAuthStore = defineStore(NAMESPACE, () => {
 
   const isAuthenticated = computed(() => !!(address.value && privateKey.value));
 
+  /** Sync reactive state from SessionManager (after any mutation) */
+  const syncSessionsFromStorage = () => {
+    sessions.value = sessionManager.getSessions();
+    activeAddress.value = sessionManager.getActiveAddress();
+  };
+
+  /** Legacy compat setter — uses SessionManager internally */
   const setAuthData = (authData: AuthData) => {
-    address.value = authData.address;
-    privateKey.value = authData.privateKey;
-    setLSAuthData(authData);
+    if (authData.address && authData.privateKey) {
+      if (!sessionManager.getSession(authData.address)) {
+        sessionManager.addSession(authData.address, authData.privateKey);
+      }
+      sessionManager.setActive(authData.address);
+    }
+    syncSessionsFromStorage();
   };
 
   const setUserInfo = (info: UserData) => {
@@ -298,7 +329,7 @@ export const useAuthStore = defineStore(NAMESPACE, () => {
           matrixKit.value?.chatIsPublic(room as Record<string, unknown>) ?? false,
         matrixId: (id: string) => matrixService.matrixId(id),
       });
-      await withTimeout(cryptoInstance.prepare(), 10_000, "Pcrypto storage init");
+      await withTimeout(cryptoInstance.prepare(address.value ?? undefined), 10_000, "Pcrypto storage init");
       pcrypto.value = cryptoInstance;
 
       // Step 7: Wire Matrix events → chat store
@@ -307,7 +338,7 @@ export const useAuthStore = defineStore(NAMESPACE, () => {
 
       // Step 6.5: Initialize local-first database
       const chatDbKit = initChatDb(
-        LSAuthData.address!,
+        address.value!,
         async (roomId: string) => pcrypto.value?.rooms[roomId],
       );
       chatStore.setChatDbKit(chatDbKit);
@@ -332,6 +363,11 @@ export const useAuthStore = defineStore(NAMESPACE, () => {
 
           if (state === "PREPARED" || state === "SYNCING") {
             chatStore.refreshRooms(state);
+            // Save sync token for background polling
+            if (address.value) {
+              const token = matrixService.client?.getSyncToken?.() ?? "";
+              if (token) sessionManager.updateSyncToken(address.value, token);
+            }
             // Sync room names to native for push notification display
             if (isNative && state === "PREPARED") {
               import('@/shared/lib/push').then(({ pushService }) => {
@@ -429,6 +465,29 @@ export const useAuthStore = defineStore(NAMESPACE, () => {
         matrixReady.value = true;
         matrixError.value = null;
 
+        // Cache connection info for background sync
+        const client = matrixService.client;
+        if (client && address.value) {
+          const accessToken = client.getAccessToken?.() ?? "";
+          const homeserverUrl = client.getHomeserverUrl?.() ?? "";
+          if (accessToken && homeserverUrl) {
+            sessionManager.updateConnectionInfo(address.value, accessToken, homeserverUrl);
+          }
+        }
+
+        // Start background pollers for all inactive accounts
+        for (const s of sessionManager.getSessions()) {
+          if (s.address === activeAddress.value) continue;
+          if (s.accessToken && s.homeserverUrl && s.syncToken) {
+            backgroundSyncManager.demote({
+              address: s.address,
+              accessToken: s.accessToken,
+              homeserverUrl: s.homeserverUrl,
+              syncToken: s.syncToken,
+            });
+          }
+        }
+
         // Fetch blockchain block height and update Pcrypto (critical for encryption key derivation).
         // In legacy code this was provided by the parent app via pcrypto.set.block().
         appInitializer.getBlockHeight().then((height) => {
@@ -519,6 +578,16 @@ export const useAuthStore = defineStore(NAMESPACE, () => {
             await nativeCallBridge.wire(callService);
           } catch (err) {
             console.warn("[auth] Failed to init native call bridge:", err);
+          }
+
+          // Switch background sync interval when app goes to background
+          // Guard: only register once (prevent leak on account switch → re-init)
+          if (!_appStateHandle) {
+            import("@capacitor/app").then(({ App: CapApp }) => {
+              CapApp.addListener("appStateChange", ({ isActive }) => {
+                backgroundSyncManager.setAppState(isActive);
+              }).then(handle => { _appStateHandle = handle; }).catch(() => {});
+            }).catch(() => {});
           }
         }
 
@@ -672,6 +741,11 @@ export const useAuthStore = defineStore(NAMESPACE, () => {
         // Initialize Matrix after successful auth
         await initMatrix();
 
+        // Bind per-account localStorage keys (pinned/muted rooms)
+        if (address.value) {
+          useChatStore().bindAccountKeys(address.value);
+        }
+
         return { data: authData, error: null };
       } catch {
         return { data: null, error: "Invalid private key or mnemonic" };
@@ -680,11 +754,9 @@ export const useAuthStore = defineStore(NAMESPACE, () => {
   );
 
   const logout = async () => {
-    // ── 0. Immediately clear auth credentials ──
-    // This must happen FIRST (before any async work) so that:
-    //   - isAuthenticated becomes false synchronously
-    //   - route guards redirect to login if navigation happens mid-cleanup
-    setAuthData({ address: null, privateKey: null });
+    const logoutAddress = activeAddress.value;
+
+    // ── 0. Clear in-memory auth state ──
     userInfo.value = undefined;
 
     // ── 1. Reset Pinia stores (in-memory state) ──
@@ -716,7 +788,7 @@ export const useAuthStore = defineStore(NAMESPACE, () => {
     // ── 4. Clear localStorage account data ──
     clearAllDrafts();
     clearQueue();
-    clearAccountLocalStorage();
+    clearAccountLocalStorage(logoutAddress ?? undefined);
 
     // ── 5. Delete Dexie local-first database (await to prevent race with re-login) ──
     await deleteChatDb().catch(() => {});
@@ -736,6 +808,15 @@ export const useAuthStore = defineStore(NAMESPACE, () => {
     setRegistrationPending(false);
     setPendingRegProfile(null);
     stopRegistrationPoll();
+
+    // ── 8. Stop all background pollers ──
+    backgroundSyncManager.stopAll();
+
+    // ── 9. Remove session from manager ──
+    if (logoutAddress) {
+      sessionManager.removeSession(logoutAddress);
+    }
+    syncSessionsFromStorage();
   };
 
   // ── Registration methods ──
@@ -1037,8 +1118,146 @@ export const useAuthStore = defineStore(NAMESPACE, () => {
     _onSyncStatusCallback = cb;
   }
 
+  /** Add a new account (from AddAccountModal) */
+  const addAccount = async (cryptoCredential: string): Promise<{ error: string | null }> => {
+    try {
+      const keyPair = createKeyPair(cryptoCredential);
+      const addr = getAddressFromPubKey(keyPair.publicKey);
+      if (!addr) return { error: "Failed to derive address" };
+
+      if (sessionManager.getSession(addr)) {
+        return { error: "Account already added" };
+      }
+      if (sessionManager.getSessions().length >= 5) {
+        return { error: "Maximum 5 accounts allowed" };
+      }
+
+      const pk = convertToHexString(keyPair.privateKey);
+      sessionManager.addSession(addr, pk);
+      syncSessionsFromStorage();
+
+      // Switch to the new account
+      await switchAccount(addr);
+
+      return { error: null };
+    } catch {
+      return { error: "Invalid private key or mnemonic" };
+    }
+  };
+
+  /** Remove a specific account */
+  const removeAccount = async (targetAddress: string) => {
+    if (targetAddress === activeAddress.value) {
+      await logout();
+      return;
+    }
+    // Remove non-active account
+    backgroundSyncManager.stop(targetAddress);
+    sessionManager.removeSession(targetAddress);
+    syncSessionsFromStorage();
+  };
+
+  let _switching = false;
+
+  /** Hot-swap to a different account without page reload */
+  const switchAccount = async (targetAddress: string) => {
+    if (_switching || targetAddress === activeAddress.value) return;
+    _switching = true;
+
+    try {
+      const targetSession = sessionManager.getSession(targetAddress);
+      if (!targetSession) throw new Error("Session not found: " + targetAddress);
+
+      // 1. DEMOTE current — save connection info for background polling
+      const currentAddr = activeAddress.value;
+      if (currentAddr && matrixReady.value) {
+        const matrixService = getMatrixClientService();
+        const client = matrixService.client;
+        if (client) {
+          const syncToken = client.getSyncToken?.() ?? "";
+          const accessToken = client.getAccessToken?.() ?? "";
+          const homeserverUrl = client.getHomeserverUrl?.() ?? "";
+          // Cache connection info for background sync
+          if (accessToken && homeserverUrl) {
+            sessionManager.updateConnectionInfo(currentAddr, accessToken, homeserverUrl);
+          }
+          if (syncToken) {
+            sessionManager.updateSyncToken(currentAddr, syncToken);
+          }
+        }
+
+        // Start lightweight poller for the account being demoted
+        const savedSession = sessionManager.getSession(currentAddr);
+        if (savedSession?.accessToken && savedSession?.homeserverUrl && savedSession?.syncToken) {
+          backgroundSyncManager.demote({
+            address: currentAddr,
+            accessToken: savedSession.accessToken,
+            homeserverUrl: savedSession.homeserverUrl,
+            syncToken: savedSession.syncToken,
+          });
+        }
+      }
+
+      // 2. CLEANUP current context (no data deletion)
+      useChatStore().cleanup();
+      useChannelStore().cleanup();
+      useCallStore().clearCall();
+      resetMatrixClientService();
+      matrixReady.value = false;
+      matrixError.value = null;
+      matrixKit.value = null;
+
+      if (pcrypto.value) {
+        for (const room of Object.values(pcrypto.value.rooms)) {
+          room.destroy();
+        }
+        pcrypto.value = null;
+      }
+
+      // Cleanup listeners
+      if (typeof window !== "undefined") {
+        if (_onlineHandler) { window.removeEventListener("online", _onlineHandler); _onlineHandler = null; }
+        if (_offlineHandler) { window.removeEventListener("offline", _offlineHandler); _offlineHandler = null; }
+      }
+      if (_blockHeightInterval) { clearInterval(_blockHeightInterval); _blockHeightInterval = null; }
+
+      // Close Dexie without deleting
+      closeChatDb();
+
+      // 3. SWAP active account
+      sessionManager.setActive(targetAddress);
+      syncSessionsFromStorage();
+      userInfo.value = undefined;
+
+      // 4. INIT new context (reuses the existing initMatrix which reads from computed address/privateKey)
+      await fetchUserInfo();
+      await initMatrix();
+
+      // 5. Bind per-account localStorage keys (pinned/muted rooms)
+      useChatStore().bindAccountKeys(targetAddress);
+
+      // Stop lightweight poller for the newly active account
+      backgroundSyncManager.promote(targetAddress);
+
+    } catch (e) {
+      console.error("[auth] switchAccount failed:", e);
+      matrixError.value = String(e);
+    } finally {
+      _switching = false;
+    }
+  };
+
   return {
     address,
+    activeAddress,
+    sessions,
+    isMultiAccount,
+    inactiveAccounts,
+    addAccount,
+    removeAccount,
+    switchAccount,
+    /** Get unread count for a background account */
+    getBackgroundUnreadCount: (addr: string) => backgroundSyncManager.getUnreadCount(addr),
     clearRegistrationState,
     editUserData,
     fetchCaptcha,

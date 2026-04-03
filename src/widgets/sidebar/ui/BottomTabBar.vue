@@ -23,6 +23,8 @@ watch(
 const currentUser = computed(() =>
   authStore.address ? userStore.getUser(authStore.address) : undefined,
 );
+
+
 </script>
 
 <template>
@@ -124,6 +126,7 @@ const currentUser = computed(() =>
       </svg>
       <span class="text-[10px] leading-tight">{{ t("nav.settings") }}</span>
     </button>
+
   </nav>
 </template>
 

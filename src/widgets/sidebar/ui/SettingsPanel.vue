@@ -3,6 +3,7 @@ import { useAuthStore } from "@/entities/auth";
 import { useThemeStore } from "@/entities/theme";
 import { useTorStore } from "@/entities/tor";
 import { useUserStore } from "@/entities/user/model";
+import { AccountList, AddAccountModal } from "@/features/account-switcher";
 import { useWallet } from "@/features/wallet/model/use-wallet";
 import Avatar from "@/shared/ui/avatar/Avatar.vue";
 import { Toggle } from "@/shared/ui/toggle";
@@ -119,6 +120,27 @@ const handleCheckUpdates = async () => {
   }
 };
 
+const showAddModal = ref(false);
+const showRemoveConfirm = ref(false);
+const removeTargetAddress = ref("");
+
+const handleSwitch = (address: string) => {
+  if (address !== authStore.activeAddress) {
+    authStore.switchAccount(address);
+  }
+};
+
+const handleRemoveAccount = (address: string) => {
+  removeTargetAddress.value = address;
+  showRemoveConfirm.value = true;
+};
+
+const confirmRemoveAccount = () => {
+  showRemoveConfirm.value = false;
+  authStore.removeAccount(removeTargetAddress.value);
+  removeTargetAddress.value = "";
+};
+
 const handleLogout = () => {
   authStore.logout();
   router.push({ name: "WelcomePage" });
@@ -152,6 +174,16 @@ const handleLogout = () => {
         >
           {{ authStore.address }}
         </p>
+      </div>
+
+      <!-- Multi-account list (shown between profile header and menu items) -->
+      <div class="px-2">
+        <AccountList
+          :show-active="false"
+          @switch="handleSwitch"
+          @add="showAddModal = true"
+          @remove="handleRemoveAccount"
+        />
       </div>
 
       <!-- Menu items -->
@@ -411,6 +443,40 @@ const handleLogout = () => {
               @click="confirmDisableTor()"
             >
               {{ t('settings.torProxy') }} Off
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <AddAccountModal
+      :show="showAddModal"
+      @close="showAddModal = false"
+    />
+
+    <!-- Remove account confirmation dialog -->
+    <Teleport to="body">
+      <div
+        v-if="showRemoveConfirm"
+        class="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+        @click.self="showRemoveConfirm = false"
+      >
+        <div class="mx-4 max-w-sm rounded-xl bg-background-secondary-theme p-6 shadow-xl">
+          <p class="mb-4 text-sm text-text-color">
+            {{ t('settings.removeAccountConfirm') }}
+          </p>
+          <div class="flex justify-end gap-3">
+            <button
+              class="rounded-lg px-4 py-2 text-sm text-text-on-main-bg-color transition-colors hover:bg-neutral-grad-0"
+              @click="showRemoveConfirm = false"
+            >
+              {{ t('common.cancel') }}
+            </button>
+            <button
+              class="rounded-lg bg-color-bad px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-80"
+              @click="confirmRemoveAccount()"
+            >
+              {{ t('settings.removeAccount') }}
             </button>
           </div>
         </div>

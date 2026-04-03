@@ -1,6 +1,10 @@
 <script setup lang="ts">
+import { migrateAll } from "@/entities/auth/model/storage-migration";
 import { useAuthStore } from "@/entities/auth";
 import { useChatStore } from "@/entities/chat";
+
+// Run storage migration before any store initialization
+migrateAll();
 import { useUserStore } from "@/entities/user/model";
 import { useContacts } from "@/features/contacts";
 import { useToast } from "@/shared/lib/use-toast";

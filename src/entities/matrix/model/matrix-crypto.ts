@@ -222,11 +222,12 @@ export class Pcrypto {
     this.getMatrixId = helpers.matrixId;
   }
 
-  async prepare(): Promise<void> {
+  async prepare(address?: string): Promise<void> {
     try {
+      const suffix = address ? `:${address}` : "";
       const [ls, lse] = await Promise.all([
-        createChatStorage("messages", 1),
-        createChatStorage("events", 1)
+        createChatStorage(`messages${suffix}`, 1),
+        createChatStorage(`events${suffix}`, 1)
       ]);
       this.ls = ls;
       this.lse = lse;

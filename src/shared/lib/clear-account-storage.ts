@@ -1,8 +1,9 @@
 /**
  * Remove all account-specific localStorage keys.
  * Preserves device settings: theme, locale, call device preferences.
+ * When address is provided, also removes per-account pinned/muted keys.
  */
-export function clearAccountLocalStorage(): void {
+export function clearAccountLocalStorage(address?: string): void {
   // Remove prefixed per-room keys
   const toRemove: string[] = [];
   for (let i = 0; i < localStorage.length; i++) {
@@ -16,4 +17,9 @@ export function clearAccountLocalStorage(): void {
   localStorage.removeItem("bastyon-chat-join-room");
   localStorage.removeItem("bastyon-chat-referral");
   localStorage.removeItem("bastyon-chat-deleted-rooms");
+
+  if (address) {
+    localStorage.removeItem(`chat_pinned_rooms:${address}`);
+    localStorage.removeItem(`chat_muted_rooms:${address}`);
+  }
 }

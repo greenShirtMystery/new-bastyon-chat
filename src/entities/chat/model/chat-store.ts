@@ -531,13 +531,24 @@ export const useChatStore = defineStore(NAMESPACE, () => {
     pinnedMessageIndex.value = (pinnedMessageIndex.value + direction + pinnedMessages.value.length) % pinnedMessages.value.length;
   };
 
-  // Room-level pin/mute (Batch 7)
-  const pinnedRoomIds = ref<Set<string>>(new Set(JSON.parse(localStorage.getItem("chat_pinned_rooms") || "[]")));
-  const mutedRoomIds = ref<Set<string>>(new Set(JSON.parse(localStorage.getItem("chat_muted_rooms") || "[]")));
+  // Room-level pin/mute (Batch 7) — per-account keys
+  let _pinnedKey = "chat_pinned_rooms";
+  let _mutedKey = "chat_muted_rooms";
+
+  const pinnedRoomIds = ref<Set<string>>(new Set());
+  const mutedRoomIds = ref<Set<string>>(new Set());
+
+  /** Called from auth store on login/switch to bind per-account keys */
+  const bindAccountKeys = (address: string) => {
+    _pinnedKey = `chat_pinned_rooms:${address}`;
+    _mutedKey = `chat_muted_rooms:${address}`;
+    pinnedRoomIds.value = new Set(JSON.parse(localStorage.getItem(_pinnedKey) || "[]"));
+    mutedRoomIds.value = new Set(JSON.parse(localStorage.getItem(_mutedKey) || "[]"));
+  };
 
   const persistRoomSets = () => {
-    localStorage.setItem("chat_pinned_rooms", JSON.stringify([...pinnedRoomIds.value]));
-    localStorage.setItem("chat_muted_rooms", JSON.stringify([...mutedRoomIds.value]));
+    localStorage.setItem(_pinnedKey, JSON.stringify([...pinnedRoomIds.value]));
+    localStorage.setItem(_mutedKey, JSON.stringify([...mutedRoomIds.value]));
   };
 
   const togglePinRoom = (roomId: string) => {
@@ -5160,8 +5171,8 @@ export const useChatStore = defineStore(NAMESPACE, () => {
     messageWindowSize.value = 50;
 
     // Clear localStorage account data
-    localStorage.removeItem("chat_pinned_rooms");
-    localStorage.removeItem("chat_muted_rooms");
+    localStorage.removeItem(_pinnedKey);
+    localStorage.removeItem(_mutedKey);
   };
 
   return {
@@ -5193,6 +5204,7 @@ export const useChatStore = defineStore(NAMESPACE, () => {
     isDetachedFromLatest,
     isRoomPublic,
     joinRoomById,
+    bindAccountKeys,
     banMember,
     getBannedMembers,
     isMemberMuted,
