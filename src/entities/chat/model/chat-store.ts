@@ -564,7 +564,8 @@ export const useChatStore = defineStore(NAMESPACE, () => {
 
     // Dexie-first path: query the DB for the last inbound timestamp
     if (chatDbKitRef.value && myAddr) {
-      chatDbKitRef.value.messages.getLastInboundTimestamp(roomId, myAddr)
+      const clearedAtTs = chatDbKitRef.value.eventWriter.getClearedAtTs(roomId);
+      chatDbKitRef.value.messages.getLastInboundTimestamp(roomId, myAddr, clearedAtTs)
         .then((lastInboundTs) => {
           if (lastInboundTs > 0) {
             return commitReadWatermark(roomId, lastInboundTs);
@@ -608,9 +609,12 @@ export const useChatStore = defineStore(NAMESPACE, () => {
   const { data: dexieMessages, isReady: dexieMessagesReady } = useLiveQuery(
     () => {
       if (!activeRoomId.value || !chatDbKitRef.value) return [] as import("@/shared/lib/local-db").LocalMessage[];
+      const clearedAtTs = chatDbKitRef.value.eventWriter.getClearedAtTs(activeRoomId.value);
       return chatDbKitRef.value.messages.getMessages(
         activeRoomId.value,
         messageWindowSize.value,
+        undefined,
+        clearedAtTs,
       );
     },
     () => [activeRoomId.value, messageWindowSize.value, chatDbKitRef.value] as const,
@@ -3691,7 +3695,8 @@ export const useChatStore = defineStore(NAMESPACE, () => {
     const db = chatDbKitRef.value;
 
     // Step 1: Find unresolved replies in Dexie (source of truth for UI)
-    const roomMsgs = await db.messages.getMessages(roomId, 200);
+    const clearedAtTs = db.eventWriter.getClearedAtTs(roomId);
+    const roomMsgs = await db.messages.getMessages(roomId, 200, undefined, clearedAtTs);
     const unresolved = roomMsgs.filter(
       m => m.replyTo && !m.replyTo.deleted && !m.replyTo.senderId && !m.replyTo.content,
     );
@@ -5165,7 +5170,8 @@ export const useChatStore = defineStore(NAMESPACE, () => {
     // Primary path: read from Dexie (local-first source of truth)
     if (chatDbKitRef.value) {
       try {
-        const localMsgs = await chatDbKitRef.value.messages.getMessages(roomId, 50);
+        const clearedAtTs = chatDbKitRef.value.eventWriter.getClearedAtTs(roomId);
+        const localMsgs = await chatDbKitRef.value.messages.getMessages(roomId, 50, undefined, clearedAtTs);
         if (localMsgs.length > 0) {
           // Dexie data will arrive via liveQuery → activeMessages computed.
           // No need to write to messages.value — just signal that cache exists.

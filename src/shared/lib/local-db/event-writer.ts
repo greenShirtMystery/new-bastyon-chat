@@ -421,7 +421,8 @@ export class EventWriter {
     await this.messageRepo.markReplyDeleted(redaction.redactedEventId);
 
     // Always update room preview after deletion
-    const prevMsg = await this.messageRepo.getLastNonDeleted(redaction.roomId);
+    const clearedAtTs = this.clearedAtTsCache.get(redaction.roomId);
+    const prevMsg = await this.messageRepo.getLastNonDeleted(redaction.roomId, clearedAtTs);
     if (prevMsg) {
       await this.updateRoomPreviewFromLocal(prevMsg);
     } else {

@@ -16,11 +16,13 @@ export class MessageRepository {
     roomId: string,
     limit = 50,
     beforeTimestamp?: number,
+    clearedAtTs?: number,
   ): Promise<LocalMessage[]> {
     const upper = beforeTimestamp ?? Dexie.maxKey;
+    const lower = clearedAtTs ?? Dexie.minKey;
     const msgs = await this.db.messages
       .where("[roomId+timestamp]")
-      .between([roomId, Dexie.minKey], [roomId, upper], true, !beforeTimestamp)
+      .between([roomId, lower], [roomId, upper], !clearedAtTs, !beforeTimestamp)
       .reverse()
       .limit(limit)
       .toArray();
@@ -58,10 +60,11 @@ export class MessageRepository {
   }
 
   /** Get the last non-deleted message in a room (for preview after deletion) */
-  async getLastNonDeleted(roomId: string): Promise<LocalMessage | undefined> {
+  async getLastNonDeleted(roomId: string, clearedAtTs?: number): Promise<LocalMessage | undefined> {
+    const lower = clearedAtTs ?? Dexie.minKey;
     const msgs = await this.db.messages
       .where("[roomId+timestamp]")
-      .between([roomId, Dexie.minKey], [roomId, Dexie.maxKey])
+      .between([roomId, lower], [roomId, Dexie.maxKey], !clearedAtTs, true)
       .reverse()
       .filter((m) => !m.softDeleted && !m.deleted)
       .limit(1)
@@ -448,7 +451,7 @@ export class MessageRepository {
   async purgeBeforeTimestamp(roomId: string, timestamp: number): Promise<number> {
     return this.db.messages
       .where("[roomId+timestamp]")
-      .between([roomId, Dexie.minKey], [roomId, timestamp], true, true)
+      .between([roomId, Dexie.minKey], [roomId, timestamp], true, false)
       .delete();
   }
 
@@ -463,11 +466,13 @@ export class MessageRepository {
     timestamp: number,
     beforeCount = 15,
     afterCount = 35,
+    clearedAtTs?: number,
   ): Promise<{ messages: LocalMessage[]; anchorIndex: number }> {
+    const lower = clearedAtTs ?? Dexie.minKey;
     const [before, after] = await Promise.all([
       this.db.messages
         .where("[roomId+timestamp]")
-        .between([roomId, Dexie.minKey], [roomId, timestamp], true, true)
+        .between([roomId, lower], [roomId, timestamp], !clearedAtTs, true)
         .reverse()
         .limit(beforeCount)
         .toArray(),
@@ -488,10 +493,12 @@ export class MessageRepository {
     roomId: string,
     afterTimestamp: number,
     excludeSenderId: string,
+    clearedAtTs?: number,
   ): Promise<number> {
+    const effectiveAfter = clearedAtTs ? Math.max(afterTimestamp, clearedAtTs) : afterTimestamp;
     return this.db.messages
       .where("[roomId+timestamp]")
-      .between([roomId, afterTimestamp], [roomId, Dexie.maxKey], false, true)
+      .between([roomId, effectiveAfter], [roomId, Dexie.maxKey], false, true)
       .filter(m => m.senderId !== excludeSenderId && !m.softDeleted)
       .count();
   }
@@ -500,10 +507,12 @@ export class MessageRepository {
   async getLastMessageAtOrBefore(
     roomId: string,
     timestamp: number,
+    clearedAtTs?: number,
   ): Promise<LocalMessage | undefined> {
+    const lower = clearedAtTs ?? Dexie.minKey;
     const msgs = await this.db.messages
       .where("[roomId+timestamp]")
-      .between([roomId, Dexie.minKey], [roomId, timestamp], true, true)
+      .between([roomId, lower], [roomId, timestamp], !clearedAtTs, true)
       .reverse()
       .limit(1)
       .toArray();
@@ -511,10 +520,11 @@ export class MessageRepository {
   }
 
   /** Get the timestamp of the last inbound (non-own) message in a room */
-  async getLastInboundTimestamp(roomId: string, myAddress: string): Promise<number> {
+  async getLastInboundTimestamp(roomId: string, myAddress: string, clearedAtTs?: number): Promise<number> {
+    const lower = clearedAtTs ?? Dexie.minKey;
     const msgs = await this.db.messages
       .where("[roomId+timestamp]")
-      .between([roomId, Dexie.minKey], [roomId, Dexie.maxKey], true, true)
+      .between([roomId, lower], [roomId, Dexie.maxKey], !clearedAtTs, true)
       .reverse()
       .filter(m => m.senderId !== myAddress)
       .limit(1)
@@ -532,14 +542,17 @@ export class MessageRepository {
     roomId: string,
     targetEventId: string,
     contextSize = 25,
+    clearedAtTs?: number,
   ): Promise<{ messages: LocalMessage[]; targetIndex: number } | null> {
     const target = await this.getByEventId(targetEventId);
     if (!target || target.roomId !== roomId) return null;
+    if (clearedAtTs && target.timestamp <= clearedAtTs) return null;
 
+    const lower = clearedAtTs ?? Dexie.minKey;
     const [before, after] = await Promise.all([
       this.db.messages
         .where("[roomId+timestamp]")
-        .between([roomId, Dexie.minKey], [roomId, target.timestamp], true, false)
+        .between([roomId, lower], [roomId, target.timestamp], !clearedAtTs, false)
         .reverse()
         .limit(contextSize)
         .toArray(),
@@ -561,10 +574,12 @@ export class MessageRepository {
     roomId: string,
     afterTimestamp: number,
     limit = 50,
+    clearedAtTs?: number,
   ): Promise<LocalMessage[]> {
+    const effectiveAfter = clearedAtTs ? Math.max(afterTimestamp, clearedAtTs) : afterTimestamp;
     const msgs = await this.db.messages
       .where("[roomId+timestamp]")
-      .between([roomId, afterTimestamp], [roomId, Dexie.maxKey], false, true)
+      .between([roomId, effectiveAfter], [roomId, Dexie.maxKey], false, true)
       .limit(limit)
       .toArray();
     return msgs;
