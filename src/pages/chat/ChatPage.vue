@@ -99,25 +99,6 @@ useAndroidBackHandler("chat-back-to-sidebar", 60, () => {
 
 <template>
   <div class="relative flex h-full bg-background-total-theme" :class="{ 'overflow-hidden': isMobile }">
-    <!-- Registration pending overlay — blocks chat while blockchain confirms -->
-    <transition name="fade">
-      <div
-        v-if="authStore.registrationPending"
-        class="absolute inset-0 z-[998] flex items-center justify-center bg-background-total-theme"
-      >
-        <div class="flex flex-col items-center gap-4 p-8 text-center">
-          <Spinner size="lg" />
-          <h2 class="text-xl font-bold text-text-color">{{ t("register.accountPending") }}</h2>
-          <p class="max-w-sm text-sm text-text-on-main-bg-color">
-            {{ t("register.accountPendingDescription") }}
-          </p>
-          <p class="text-xs text-text-on-main-bg-color">
-            {{ t("register.accountPendingHint") }}
-          </p>
-        </div>
-      </div>
-    </transition>
-
     <!-- Desktop: show both side by side -->
     <template v-if="!isMobile">
       <ChatSidebar

@@ -636,6 +636,14 @@ export const en = {
   "register.usernameRejected": "Username unavailable",
   "register.usernameRejectedHint": "The chosen display name was rejected by the network. Please choose a different name.",
   "register.retryWithNewName": "Try with new name",
+  "register.step1Title": "Preparing account",
+  "register.step1Text": "Requesting resources for registration on the network...",
+  "register.step2Title": "Registering on the blockchain",
+  "register.step2Text": "Transaction sent to the blockchain, waiting for confirmation. Please don't close the window...",
+  "register.step3Title": "Account successfully created!",
+  "register.step3Text": "Syncing data and preparing your chat...",
+  "register.errorTitle": "Registration error",
+  "register.backToName": "Back to name entry",
   "invite.shareText": "Join me on Forta Chat!",
 
   // ── Language names ──
