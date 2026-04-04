@@ -203,19 +203,43 @@ onMounted(async () => {
   // Keyboard height detection: native IME insets (primary) + visualViewport (fallback).
   // Native --native-keyboard-height is injected by MainActivity.kt on every WindowInsets change.
   // visualViewport serves as fallback for devices where native injection is delayed or unavailable.
+  //
+  // Anti-double-push: baseline innerHeight is tracked at rest (no keyboard) and updated
+  // dynamically to survive orientation changes. If innerHeight shrinks significantly when
+  // keyboard opens, Android itself is resizing the window (adjustResize) — skip our padding.
+  let baseInnerHeight = window.innerHeight;
+
+  const updateKeyboardHeight = (e?: Event) => {
+    // When triggered by native event, trust the native value as authoritative —
+    // visualViewport may lag behind WindowInsets when keyboard is dismissed via Back button.
+    const isNativeEvent = e?.type === "native-keyboard-change";
+    const nativeKbh = isNativeEvent
+      ? (e as CustomEvent).detail?.height ?? 0
+      : parseInt(
+          getComputedStyle(document.documentElement).getPropertyValue("--native-keyboard-height") || "0",
+          10,
+        );
+
+    const vv = window.visualViewport;
+    const webKbh = vv ? Math.max(0, window.innerHeight - vv.height) : 0;
+
+    // Native event is authoritative; for visualViewport events use max of both sources.
+    let kbh = isNativeEvent ? nativeKbh : Math.max(webKbh, nativeKbh);
+
+    if (kbh === 0) {
+      // No keyboard visible — update baseline (handles orientation changes)
+      baseInnerHeight = window.innerHeight;
+    } else if (window.innerHeight < baseInnerHeight - 50) {
+      // Anti-double-push: Android itself shrank innerHeight (adjustResize working),
+      // skip our programmatic padding — the system already handled it.
+      kbh = 0;
+    }
+
+    document.documentElement.style.setProperty("--keyboardheight", `${kbh}px`);
+  };
+
   if (window.visualViewport) {
     const vv = window.visualViewport;
-    const updateKeyboardHeight = () => {
-      const webKbh = Math.max(0, window.innerHeight - vv.height);
-      // Read native value injected from Kotlin via CSS variable
-      const nativeKbh = parseInt(
-        getComputedStyle(document.documentElement).getPropertyValue("--native-keyboard-height") || "0",
-        10,
-      );
-      // Use whichever is larger — covers edge cases across all devices
-      const kbh = Math.max(webKbh, nativeKbh);
-      document.documentElement.style.setProperty("--keyboardheight", `${kbh}px`);
-    };
     vv.addEventListener("resize", updateKeyboardHeight);
     // Some Android WebViews (Samsung) fire scroll instead of resize when keyboard toolbar changes
     vv.addEventListener("scroll", updateKeyboardHeight);
@@ -224,6 +248,12 @@ onMounted(async () => {
       vv.removeEventListener("scroll", updateKeyboardHeight);
     });
   }
+
+  // Listen for native keyboard height changes dispatched by MainActivity.kt.
+  // This is the PRIMARY trigger — visualViewport events may not fire on all Android
+  // devices when keyboard is dismissed via Back button or gesture navigation.
+  window.addEventListener("native-keyboard-change", updateKeyboardHeight);
+  onUnmounted(() => window.removeEventListener("native-keyboard-change", updateKeyboardHeight));
 
   // On native platforms, scroll focused inputs into view when keyboard opens.
   // Two passes: 300ms (keyboard appearing) and 600ms (delayed toolbar expansion on some keyboards).

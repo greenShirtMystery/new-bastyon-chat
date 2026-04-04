@@ -100,6 +100,7 @@ class MainActivity : BridgeActivity() {
         val js = """
             (function() {
                 document.documentElement.style.setProperty('--native-keyboard-height', '${keyboardHeight}px');
+                window.dispatchEvent(new CustomEvent('native-keyboard-change', { detail: { height: ${keyboardHeight} } }));
             })();
         """.trimIndent()
         webView.post { webView.evaluateJavascript(js, null) }
