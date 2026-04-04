@@ -638,6 +638,14 @@ export const ru: Record<TranslationKey, string> = {
   "register.usernameRejected": "Имя недоступно",
   "register.usernameRejectedHint": "Выбранное имя было отклонено сетью. Пожалуйста, выберите другое имя.",
   "register.retryWithNewName": "Попробовать с новым именем",
+  "register.step1Title": "Подготовка аккаунта",
+  "register.step1Text": "Запрашиваем ресурсы для регистрации в сети...",
+  "register.step2Title": "Регистрация в блокчейне",
+  "register.step2Text": "Транзакция отправлена в блокчейн, ожидаем подтверждение. Не закрывайте окно...",
+  "register.step3Title": "Аккаунт успешно создан!",
+  "register.step3Text": "Синхронизируем данные и готовим ваш чат...",
+  "register.errorTitle": "Ошибка регистрации",
+  "register.backToName": "Назад к вводу имени",
   "invite.shareText": "Присоединяйтесь ко мне в Forta Chat!",
 
   // ── Language names ──

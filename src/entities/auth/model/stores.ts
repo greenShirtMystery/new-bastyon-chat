@@ -118,6 +118,8 @@ function extractErrorCode(err: unknown): number | null {
   return null;
 }
 
+export type RegistrationPhase = 'init' | 'broadcasting' | 'confirming' | 'done' | 'error';
+
 // Store-level references for cleanup on logout
 let _onlineHandler: (() => void) | null = null;
 let _offlineHandler: (() => void) | null = null;
@@ -173,6 +175,16 @@ export const useAuthStore = defineStore(NAMESPACE, () => {
 
   // Registration error: when UserInfo broadcast fails with code 18 (username taken/invalid)
   const registrationUsernameError = ref(false);
+
+  // Registration phase for stepper UI (persisted in LS for reload resilience)
+  const { setLSValue: setLSRegPhase, value: LSRegPhase } =
+    useLocalStorage<RegistrationPhase>('registration_phase', 'init');
+  const registrationPhase = ref<RegistrationPhase>(LSRegPhase);
+
+  const setRegistrationPhase = (phase: RegistrationPhase) => {
+    registrationPhase.value = phase;
+    setLSRegPhase(phase);
+  };
 
   const setPendingRegProfile = (val: PendingRegProfile | null) => {
     pendingRegProfile.value = val;
@@ -893,6 +905,7 @@ export const useAuthStore = defineStore(NAMESPACE, () => {
 
     // Mark as pending — blockchain hasn't confirmed yet
     setRegistrationPending(true);
+    setRegistrationPhase('init');
 
     await login(mnemonic);
 
@@ -917,6 +930,7 @@ export const useAuthStore = defineStore(NAMESPACE, () => {
 
     setPendingRegProfile({ name: newName, language, about, image, encPublicKeys });
     setRegistrationPending(true);
+    setRegistrationPhase('init');
     startRegistrationPoll();
   };
 
@@ -935,6 +949,12 @@ export const useAuthStore = defineStore(NAMESPACE, () => {
     const MAX_POLL_INTERVAL = 60000;
     let attempt = 0;
     console.log("[auth] Starting registration poll (phase:", pendingRegProfile.value ? "1-broadcast" : "2-confirm", ")");
+    // Set initial phase based on current state (handles reload resume)
+    if (pendingRegProfile.value) {
+      if (registrationPhase.value !== 'init') setRegistrationPhase('init');
+    } else {
+      if (registrationPhase.value !== 'confirming') setRegistrationPhase('confirming');
+    }
 
     const poll = async () => {
       if (!address.value) {
@@ -948,12 +968,14 @@ export const useAuthStore = defineStore(NAMESPACE, () => {
           const hasUnspents = await appInitializer.checkUnspents(address.value);
           if (hasUnspents) {
             console.log("[auth] PKOIN received, broadcasting UserInfo...");
+            setRegistrationPhase('broadcasting');
             try {
               await appInitializer.syncNodeTime();
               const { encPublicKeys, image, ...profile } = pendingRegProfile.value;
               await appInitializer.initializeAndFetchUserData(address.value);
               await appInitializer.registerUserProfile(address.value, profile, encPublicKeys, image);
               console.log("[auth] UserInfo broadcast requested, moving to phase 2");
+              setRegistrationPhase('confirming');
               setPendingRegProfile(null);
               pollInterval = 3000;
               attempt = 0;
@@ -962,6 +984,7 @@ export const useAuthStore = defineStore(NAMESPACE, () => {
               const errCode = extractErrorCode(broadcastErr);
               if (errCode === 18) {
                 console.error("[auth] UserInfo broadcast rejected: username taken/invalid (code 18)");
+                setRegistrationPhase('error');
                 registrationUsernameError.value = true;
                 setRegistrationPending(false);
                 stopRegistrationPoll();
@@ -1009,6 +1032,9 @@ export const useAuthStore = defineStore(NAMESPACE, () => {
     poll();
 
     async function onRegistrationConfirmed() {
+      setRegistrationPhase('done');
+      // Keep overlay visible for 1.5s to show success step
+      await new Promise(resolve => setTimeout(resolve, 1500));
       await appInitializer.initializeAndFetchUserData(
         address.value!,
         (data: UserData) => {
@@ -1025,6 +1051,7 @@ export const useAuthStore = defineStore(NAMESPACE, () => {
         }
       );
       setRegistrationPending(false);
+      setRegistrationPhase('init'); // Reset phase for clean localStorage state
       stopRegistrationPoll();
       if (!matrixReady.value) {
         PocketnetInstanceConfigurator.setUserAddress(address.value!);
@@ -1295,6 +1322,7 @@ export const useAuthStore = defineStore(NAMESPACE, () => {
     checkUsername,
     register,
     registrationPending,
+    registrationPhase,
     registrationUsernameError,
     resumeRegistrationPoll,
     retryRegistrationWithNewName,
