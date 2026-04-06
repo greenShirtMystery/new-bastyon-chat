@@ -17,6 +17,7 @@ export type LocalMessageStatus =
   | "syncing"   // Currently being sent
   | "synced"    // Server confirmed (has eventId)
   | "failed"    // Send failed (will retry or user taps retry)
+  | "cancelled" // User cancelled upload — cleanup pending
   | "delivered" // Delivered to recipient
   | "read";     // Read by recipient
 
@@ -132,6 +133,8 @@ export interface LocalMessage {
 
   /** Upload progress 0-100 (only during media upload) */
   uploadProgress?: number;
+  /** Current phase of media upload pipeline */
+  uploadPhase?: "encrypting" | "uploading" | "sending_event";
   /** Local blob: URL for instant media preview before upload completes */
   localBlobUrl?: string;
 }

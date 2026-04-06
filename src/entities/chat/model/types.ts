@@ -120,7 +120,8 @@ export enum MessageStatus {
   sent = "sent",
   delivered = "delivered",
   read = "read",
-  failed = "failed"
+  failed = "failed",
+  cancelled = "cancelled"
 }
 
 export enum MessageType {

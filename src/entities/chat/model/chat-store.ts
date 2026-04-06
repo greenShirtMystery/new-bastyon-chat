@@ -1833,7 +1833,7 @@ export const useChatStore = defineStore(NAMESPACE, () => {
       // Preserve the most advanced status from all candidates with the same ID.
       // matrixRoomToChatRoom always returns status=sent, but loaded messages
       // may have status=read from receipts — keep the most advanced one.
-      const statusPriority = { [MessageStatus.sending]: 0, [MessageStatus.failed]: 0, [MessageStatus.sent]: 1, [MessageStatus.delivered]: 2, [MessageStatus.read]: 3 };
+      const statusPriority = { [MessageStatus.sending]: 0, [MessageStatus.failed]: 0, [MessageStatus.cancelled]: 0, [MessageStatus.sent]: 1, [MessageStatus.delivered]: 2, [MessageStatus.read]: 3 };
       for (const c of candidates) {
         if (!c || c.id !== best.id) continue;
         if ((statusPriority[c.status] ?? 0) > (statusPriority[best.status] ?? 0)) {

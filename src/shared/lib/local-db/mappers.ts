@@ -62,6 +62,8 @@ export function localStatusToMessageStatus(status: LocalMessageStatus): MessageS
       return MessageStatus.sent;
     case "failed":
       return MessageStatus.failed;
+    case "cancelled":
+      return MessageStatus.cancelled;
     case "delivered":
       return MessageStatus.delivered;
     case "read":
@@ -84,6 +86,7 @@ export function deriveOutboundStatus(
   // Local-only statuses take priority (not yet on server)
   if (localStatus === "pending" || localStatus === "syncing") return MessageStatus.sending;
   if (localStatus === "failed") return MessageStatus.failed;
+  if (localStatus === "cancelled") return MessageStatus.cancelled;
 
   // Derived from watermark: if the other party read up to this timestamp → read
   if (roomLastReadOutboundTs >= messageTimestamp) return MessageStatus.read;
@@ -101,6 +104,8 @@ export function messageStatusToLocal(status: MessageStatus): LocalMessageStatus 
       return "synced";
     case MessageStatus.failed:
       return "failed";
+    case MessageStatus.cancelled:
+      return "cancelled";
     case MessageStatus.delivered:
       return "delivered";
     case MessageStatus.read:

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { deriveOutboundStatus, localToMessage } from "./mappers";
+import { deriveOutboundStatus, localToMessage, localStatusToMessageStatus } from "./mappers";
 import { MessageStatus, MessageType } from "@/entities/chat/model/types";
 import type { LocalMessage } from "./schema";
 
@@ -14,6 +14,10 @@ describe("deriveOutboundStatus", () => {
 
   it("returns failed for failed status regardless of watermark", () => {
     expect(deriveOutboundStatus("failed", 1000, 2000)).toBe(MessageStatus.failed);
+  });
+
+  it("returns cancelled for cancelled status", () => {
+    expect(deriveOutboundStatus("cancelled", 1000, 2000)).toBe(MessageStatus.cancelled);
   });
 
   it("returns read when watermark >= message timestamp", () => {
@@ -31,6 +35,12 @@ describe("deriveOutboundStatus", () => {
     expect(deriveOutboundStatus("synced", msgTs, 4999)).toBe(MessageStatus.sent);
     expect(deriveOutboundStatus("synced", msgTs, 5000)).toBe(MessageStatus.read);
     expect(deriveOutboundStatus("synced", msgTs, 9999)).toBe(MessageStatus.read);
+  });
+});
+
+describe("localStatusToMessageStatus", () => {
+  it("maps cancelled to cancelled", () => {
+    expect(localStatusToMessageStatus("cancelled")).toBe(MessageStatus.cancelled);
   });
 });
 
