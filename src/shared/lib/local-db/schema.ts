@@ -192,7 +192,7 @@ export interface DecryptionJob {
   eventId: string;               // Matrix event ID → LocalMessage.eventId
   roomId: string;
   encryptedBody: string;         // JSON-serialized raw Matrix event content
-  status: "pending" | "processing" | "failed" | "dead";
+  status: "queued" | "processing" | "waiting" | "dead";
   attempts: number;
   nextAttemptAt: number;         // Timestamp for backoff scheduling
   lastError?: string;
@@ -510,6 +510,23 @@ export class ChatDatabase extends Dexie {
       attachments: "++id, messageLocalId, status",
       decryptionQueue: "++id, eventId, roomId, status, [status+nextAttemptAt]",
       listenedMessages: "messageId",
+    });
+
+    // Version 10: rename decryption statuses (pending→queued, failed→waiting)
+    this.version(10).stores({
+      rooms: "id, updatedAt, membership, isDeleted",
+      messages: "++localId, eventId, clientId, [roomId+timestamp], [roomId+status], senderId",
+      users: "address, updatedAt",
+      pendingOps: "++id, [roomId+createdAt], status",
+      syncState: "key",
+      attachments: "++id, messageLocalId, status",
+      decryptionQueue: "++id, eventId, roomId, status, [status+nextAttemptAt]",
+      listenedMessages: "messageId",
+    }).upgrade(tx => {
+      return tx.table("decryptionQueue").toCollection().modify(job => {
+        if (job.status === "pending") job.status = "queued";
+        if (job.status === "failed") job.status = "waiting";
+      });
     });
   }
 }

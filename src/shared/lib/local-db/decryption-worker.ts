@@ -4,18 +4,23 @@ import { MessageType } from "@/entities/chat/model/types";
 
 type GetRoomCrypto = (roomId: string) => Promise<{ decryptEvent(raw: unknown): Promise<{ body: string }> } | undefined>;
 
-const BACKOFF_MS = [5_000, 30_000, 300_000, 1_800_000]; // 5s, 30s, 5min, 30min
-const MAX_ATTEMPTS = 5;
+const FAST_BACKOFF_MS = [2_000, 5_000, 10_000];
+const SLOW_BACKOFF_MS = [30_000, 120_000, 600_000, 3_600_000];
+const MAX_ATTEMPTS = 8;
 const BATCH_SIZE = 20;
 
 /**
- * Background worker that retries decryption of messages that failed
- * due to temporarily unavailable keys. Persists jobs in Dexie so
- * retries survive page reloads.
+ * Background worker that retries decryption of messages with temporarily
+ * unavailable keys. Persists jobs in Dexie so retries survive page reloads.
+ *
+ * Two retry mechanisms:
+ * 1. Polling backoff (fast tier: 2s/5s/10s, slow tier: 30s/2min/10min/1h)
+ * 2. Event-driven: retryForRoom() called when keys arrive, retryAllWaiting() on online
  */
 export class DecryptionWorker {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private processing = false;
+  private disposed = false;
 
   constructor(
     private db: ChatDatabase,
@@ -37,9 +42,9 @@ export class DecryptionWorker {
       eventId,
       roomId,
       encryptedBody,
-      status: "pending",
+      status: "queued",
       attempts: 0,
-      nextAttemptAt: Date.now() + BACKOFF_MS[0],
+      nextAttemptAt: Date.now() + FAST_BACKOFF_MS[0],
       createdAt: Date.now(),
     });
 
@@ -53,13 +58,23 @@ export class DecryptionWorker {
 
     try {
       const now = Date.now();
-      const jobs = await this.db.decryptionQueue
+
+      const queuedJobs = await this.db.decryptionQueue
         .where("[status+nextAttemptAt]")
-        .between(["pending", 0], ["pending", now], true, true)
+        .between(["queued", 0], ["queued", now], true, true)
         .limit(BATCH_SIZE)
         .toArray();
 
-      for (const job of jobs) {
+      const remaining = BATCH_SIZE - queuedJobs.length;
+      const waitingJobs = remaining > 0
+        ? await this.db.decryptionQueue
+            .where("[status+nextAttemptAt]")
+            .between(["waiting", 0], ["waiting", now], true, true)
+            .limit(remaining)
+            .toArray()
+        : [];
+
+      for (const job of [...queuedJobs, ...waitingJobs]) {
         await this.processJob(job);
       }
     } finally {
@@ -68,30 +83,51 @@ export class DecryptionWorker {
     }
   }
 
-  /** Retry all dead-letter jobs for a specific room (e.g., when new keys arrive). */
-  async retryDeadForRoom(roomId: string): Promise<void> {
+  /** Retry ALL jobs for a room (called when new keys arrive). Resets attempts. */
+  async retryForRoom(roomId: string): Promise<void> {
     await this.db.decryptionQueue
       .where("roomId").equals(roomId)
-      .filter(j => j.status === "dead" || j.status === "failed")
+      .filter(j => j.status !== "processing")
       .modify({
-        status: "pending",
+        status: "queued",
+        attempts: 0,
         nextAttemptAt: Date.now(),
       });
     this.scheduleNext();
   }
 
+  /** Retry all queued/waiting jobs immediately (called on online transition). */
+  async retryAllWaiting(): Promise<void> {
+    await this.db.decryptionQueue
+      .where("status").anyOf(["queued", "waiting"])
+      .modify({ nextAttemptAt: Date.now() });
+    this.scheduleNext();
+  }
+
   /** Get queue statistics for diagnostics. */
-  async getStats(): Promise<{ pending: number; processing: number; dead: number }> {
+  async getStats(): Promise<{
+    queued: number;
+    waiting: number;
+    processing: number;
+    dead: number;
+    oldestDeadAge?: number;
+  }> {
     const all = await this.db.decryptionQueue.toArray();
+    const dead = all.filter(j => j.status === "dead");
     return {
-      pending: all.filter(j => j.status === "pending").length,
+      queued: all.filter(j => j.status === "queued").length,
+      waiting: all.filter(j => j.status === "waiting").length,
       processing: all.filter(j => j.status === "processing").length,
-      dead: all.filter(j => j.status === "dead").length,
+      dead: dead.length,
+      oldestDeadAge: dead.length
+        ? Date.now() - Math.min(...dead.map(j => j.createdAt))
+        : undefined,
     };
   }
 
   /** Stop the worker and clear timers. */
   dispose(): void {
+    this.disposed = true;
     if (this.timer) {
       clearTimeout(this.timer);
       this.timer = null;
@@ -118,29 +154,48 @@ export class DecryptionWorker {
           encryptedBody: undefined,
         });
 
-        // Update room preview if this is the latest message in the room
+        // Update room preview if this is the latest message
         if (this.roomRepo) {
           await this.updateRoomPreviewIfLatest(msg.roomId, msg.eventId!, result.body, msg.senderId, msg.type, msg.timestamp);
         }
       }
+
+      // Clear room-level decryption status
+      try {
+        const room = await this.db.rooms.where("id").equals(job.roomId).first();
+        if (room && room.lastMessageEventId === job.eventId) {
+          await this.db.rooms.update(job.roomId, {
+            lastMessageDecryptionStatus: undefined,
+          });
+        }
+      } catch { /* non-critical */ }
 
       // Remove completed job
       await this.db.decryptionQueue.delete(job.id!);
     } catch (e) {
       const attempts = job.attempts + 1;
       const isDead = attempts >= MAX_ATTEMPTS;
-      const backoffIndex = Math.min(attempts - 1, BACKOFF_MS.length - 1);
-      const delay = BACKOFF_MS[backoffIndex];
+
+      let delay: number;
+      if (attempts <= FAST_BACKOFF_MS.length) {
+        delay = FAST_BACKOFF_MS[attempts - 1];
+      } else {
+        const slowIdx = Math.min(
+          attempts - FAST_BACKOFF_MS.length - 1,
+          SLOW_BACKOFF_MS.length - 1,
+        );
+        delay = SLOW_BACKOFF_MS[slowIdx];
+      }
       const jitter = Math.random() * delay * 0.2;
 
       await this.db.decryptionQueue.update(job.id!, {
-        status: isDead ? "dead" : "pending",
+        status: isDead ? "dead" : "waiting",
         attempts,
         nextAttemptAt: isDead ? 0 : Date.now() + delay + jitter,
         lastError: String(e instanceof Error ? e.message : e),
       });
 
-      // Also mark message as failed if dead
+      // Mark message as failed if dead
       if (isDead) {
         const msg = await this.db.messages
           .where("eventId").equals(job.eventId).first();
@@ -150,7 +205,6 @@ export class DecryptionWorker {
           });
         }
 
-        // Update room preview status to "failed" so UI shows fallback instead of infinite skeleton
         try {
           const room = await this.db.rooms.where("id").equals(job.roomId).first();
           if (room && room.lastMessageEventId === job.eventId) {
@@ -176,7 +230,6 @@ export class DecryptionWorker {
     try {
       const room = await this.roomRepo.getRoom(roomId);
       if (!room) return;
-      // Only update if this event is the room's last message or preview is stale
       if (room.lastMessageEventId === eventId ||
           ((room.lastMessagePreview === "[encrypted]" || room.lastMessagePreview === "") &&
            timestamp >= (room.lastMessageTimestamp ?? 0))) {
@@ -194,24 +247,38 @@ export class DecryptionWorker {
   }
 
   private scheduleNext(): void {
+    if (this.disposed) return;
     if (this.timer) {
       clearTimeout(this.timer);
       this.timer = null;
     }
 
-    // Find next pending job
-    this.db.decryptionQueue
-      .where("[status+nextAttemptAt]")
-      .between(["pending", 0], ["pending", Infinity], true, true)
-      .first()
-      .then(nextJob => {
-        if (!nextJob) return;
-        const delay = Math.max(0, nextJob.nextAttemptAt - Date.now());
+    void (async () => {
+      try {
+        if (this.disposed) return;
+        const nextQueued = await this.db.decryptionQueue
+          .where("[status+nextAttemptAt]")
+          .between(["queued", 0], ["queued", Infinity], true, true)
+          .first();
+
+        if (this.disposed) return;
+        const nextWaiting = await this.db.decryptionQueue
+          .where("[status+nextAttemptAt]")
+          .between(["waiting", 0], ["waiting", Infinity], true, true)
+          .first();
+
+        if (this.disposed) return;
+        const candidates = [nextQueued, nextWaiting].filter(Boolean) as DecryptionJob[];
+        if (candidates.length === 0) return;
+
+        const nearest = Math.min(...candidates.map(j => j.nextAttemptAt));
+        const delay = Math.max(0, nearest - Date.now());
         this.timer = setTimeout(() => this.tick(), Math.min(delay, 60_000));
-      })
-      .catch(() => {
-        // DB error — retry in 30s
-        this.timer = setTimeout(() => this.tick(), 30_000);
-      });
+      } catch {
+        if (!this.disposed) {
+          this.timer = setTimeout(() => this.tick(), 30_000);
+        }
+      }
+    })();
   }
 }

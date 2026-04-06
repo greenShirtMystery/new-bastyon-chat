@@ -367,6 +367,13 @@ export const useAuthStore = defineStore(NAMESPACE, () => {
       }
       chatStore.setHelpers(matrixKit.value!, cryptoInstance);
 
+      // Wire Pcrypto key-load → decryption retry
+      if (cryptoInstance) {
+        cryptoInstance.onKeysLoaded = (roomId: string) => {
+          chatDbKit.retryRoomDecryption?.(roomId);
+        };
+      }
+
       let _lastSyncState: string | null = null;
       matrixService.setHandlers({
         onSync: (state) => {
@@ -461,6 +468,9 @@ export const useAuthStore = defineStore(NAMESPACE, () => {
             console.error("[auth] Failed to handle incoming call:", err);
             try { (call as any).reject?.(); } catch { /* ignore */ }
           }
+        },
+        onEncryptionKeyArrived: (roomId: string) => {
+          chatDbKit.retryRoomDecryption?.(roomId);
         },
       });
       // Route Matrix traffic through Tor reverse proxy on native platforms

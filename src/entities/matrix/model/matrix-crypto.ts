@@ -206,6 +206,9 @@ export class Pcrypto {
   private getIsChatPublic: ((room: unknown) => boolean) | null = null;
   private getMatrixId: ((id: string) => string) | null = null;
 
+  /** Called when user crypto keys are successfully loaded for a room */
+  onKeysLoaded?: (roomId: string) => void;
+
   init(user: UserWithPrivateKeys) {
     this.user = user;
   }
@@ -416,6 +419,8 @@ export class Pcrypto {
       for (const ui of _usersinfo) {
         usersinfo[ui.id] = ui;
       }
+      // Notify that keys are loaded — triggers decryption retry
+      pcrypto.onKeysLoaded?.(roomId);
     }
 
     // ---- eaa object — EXACT match of original lines 405-527 ----
