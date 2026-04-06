@@ -1,4 +1,3 @@
-import { computed, toRef } from "vue";
 import { storeToRefs } from "pinia";
 import { getPocketnetInstance } from "@/shared/api/sdk-bridge";
 import { useAuthStore } from "@/entities/auth";
