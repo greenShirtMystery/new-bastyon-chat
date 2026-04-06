@@ -126,6 +126,7 @@ export interface LocalMessage {
   decryptionAttempts?: number;   // Number of decrypt attempts
   serverTs?: number;             // Original server timestamp
   version: number;               // Incremented on each local edit
+  lastEditTs?: number;           // origin_server_ts of last applied edit (out-of-order guard)
   softDeleted: boolean;          // true = marked for deletion, pending sync
   deletedAt?: number;            // When soft-delete happened
 

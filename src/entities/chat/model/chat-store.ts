@@ -3519,6 +3519,13 @@ export const useChatStore = defineStore(NAMESPACE, () => {
 
         target.content = editBody.replace(/^\* /, "");
         target.edited = true;
+
+        // Persist edit to Dexie so it survives reload
+        await chatDbKitRef.value?.eventWriter.writeEdit(roomId, {
+          targetEventId: targetId,
+          newContent: target.content,
+          editTs: typeof raw.origin_server_ts === "number" ? raw.origin_server_ts : undefined,
+        });
       }
     }
 
@@ -4568,7 +4575,17 @@ export const useChatStore = defineStore(NAMESPACE, () => {
           newBody = (newContent?.body as string) ?? (content.body as string) ?? "";
         }
 
-        updateMessageContent(roomId, targetId, newBody.replace(/^\* /, ""));
+        const cleanBody = newBody.replace(/^\* /, "");
+
+        // Persist to Dexie (survives reload, triggers useLiveQuery)
+        chatDbKitRef.value?.eventWriter.writeEdit(roomId, {
+          targetEventId: targetId,
+          newContent: cleanBody,
+          editTs: typeof raw.origin_server_ts === "number" ? raw.origin_server_ts : undefined,
+        });
+
+        // Immediate in-memory update (no Dexie round-trip delay)
+        updateMessageContent(roomId, targetId, cleanBody);
         return;
       }
 

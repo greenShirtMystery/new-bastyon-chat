@@ -255,14 +255,17 @@ export class MessageRepository {
   // ---------------------------------------------------------------------------
 
   /** Mark a message as edited (local optimistic update) */
-  async editLocal(eventId: string, newContent: string): Promise<void> {
+  async editLocal(eventId: string, newContent: string, editTs?: number): Promise<void> {
     await this.db.messages
       .where("eventId")
       .equals(eventId)
       .modify((msg: LocalMessage) => {
+        // Skip stale edit if a newer one was already applied
+        if (editTs && msg.lastEditTs && editTs < msg.lastEditTs) return;
         msg.content = newContent;
         msg.edited = true;
         msg.version++;
+        if (editTs) msg.lastEditTs = editTs;
       });
   }
 

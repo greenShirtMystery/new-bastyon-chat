@@ -54,6 +54,7 @@ export interface ParsedReaction {
 export interface ParsedEdit {
   targetEventId: string;
   newContent: string;
+  editTs?: number;  // origin_server_ts of edit event — for out-of-order guard
 }
 
 /** A parsed redaction (deletion) event */
@@ -217,6 +218,13 @@ export class EventWriter {
     perfMark("flush-batch:end");
     perfMeasure("flush-batch", "flush-batch:start", "flush-batch:end");
 
+    // Apply stashed edits for newly inserted messages (outside the transaction)
+    for (const item of items) {
+      if (item.parsed.eventId && this.pendingEdits.has(item.parsed.eventId)) {
+        await this.applyPendingEdit(item.parsed.eventId, item.roomId);
+      }
+    }
+
     // Notify once per unique room (outside the transaction)
     for (const roomId of changedRooms) {
       this.onChange?.(roomId);
@@ -263,6 +271,10 @@ export class EventWriter {
     });
 
     if (out.result === "inserted") {
+      // Apply any edit that arrived before the base message
+      if (parsed.eventId) {
+        await this.applyPendingEdit(parsed.eventId, parsed.roomId);
+      }
       this.onChange?.(parsed.roomId);
     }
 
@@ -286,6 +298,13 @@ export class EventWriter {
     const latest = sorted[0];
     if (latest && !(clearedAtTs && latest.timestamp <= clearedAtTs)) {
       await this.updateRoomPreview(latest);
+    }
+
+    // Apply any stashed edits for messages that just landed
+    for (const m of messages) {
+      if (m.eventId && this.pendingEdits.has(m.eventId)) {
+        await this.applyPendingEdit(m.eventId, m.roomId);
+      }
     }
   }
 
@@ -404,10 +423,66 @@ export class EventWriter {
   // Edits
   // ---------------------------------------------------------------------------
 
-  /** Apply an edit to a message in the local DB */
+  /** Edits whose base message hasn't arrived yet (keyed by target eventId) */
+  private pendingEdits = new Map<string, { roomId: string; edit: ParsedEdit; stashedAt: number }>();
+  private static readonly PENDING_EDIT_TTL_MS = 5 * 60_000; // 5 minutes
+  private static readonly PENDING_EDIT_MAX_SIZE = 200;
+
+  /** Apply an edit to a message in the local DB, updating room preview if needed */
   async writeEdit(roomId: string, edit: ParsedEdit): Promise<void> {
-    await this.messageRepo.editLocal(edit.targetEventId, edit.newContent);
+    const exists = await this.db.messages
+      .where("eventId")
+      .equals(edit.targetEventId)
+      .count();
+
+    if (exists === 0) {
+      // Base message not in Dexie yet — stash for later
+      this.pendingEdits.set(edit.targetEventId, { roomId, edit, stashedAt: Date.now() });
+      this.evictStalePendingEdits();
+      return;
+    }
+
+    // Wrap edit + room preview in a single transaction to prevent races
+    await this.db.transaction("rw", [this.db.messages, this.db.rooms], async () => {
+      await this.messageRepo.editLocal(edit.targetEventId, edit.newContent, edit.editTs);
+
+      // Update room preview if the edited message is the last one shown
+      const room = await this.roomRepo.getRoom(roomId);
+      if (room?.lastMessageEventId === edit.targetEventId) {
+        await this.db.rooms.update(roomId, {
+          lastMessagePreview: edit.newContent,
+        });
+      }
+    });
+
     this.onChange?.(roomId);
+  }
+
+  /** Apply a stashed edit after its base message has been written */
+  async applyPendingEdit(eventId: string, roomId: string): Promise<void> {
+    const stashed = this.pendingEdits.get(eventId);
+    if (!stashed) return;
+    this.pendingEdits.delete(eventId);
+    await this.writeEdit(roomId, stashed.edit);
+  }
+
+  /** Evict stale or overflow entries from the pending edits buffer */
+  private evictStalePendingEdits(): void {
+    const now = Date.now();
+    for (const [key, entry] of this.pendingEdits) {
+      if (now - entry.stashedAt > EventWriter.PENDING_EDIT_TTL_MS) {
+        this.pendingEdits.delete(key);
+      }
+    }
+    // Hard cap: drop oldest entries if over limit
+    if (this.pendingEdits.size > EventWriter.PENDING_EDIT_MAX_SIZE) {
+      const sorted = [...this.pendingEdits.entries()]
+        .sort((a, b) => a[1].stashedAt - b[1].stashedAt);
+      const toRemove = sorted.slice(0, sorted.length - EventWriter.PENDING_EDIT_MAX_SIZE);
+      for (const [key] of toRemove) {
+        this.pendingEdits.delete(key);
+      }
+    }
   }
 
   // ---------------------------------------------------------------------------
