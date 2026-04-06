@@ -11,7 +11,7 @@
  *   A bug here breaks: encrypted file decryption, image/video rendering.
  */
 import { describe, it, expect } from "vitest";
-import { matrixIdToAddress, messageTypeFromMime, parseFileInfo, looksLikeProperName, resolveSystemText, isUnresolvedName, cleanMatrixIds } from "./chat-helpers";
+import { matrixIdToAddress, messageTypeFromMime, normalizeMime, parseFileInfo, looksLikeProperName, resolveSystemText, isUnresolvedName, cleanMatrixIds } from "./chat-helpers";
 import { hexEncode } from "@/shared/lib/matrix/functions";
 import { MessageType } from "../model/types";
 
@@ -90,6 +90,29 @@ describe("crypto sender encoding (regression: emptykey bug)", () => {
   });
 });
 
+// ─── normalizeMime ───────────────────────────────────────────────
+
+describe("normalizeMime", () => {
+  it("returns valid MIME as-is", () => {
+    expect(normalizeMime("image/jpeg")).toBe("image/jpeg");
+    expect(normalizeMime("application/pdf")).toBe("application/pdf");
+    expect(normalizeMime("application/vnd.android.package-archive")).toBe("application/vnd.android.package-archive");
+  });
+
+  it("falls back to application/octet-stream for empty string", () => {
+    expect(normalizeMime("")).toBe("application/octet-stream");
+  });
+
+  it("falls back to application/octet-stream for undefined", () => {
+    expect(normalizeMime(undefined)).toBe("application/octet-stream");
+  });
+
+  it("falls back for malformed MIME without slash", () => {
+    expect(normalizeMime("apk")).toBe("application/octet-stream");
+    expect(normalizeMime("fb2")).toBe("application/octet-stream");
+  });
+});
+
 // ─── messageTypeFromMime ─────────────────────────────────────────
 
 describe("messageTypeFromMime", () => {
@@ -115,8 +138,14 @@ describe("messageTypeFromMime", () => {
     expect(messageTypeFromMime("text/plain")).toBe(MessageType.file);
   });
 
-  it("defaults to file for empty string", () => {
+  it("defaults to file for empty string (via normalizeMime fallback)", () => {
     expect(messageTypeFromMime("")).toBe(MessageType.file);
+  });
+
+  it("classifies generic types (.apk, .fb2) as file", () => {
+    expect(messageTypeFromMime("application/vnd.android.package-archive")).toBe(MessageType.file);
+    expect(messageTypeFromMime("application/x-fictionbook+xml")).toBe(MessageType.file);
+    expect(messageTypeFromMime("application/octet-stream")).toBe(MessageType.file);
   });
 });
 

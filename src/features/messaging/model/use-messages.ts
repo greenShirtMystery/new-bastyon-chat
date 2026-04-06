@@ -1,5 +1,5 @@
 import { onScopeDispose } from "vue";
-import { useChatStore, MessageStatus, MessageType } from "@/entities/chat";
+import { useChatStore, MessageStatus, MessageType, messageTypeFromMime, normalizeMime } from "@/entities/chat";
 import type { FileInfo, Message, LinkPreview } from "@/entities/chat";
 import { useAuthStore } from "@/entities/auth";
 import { getMatrixClientService } from "@/entities/matrix";
@@ -15,6 +15,9 @@ import { withTimeout } from "@/shared/lib/with-timeout";
 
 /** Max time for the entire media pipeline (encrypt + upload + send event + confirm) */
 const MEDIA_PIPELINE_TIMEOUT = 5 * 60 * 1000; // 5 minutes
+
+/** Max file size for uploads (100 MB — typical Matrix homeserver limit) */
+const MAX_UPLOAD_SIZE = 100 * 1024 * 1024;
 
 export function useMessages() {
   const chatStore = useChatStore();
@@ -237,14 +240,17 @@ export function useMessages() {
     const roomId = chatStore.activeRoomId;
     if (!roomId || !file) return;
 
+    if (file.size > MAX_UPLOAD_SIZE) {
+      console.warn(`[use-messages] File too large: ${file.name} (${(file.size / 1024 / 1024).toFixed(1)} MB)`);
+      return;
+    }
+
     const matrixService = getMatrixClientService();
     if (!matrixService.isReady()) return;
 
-    // Determine message type from MIME
-    let msgType = MessageType.file;
-    if (file.type.startsWith("image/")) msgType = MessageType.image;
-    else if (file.type.startsWith("video/")) msgType = MessageType.video;
-    else if (file.type.startsWith("audio/")) msgType = MessageType.audio;
+    // Determine message type from MIME (with fallback for unknown extensions)
+    const mime = normalizeMime(file.type);
+    const msgType = messageTypeFromMime(mime);
 
     const localBlobUrl = URL.createObjectURL(file);
 
@@ -259,7 +265,7 @@ export function useMessages() {
           type: msgType,
           fileInfo: {
             name: file.name,
-            type: file.type,
+            type: mime,
             size: file.size,
             url: localBlobUrl,
           },
@@ -276,7 +282,7 @@ export function useMessages() {
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
               const fileInfo: Record<string, any> = {
                 name: file.name,
-                type: file.type,
+                type: mime,
                 size: file.size,
               };
 
@@ -302,7 +308,7 @@ export function useMessages() {
 
               const serverFileInfo: FileInfo = {
                 name: file.name,
-                type: file.type,
+                type: mime,
                 size: file.size,
                 url,
                 ...(fileInfo.secrets ? { secrets: fileInfo.secrets } : {}),
@@ -332,13 +338,14 @@ export function useMessages() {
     }
 
     // Legacy path
-    sendFileLegacy(file, roomId, msgType, localBlobUrl, matrixService);
+    sendFileLegacy(file, roomId, mime, msgType, localBlobUrl, matrixService);
   };
 
   /** Legacy sendFile — fallback when Dexie is not ready */
   const sendFileLegacy = async (
     file: File,
     roomId: string,
+    fileMime: string,
     msgType: MessageType,
     localBlobUrl: string,
     matrixService: ReturnType<typeof getMatrixClientService>,
@@ -354,7 +361,7 @@ export function useMessages() {
       type: msgType,
       fileInfo: {
         name: file.name,
-        type: file.type,
+        type: fileMime,
         size: file.size,
         url: localBlobUrl,
       },
@@ -367,7 +374,7 @@ export function useMessages() {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const fileInfo: Record<string, any> = {
         name: file.name,
-        type: file.type,
+        type: fileMime,
         size: file.size,
       };
 

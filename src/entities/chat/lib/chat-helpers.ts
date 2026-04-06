@@ -22,12 +22,17 @@ export function matrixIdToAddress(matrixUserId: string): string {
   return hexPart;
 }
 
+/** Normalize MIME: fallback to application/octet-stream for empty/unknown types */
+export function normalizeMime(mime: string | undefined): string {
+  return mime && mime.includes("/") ? mime : "application/octet-stream";
+}
+
 /** Determine MessageType from MIME type string */
 export function messageTypeFromMime(mime: string): MessageType {
-  if (!mime) return MessageType.file;
-  if (mime.startsWith("image/")) return MessageType.image;
-  if (mime.startsWith("video/")) return MessageType.video;
-  if (mime.startsWith("audio/")) return MessageType.audio;
+  const m = normalizeMime(mime);
+  if (m.startsWith("image/")) return MessageType.image;
+  if (m.startsWith("video/")) return MessageType.video;
+  if (m.startsWith("audio/")) return MessageType.audio;
   return MessageType.file;
 }
 

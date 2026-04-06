@@ -575,7 +575,7 @@ const handleKitchenSelect = async (imageUrl: string) => {
       />
       <!-- Hidden file inputs -->
       <input ref="photoInputRef" type="file" class="hidden" multiple accept="image/*,video/*" @change="handlePhotoSelect" />
-      <input ref="fileInputRef" type="file" class="hidden" multiple accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.zip,.rar,.7z" @change="handleFileSelect" />
+      <input ref="fileInputRef" type="file" class="hidden" multiple @change="handleFileSelect" />
 
       <!-- ======= IDLE state: normal input ======= -->
       <template v-if="recState === 'idle'">
