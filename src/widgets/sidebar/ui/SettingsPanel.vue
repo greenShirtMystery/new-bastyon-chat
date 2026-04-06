@@ -4,7 +4,7 @@ import { useThemeStore } from "@/entities/theme";
 import { useTorStore } from "@/entities/tor";
 import { useUserStore } from "@/entities/user/model";
 import { AccountList, AddAccountModal } from "@/features/account-switcher";
-import { useWallet } from "@/features/wallet/model/use-wallet";
+import { useWalletStore } from "@/features/wallet";
 import Avatar from "@/shared/ui/avatar/Avatar.vue";
 import { Toggle } from "@/shared/ui/toggle";
 import { isNative, isAndroid } from "@/shared/lib/platform";
@@ -24,31 +24,12 @@ const torStore = useTorStore();
 const userStore = useUserStore();
 const router = useRouter();
 const { openSettingsContent } = useSidebarTab();
-const { isAvailable: walletAvailable, getBalance } = useWallet();
+const walletStore = useWalletStore();
 
 const isElectron = !!(window as any).electronAPI?.isElectron;
 const showTor = isElectron || isNative;
 const showDisableWarning = ref(false);
 
-// --- Wallet balance ---
-const pkoinBalance = ref<number | null>(null);
-const balanceLoading = ref(false);
-
-const loadBalance = async () => {
-  if (!walletAvailable.value || balanceLoading.value) return;
-  balanceLoading.value = true;
-  try {
-    pkoinBalance.value = await getBalance();
-  } catch (e) {
-    console.warn("[settings] Failed to load balance:", e);
-    pkoinBalance.value = null;
-  } finally {
-    balanceLoading.value = false;
-  }
-};
-
-// Load balance when wallet becomes available
-watch(walletAvailable, (v) => { if (v) loadBalance(); }, { immediate: true });
 
 const { t } = useI18n();
 
@@ -324,9 +305,9 @@ const handleLogout = () => {
 
         <!-- PKOIN Wallet Balance -->
         <div
-          v-if="walletAvailable"
+          v-if="walletStore.isAvailable"
           class="flex items-center gap-3 rounded-lg px-3 py-3 transition-colors hover:bg-neutral-grad-0 cursor-pointer"
-          @click="loadBalance"
+          @click="walletStore.refresh()"
         >
           <svg
             width="20"
@@ -339,13 +320,13 @@ const handleLogout = () => {
           </svg>
           <span class="flex-1 text-sm text-text-color">{{ t("settings.wallet") }}</span>
           <span
-            v-if="balanceLoading"
+            v-if="walletStore.status === 'loading'"
             class="text-xs text-text-on-main-bg-color animate-pulse"
           >...</span>
           <span
-            v-else-if="pkoinBalance !== null"
+            v-else-if="walletStore.balance !== null"
             class="text-sm font-semibold text-color-bg-ac"
-          >{{ pkoinBalance.toFixed(4) }} PKOIN</span>
+          >{{ walletStore.balance!.toFixed(4) }} PKOIN</span>
           <span
             v-else
             class="text-xs text-text-on-main-bg-color"

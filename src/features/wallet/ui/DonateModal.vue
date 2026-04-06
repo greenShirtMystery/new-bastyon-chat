@@ -2,6 +2,7 @@
 import { useChatStore } from "@/entities/chat";
 import { useAuthStore } from "@/entities/auth";
 import { useWallet } from "../model/use-wallet";
+import { useWalletStore } from "../model/wallet-store";
 import { useMessages } from "@/features/messaging/model/use-messages";
 import Modal from "@/shared/ui/modal/Modal.vue";
 
@@ -11,13 +12,13 @@ const emit = defineEmits<{ close: [] }>();
 const { t } = useI18n();
 const chatStore = useChatStore();
 const authStore = useAuthStore();
-const { getBalance, estimateFees, sendTransfer } = useWallet();
+const { estimateFees, sendTransfer } = useWallet();
+const walletStore = useWalletStore();
 const { sendTransferMessage } = useMessages();
 
 const amount = ref("");
 const message = ref("");
 const feeDirection = ref<"exclude" | "include">("exclude");
-const balance = ref<number | null>(null);
 const fees = ref<number | null>(null);
 const sending = ref(false);
 const error = ref("");
@@ -38,13 +39,13 @@ const total = computed(() => {
 const canCalculate = computed(() => numericAmount.value > 0 && !feesLoading.value);
 const canSend = computed(() => {
   if (fees.value === null || numericAmount.value <= 0 || sending.value) return false;
-  if (balance.value !== null && total.value > balance.value) return false;
+  if (walletStore.balance !== null && total.value > walletStore.balance) return false;
   return true;
 });
 
 const insufficientBalance = computed(() => {
-  if (balance.value === null || fees.value === null) return false;
-  return total.value > balance.value;
+  if (walletStore.balance === null || fees.value === null) return false;
+  return total.value > walletStore.balance;
 });
 
 // Hint text explaining why button is disabled
@@ -55,14 +56,6 @@ const sendButtonHint = computed(() => {
   if (insufficientBalance.value) return t("wallet.insufficientBalance");
   return "";
 });
-
-const fetchBalance = async () => {
-  try {
-    balance.value = await getBalance();
-  } catch {
-    balance.value = null;
-  }
-};
 
 const calculateFees = async () => {
   if (!canCalculate.value) return;
@@ -113,9 +106,9 @@ watch([amount, feeDirection], () => {
   fees.value = null;
 });
 
-// Fetch balance when modal opens
+// Refresh balance when modal opens
 watch(() => props.show, (v) => {
-  if (v) fetchBalance();
+  if (v) walletStore.refresh();
 });
 </script>
 
@@ -134,9 +127,9 @@ watch(() => props.show, (v) => {
           <p class="truncate text-xs text-text-on-main-bg-color">{{ receiverName }}</p>
         </div>
         <!-- Balance badge -->
-        <div v-if="balance !== null" class="shrink-0 rounded-lg bg-neutral-grad-0 px-2.5 py-1">
+        <div v-if="walletStore.balance !== null" class="shrink-0 rounded-lg bg-neutral-grad-0 px-2.5 py-1">
           <span class="text-[10px] uppercase text-text-on-main-bg-color">{{ t("wallet.balance") }}</span>
-          <div class="text-sm font-bold text-text-color">{{ balance.toFixed(2) }} <span class="text-[10px] font-normal text-text-on-main-bg-color">PKOIN</span></div>
+          <div class="text-sm font-bold text-text-color">{{ walletStore.balance!.toFixed(2) }} <span class="text-[10px] font-normal text-text-on-main-bg-color">PKOIN</span></div>
         </div>
       </div>
 

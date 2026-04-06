@@ -18,7 +18,7 @@ import { useUserStore } from "@/entities/user/model";
 
 import { useCallService } from "@/features/video-calls/model/call-service";
 import type { CallType } from "@/entities/call";
-import { useWallet } from "@/features/wallet";
+import { useWalletStore } from "@/features/wallet";
 import DonateModal from "@/features/wallet/ui/DonateModal.vue";
 import { hexEncode, hexDecode } from "@/shared/lib/matrix/functions";
 import DropOverlay from "@/features/messaging/ui/DropOverlay.vue";
@@ -164,7 +164,7 @@ pasteDrop.setupDragListeners(chatWindowRef);
 
 
 const callService = useCallService();
-const { isAvailable: walletAvailable } = useWallet();
+const walletStore = useWalletStore();
 const showDonateModal = ref(false);
 
 // Android back: close overlays in ChatWindow
@@ -538,7 +538,7 @@ onUnmounted(() => {
         <MessageInput
           v-else
           ref="messageInputRef"
-          :show-donate="!chatStore.activeRoom?.isGroup && walletAvailable"
+          :show-donate="!chatStore.activeRoom?.isGroup && walletStore.isAvailable"
           @donate="showDonateModal = true"
         />
         <ForwardPicker
