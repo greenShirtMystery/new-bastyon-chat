@@ -9,6 +9,7 @@ const props = defineProps<{
 
 const isSending = computed(() => props.status === MessageStatus.sending);
 const isFailed = computed(() => props.status === MessageStatus.failed);
+const isCancelled = computed(() => props.status === MessageStatus.cancelled);
 const isRead = computed(() => props.status === MessageStatus.read);
 const isDouble = computed(() => props.status === MessageStatus.delivered || props.status === MessageStatus.read);
 
@@ -31,6 +32,12 @@ const iconColor = computed(() => {
     <circle cx="12" cy="12" r="9" stroke="#FF4444" stroke-width="1.8" />
     <path d="M12 8v5" stroke="#FF4444" stroke-width="2" stroke-linecap="round" />
     <circle cx="12" cy="16" r="1" fill="#FF4444" />
+  </svg>
+
+  <!-- Cancelled: grey X circle -->
+  <svg v-else-if="isCancelled" width="14" height="14" viewBox="0 0 24 24" fill="none" class="inline-block align-text-bottom">
+    <circle cx="12" cy="12" r="9" stroke="#999" stroke-width="1.8" />
+    <path d="M9 9l6 6M15 9l-6 6" stroke="#999" stroke-width="1.8" stroke-linecap="round" />
   </svg>
 
   <!-- Double check (delivered / read) -->

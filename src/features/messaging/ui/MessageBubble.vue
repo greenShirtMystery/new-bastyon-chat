@@ -57,6 +57,7 @@ const emit = defineEmits<{
   resize: [];
   retryMedia: [message: Message];
   retryMessage: [message: Message];
+  cancelUpload: [message: Message];
 }>();
 
 const handleToggleReaction = (emoji: string) => {
@@ -421,13 +422,17 @@ const replyPreviewSender = computed(() => {
           <img v-else-if="fileState.objectUrl" :src="fileState.objectUrl" :alt="message.fileInfo?.name" class="block max-h-[460px] max-w-full object-cover" :style="imageStyle" @load="emit('resize')" />
           <!-- Upload progress overlay -->
           <div v-if="isUploading" class="absolute inset-0 flex items-center justify-center bg-black/30">
-            <svg class="h-14 w-14" viewBox="0 0 36 36">
-              <circle cx="18" cy="18" r="15" fill="none" stroke="white" stroke-opacity="0.3" stroke-width="2.5" />
-              <circle cx="18" cy="18" r="15" fill="none" stroke="white" stroke-width="2.5"
-                :stroke-dasharray="94.25" :stroke-dashoffset="94.25 - (94.25 * (message.uploadProgress ?? 0) / 100)"
-                stroke-linecap="round" transform="rotate(-90 18 18)" class="transition-[stroke-dashoffset] duration-300" />
-            </svg>
-            <span class="absolute text-sm font-medium text-white">{{ message.uploadProgress }}%</span>
+            <button class="relative flex h-14 w-14 items-center justify-center" @click.stop="emit('cancelUpload', message)">
+              <svg class="h-full w-full" viewBox="0 0 36 36">
+                <circle cx="18" cy="18" r="15" fill="none" stroke="white" stroke-opacity="0.3" stroke-width="2.5" />
+                <circle cx="18" cy="18" r="15" fill="none" stroke="white" stroke-width="2.5"
+                  :stroke-dasharray="94.25" :stroke-dashoffset="94.25 - (94.25 * (message.uploadProgress ?? 0) / 100)"
+                  stroke-linecap="round" transform="rotate(-90 18 18)" class="transition-[stroke-dashoffset] duration-300" />
+              </svg>
+              <svg class="absolute h-3.5 w-3.5" viewBox="0 0 14 14" fill="none">
+                <path d="M3 3l8 8M11 3l-8 8" stroke="white" stroke-width="2" stroke-linecap="round"/>
+              </svg>
+            </button>
           </div>
           <!-- Sending spinner (no progress info, legacy fallback) -->
           <div v-else-if="isSending" class="absolute inset-0 flex items-center justify-center bg-black/30">
@@ -485,13 +490,17 @@ const replyPreviewSender = computed(() => {
         <VideoCirclePlayer :message="message" :is-own="props.isOwn" />
         <!-- Upload progress overlay for video circle -->
         <div v-if="isUploading" class="absolute inset-0 flex items-center justify-center rounded-full bg-black/30">
-          <svg class="h-14 w-14" viewBox="0 0 36 36">
-            <circle cx="18" cy="18" r="15" fill="none" stroke="white" stroke-opacity="0.3" stroke-width="2.5" />
-            <circle cx="18" cy="18" r="15" fill="none" stroke="white" stroke-width="2.5"
-              :stroke-dasharray="94.25" :stroke-dashoffset="94.25 - (94.25 * (message.uploadProgress ?? 0) / 100)"
-              stroke-linecap="round" transform="rotate(-90 18 18)" class="transition-[stroke-dashoffset] duration-300" />
-          </svg>
-          <span class="absolute text-sm font-medium text-white">{{ message.uploadProgress }}%</span>
+          <button class="relative flex h-14 w-14 items-center justify-center" @click.stop="emit('cancelUpload', message)">
+            <svg class="h-full w-full" viewBox="0 0 36 36">
+              <circle cx="18" cy="18" r="15" fill="none" stroke="white" stroke-opacity="0.3" stroke-width="2.5" />
+              <circle cx="18" cy="18" r="15" fill="none" stroke="white" stroke-width="2.5"
+                :stroke-dasharray="94.25" :stroke-dashoffset="94.25 - (94.25 * (message.uploadProgress ?? 0) / 100)"
+                stroke-linecap="round" transform="rotate(-90 18 18)" class="transition-[stroke-dashoffset] duration-300" />
+            </svg>
+            <svg class="absolute h-3.5 w-3.5" viewBox="0 0 14 14" fill="none">
+              <path d="M3 3l8 8M11 3l-8 8" stroke="white" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+          </button>
         </div>
         <div v-else-if="isSending" class="absolute inset-0 flex items-center justify-center rounded-full bg-black/30">
           <div class="h-8 w-8 animate-spin rounded-full border-3 border-white border-t-transparent" />
@@ -552,13 +561,17 @@ const replyPreviewSender = computed(() => {
           </button>
           <!-- Upload progress overlay for video -->
           <div v-if="isUploading" class="absolute inset-0 flex items-center justify-center bg-black/30">
-            <svg class="h-14 w-14" viewBox="0 0 36 36">
-              <circle cx="18" cy="18" r="15" fill="none" stroke="white" stroke-opacity="0.3" stroke-width="2.5" />
-              <circle cx="18" cy="18" r="15" fill="none" stroke="white" stroke-width="2.5"
-                :stroke-dasharray="94.25" :stroke-dashoffset="94.25 - (94.25 * (message.uploadProgress ?? 0) / 100)"
-                stroke-linecap="round" transform="rotate(-90 18 18)" class="transition-[stroke-dashoffset] duration-300" />
-            </svg>
-            <span class="absolute text-sm font-medium text-white">{{ message.uploadProgress }}%</span>
+            <button class="relative flex h-14 w-14 items-center justify-center" @click.stop="emit('cancelUpload', message)">
+              <svg class="h-full w-full" viewBox="0 0 36 36">
+                <circle cx="18" cy="18" r="15" fill="none" stroke="white" stroke-opacity="0.3" stroke-width="2.5" />
+                <circle cx="18" cy="18" r="15" fill="none" stroke="white" stroke-width="2.5"
+                  :stroke-dasharray="94.25" :stroke-dashoffset="94.25 - (94.25 * (message.uploadProgress ?? 0) / 100)"
+                  stroke-linecap="round" transform="rotate(-90 18 18)" class="transition-[stroke-dashoffset] duration-300" />
+              </svg>
+              <svg class="absolute h-3.5 w-3.5" viewBox="0 0 14 14" fill="none">
+                <path d="M3 3l8 8M11 3l-8 8" stroke="white" stroke-width="2" stroke-linecap="round"/>
+              </svg>
+            </button>
           </div>
           <div v-else-if="isSending" class="absolute inset-0 flex items-center justify-center bg-black/30">
             <div class="h-8 w-8 animate-spin rounded-full border-3 border-white border-t-transparent" />

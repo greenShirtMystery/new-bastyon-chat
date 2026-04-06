@@ -28,7 +28,7 @@ import UnreadBanner from "./UnreadBanner.vue";
 const chatStore = useChatStore();
 const authStore = useAuthStore();
 const themeStore = useThemeStore();
-const { loadMessages, toggleReaction, deleteMessage, votePoll, endPoll, retryMediaUpload, retryMessage } = useMessages();
+const { loadMessages, toggleReaction, deleteMessage, votePoll, endPoll, retryMediaUpload, retryMessage, cancelMediaUpload } = useMessages();
 const { toast } = useToast();
 const { t } = useI18n();
 
@@ -1213,6 +1213,7 @@ defineExpose({ scrollToMessage, setSearchQuery });
             @poll-end="handlePollEnd"
             @retry-media="retryMediaUpload"
             @retry-message="retryMessage"
+            @cancel-upload="cancelMediaUpload"
           >
             <template #avatar>
               <UserAvatar :address="item.message.senderId" size="sm" />
