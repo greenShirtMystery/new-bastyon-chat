@@ -86,6 +86,39 @@ describe("wallet-store", () => {
     expect(store.balance).toBeNull();
   });
 
+  it("isAvailable returns false when no address", () => {
+    mockAddress.value = null;
+    const store = useWalletStore();
+    expect(store.isAvailable).toBe(false);
+  });
+
+  it("isAvailable returns true when authenticated with address", () => {
+    const store = useWalletStore();
+    expect(store.isAvailable).toBe(true);
+  });
+
+  it("isStale returns true initially and false after refresh", async () => {
+    mockRpc.mockResolvedValue({ balance: 1 });
+    const store = useWalletStore();
+    expect(store.isStale).toBe(true);
+    await store.refresh();
+    expect(store.isStale).toBe(false);
+  });
+
+  it("startPolling triggers periodic refresh", async () => {
+    vi.useFakeTimers();
+    mockRpc.mockResolvedValue({ balance: 5 });
+
+    const store = useWalletStore();
+    store.startPolling(100);
+
+    await vi.advanceTimersByTimeAsync(100);
+    expect(mockRpc).toHaveBeenCalled();
+
+    store.stopPolling();
+    vi.useRealTimers();
+  });
+
   it("reset clears all state", async () => {
     mockRpc.mockResolvedValue({ balance: 10 });
 

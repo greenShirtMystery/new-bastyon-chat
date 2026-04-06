@@ -104,9 +104,9 @@ export const useWalletStore = defineStore("wallet", () => {
   // --- Auto-watch: reset + refresh on address change ---
   watch(
     () => authStore.address,
-    () => {
+    (newAddr) => {
       reset();
-      refresh();
+      if (newAddr) refresh();
     },
   );
 
