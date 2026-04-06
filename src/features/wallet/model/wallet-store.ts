@@ -22,6 +22,20 @@ export async function getApi(address?: string | null): Promise<InstanceType<type
 
 export type WalletStatus = "idle" | "loading" | "ready" | "error";
 
+/**
+ * Format PKOIN balance with dynamic precision (matches Bastyon main app).
+ * >= 1       → 2 decimals  (e.g. "42.50")
+ * 0.0005–0.9 → 4 decimals  (e.g. "0.0006")
+ * < 0.0005   → 8 decimals  (e.g. "0.00000050")
+ * 0 / null   → "0"
+ */
+export function formatPkoin(value: number | null | undefined): string {
+  if (value == null || value <= 0) return "0";
+  if (value >= 1) return value.toFixed(2);
+  if (value >= 0.0005) return value.toFixed(4).replace(/0+$/, "").replace(/\.$/, "");
+  return value.toFixed(8).replace(/0+$/, "").replace(/\.$/, "");
+}
+
 export const useWalletStore = defineStore("wallet", () => {
   const authStore = useAuthStore();
 

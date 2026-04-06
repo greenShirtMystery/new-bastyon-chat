@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { setActivePinia, createPinia } from "pinia";
 import { ref } from "vue";
+import { formatPkoin } from "./wallet-store";
 
 // --- Mocks ---
 
@@ -133,5 +134,33 @@ describe("wallet-store", () => {
     expect(store.status).toBe("idle");
     expect(store.error).toBeNull();
     expect(store.updatedAt).toBeNull();
+  });
+});
+
+describe("formatPkoin", () => {
+  it("returns '0' for null/undefined/zero/negative", () => {
+    expect(formatPkoin(null)).toBe("0");
+    expect(formatPkoin(undefined)).toBe("0");
+    expect(formatPkoin(0)).toBe("0");
+    expect(formatPkoin(-1)).toBe("0");
+  });
+
+  it("uses 2 decimals for >= 1", () => {
+    expect(formatPkoin(42.5)).toBe("42.50");
+    expect(formatPkoin(1)).toBe("1.00");
+    expect(formatPkoin(1000.123)).toBe("1000.12");
+  });
+
+  it("uses up to 4 decimals for 0.0005–0.9999", () => {
+    expect(formatPkoin(0.5)).toBe("0.5");
+    expect(formatPkoin(0.0006)).toBe("0.0006");
+    expect(formatPkoin(0.001)).toBe("0.001");
+    expect(formatPkoin(0.1234)).toBe("0.1234");
+  });
+
+  it("uses up to 8 decimals for < 0.0005", () => {
+    expect(formatPkoin(0.0001)).toBe("0.0001");
+    expect(formatPkoin(0.00000050)).toBe("0.0000005");
+    expect(formatPkoin(0.00000001)).toBe("0.00000001");
   });
 });

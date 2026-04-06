@@ -4,7 +4,7 @@ import { useThemeStore } from "@/entities/theme";
 import { useTorStore } from "@/entities/tor";
 import { useUserStore } from "@/entities/user/model";
 import { AccountList, AddAccountModal } from "@/features/account-switcher";
-import { useWalletStore } from "@/features/wallet";
+import { useWalletStore, formatPkoin } from "@/features/wallet";
 import Avatar from "@/shared/ui/avatar/Avatar.vue";
 import { Toggle } from "@/shared/ui/toggle";
 import { isNative, isAndroid } from "@/shared/lib/platform";
@@ -326,7 +326,7 @@ const handleLogout = () => {
           <span
             v-else-if="walletStore.balance !== null"
             class="text-sm font-semibold text-color-bg-ac"
-          >{{ walletStore.balance!.toFixed(4) }} PKOIN</span>
+          >{{ formatPkoin(walletStore.balance) }} PKOIN</span>
           <span
             v-else
             class="text-xs text-text-on-main-bg-color"

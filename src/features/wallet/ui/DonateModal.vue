@@ -2,7 +2,7 @@
 import { useChatStore } from "@/entities/chat";
 import { useAuthStore } from "@/entities/auth";
 import { useWallet } from "../model/use-wallet";
-import { useWalletStore } from "../model/wallet-store";
+import { useWalletStore, formatPkoin } from "../model/wallet-store";
 import { useMessages } from "@/features/messaging/model/use-messages";
 import Modal from "@/shared/ui/modal/Modal.vue";
 
@@ -129,7 +129,7 @@ watch(() => props.show, (v) => {
         <!-- Balance badge -->
         <div v-if="walletStore.balance !== null" class="shrink-0 rounded-lg bg-neutral-grad-0 px-2.5 py-1">
           <span class="text-[10px] uppercase text-text-on-main-bg-color">{{ t("wallet.balance") }}</span>
-          <div class="text-sm font-bold text-text-color">{{ walletStore.balance!.toFixed(2) }} <span class="text-[10px] font-normal text-text-on-main-bg-color">PKOIN</span></div>
+          <div class="text-sm font-bold text-text-color">{{ formatPkoin(walletStore.balance) }} <span class="text-[10px] font-normal text-text-on-main-bg-color">PKOIN</span></div>
         </div>
       </div>
 

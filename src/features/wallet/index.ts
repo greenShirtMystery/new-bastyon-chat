@@ -1,2 +1,2 @@
 export { useWallet } from "./model/use-wallet";
-export { useWalletStore } from "./model/wallet-store";
+export { useWalletStore, formatPkoin } from "./model/wallet-store";
