@@ -299,10 +299,22 @@ export function useMessages() {
           uploadProgress: 0,
         });
 
-        // Async upload pipeline (with timeout to prevent infinite spinner)
+        // Async upload pipeline (with abort support)
         (async () => {
+          const controller = registerUploadAbort(localMsg.clientId);
+          const { signal } = controller;
+
           try {
+            const checkAbort = () => {
+              if (signal.aborted) throw new DOMException("Upload cancelled", "AbortError");
+            };
+
             await withTimeout((async () => {
+              // Phase 1: Encrypt
+              checkAbort();
+              await dbKit.db.messages.where("clientId").equals(localMsg.clientId)
+                .modify({ uploadPhase: "encrypting" });
+
               const roomCrypto = authStore.pcrypto?.rooms[roomId] as PcryptoRoomInstance | undefined;
 
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -320,11 +332,21 @@ export function useMessages() {
                 fileToUpload = encrypted.file;
               }
 
+              // Phase 2: Upload
+              checkAbort();
+              await dbKit.db.messages.where("clientId").equals(localMsg.clientId)
+                .modify({ uploadPhase: "uploading" });
+
               const url = await matrixService.uploadContent(fileToUpload, (progress) => {
                 const percent = progress.total > 0 ? Math.round((progress.loaded / progress.total) * 100) : 0;
                 dbKit.messages.updateUploadProgress(localMsg.clientId, percent);
-              });
+              }, signal);
               fileInfo.url = url;
+
+              // Phase 3: Send event
+              checkAbort();
+              await dbKit.db.messages.where("clientId").equals(localMsg.clientId)
+                .modify({ uploadPhase: "sending_event", uploadProgress: 100 });
 
               const body = JSON.stringify(fileInfo);
               const serverEventId = await matrixService.sendEncryptedText(roomId, {
@@ -345,15 +367,22 @@ export function useMessages() {
               setTimeout(() => URL.revokeObjectURL(localBlobUrl), 5000);
             })(), MEDIA_PIPELINE_TIMEOUT, "File upload");
           } catch (e) {
-            console.error("Failed to send file (Dexie path):", e);
-            // Only mark failed if not already confirmed (race: timeout fires after confirmMediaSent)
-            const current = await dbKit.messages.getByClientId(localMsg.clientId);
-            if (current && current.status !== "synced") {
-              await dbKit.db.messages.where("clientId").equals(localMsg.clientId).modify({
-                status: "failed" as import("@/shared/lib/local-db/schema").LocalMessageStatus,
-                uploadProgress: undefined,
-              });
+            if (e instanceof DOMException && e.name === "AbortError") {
+              await handleUploadCancelled(dbKit, localMsg.clientId, localBlobUrl);
+            } else {
+              console.error("Failed to send file (Dexie path):", e);
+              // Only mark failed if not already confirmed (race: timeout fires after confirmMediaSent)
+              const current = await dbKit.messages.getByClientId(localMsg.clientId);
+              if (current && current.status !== "synced") {
+                await dbKit.db.messages.where("clientId").equals(localMsg.clientId).modify({
+                  status: "failed" as LocalMessageStatus,
+                  uploadProgress: undefined,
+                  uploadPhase: undefined,
+                });
+              }
             }
+          } finally {
+            unregisterUploadAbort(localMsg.clientId);
           }
         })();
 
@@ -672,10 +701,22 @@ export function useMessages() {
           uploadProgress: 0,
         });
 
-        // Async upload pipeline (with timeout to prevent infinite spinner)
+        // Async upload pipeline (with abort support)
         (async () => {
+          const controller = registerUploadAbort(localMsg.clientId);
+          const { signal } = controller;
+
           try {
+            const checkAbort = () => {
+              if (signal.aborted) throw new DOMException("Upload cancelled", "AbortError");
+            };
+
             await withTimeout((async () => {
+              // Phase 1: Encrypt
+              checkAbort();
+              await dbKit.db.messages.where("clientId").equals(localMsg.clientId)
+                .modify({ uploadPhase: "encrypting" });
+
               const roomCrypto = authStore.pcrypto?.rooms[roomId] as PcryptoRoomInstance | undefined;
 
               let fileToUpload: Blob = file;
@@ -687,10 +728,20 @@ export function useMessages() {
                 fileToUpload = encrypted.file;
               }
 
+              // Phase 2: Upload
+              checkAbort();
+              await dbKit.db.messages.where("clientId").equals(localMsg.clientId)
+                .modify({ uploadPhase: "uploading" });
+
               const url = await matrixService.uploadContent(fileToUpload, (progress) => {
                 const percent = progress.total > 0 ? Math.round((progress.loaded / progress.total) * 100) : 0;
                 dbKit.messages.updateUploadProgress(localMsg.clientId, percent);
-              });
+              }, signal);
+
+              // Phase 3: Send event
+              checkAbort();
+              await dbKit.db.messages.where("clientId").equals(localMsg.clientId)
+                .modify({ uploadPhase: "sending_event", uploadProgress: 100 });
 
               const intWaveform = options.waveform?.map((v: number) => Math.round(v * 1024));
 
@@ -724,14 +775,21 @@ export function useMessages() {
               setTimeout(() => URL.revokeObjectURL(localBlobUrl), 5000);
             })(), MEDIA_PIPELINE_TIMEOUT, "Audio upload");
           } catch (e) {
-            console.error("Failed to send audio (Dexie path):", e);
-            const current = await dbKit.messages.getByClientId(localMsg.clientId);
-            if (current && current.status !== "synced") {
-              await dbKit.db.messages.where("clientId").equals(localMsg.clientId).modify({
-                status: "failed" as import("@/shared/lib/local-db/schema").LocalMessageStatus,
-                uploadProgress: undefined,
-              });
+            if (e instanceof DOMException && e.name === "AbortError") {
+              await handleUploadCancelled(dbKit, localMsg.clientId, localBlobUrl);
+            } else {
+              console.error("Failed to send audio (Dexie path):", e);
+              const current = await dbKit.messages.getByClientId(localMsg.clientId);
+              if (current && current.status !== "synced") {
+                await dbKit.db.messages.where("clientId").equals(localMsg.clientId).modify({
+                  status: "failed" as LocalMessageStatus,
+                  uploadProgress: undefined,
+                  uploadPhase: undefined,
+                });
+              }
             }
+          } finally {
+            unregisterUploadAbort(localMsg.clientId);
           }
         })();
 
@@ -847,10 +905,22 @@ export function useMessages() {
           uploadProgress: 0,
         });
 
-        // Async upload pipeline (with timeout to prevent infinite spinner)
+        // Async upload pipeline (with abort support)
         (async () => {
+          const controller = registerUploadAbort(localMsg.clientId);
+          const { signal } = controller;
+
           try {
+            const checkAbort = () => {
+              if (signal.aborted) throw new DOMException("Upload cancelled", "AbortError");
+            };
+
             await withTimeout((async () => {
+              // Phase 1: Encrypt
+              checkAbort();
+              await dbKit.db.messages.where("clientId").equals(localMsg.clientId)
+                .modify({ uploadPhase: "encrypting" });
+
               const roomCrypto = authStore.pcrypto?.rooms[roomId] as PcryptoRoomInstance | undefined;
 
               let fileToUpload: Blob = file;
@@ -862,10 +932,20 @@ export function useMessages() {
                 fileToUpload = encrypted.file;
               }
 
+              // Phase 2: Upload
+              checkAbort();
+              await dbKit.db.messages.where("clientId").equals(localMsg.clientId)
+                .modify({ uploadPhase: "uploading" });
+
               const url = await matrixService.uploadContent(fileToUpload, (progress) => {
                 const percent = progress.total > 0 ? Math.round((progress.loaded / progress.total) * 100) : 0;
                 dbKit.messages.updateUploadProgress(localMsg.clientId, percent);
-              });
+              }, signal);
+
+              // Phase 3: Send event
+              checkAbort();
+              await dbKit.db.messages.where("clientId").equals(localMsg.clientId)
+                .modify({ uploadPhase: "sending_event", uploadProgress: 100 });
 
               const content: Record<string, unknown> = {
                 body: "Video message",
@@ -901,14 +981,21 @@ export function useMessages() {
               setTimeout(() => URL.revokeObjectURL(localBlobUrl), 5000);
             })(), MEDIA_PIPELINE_TIMEOUT, "Video circle upload");
           } catch (e) {
-            console.error("Failed to send video circle (Dexie path):", e);
-            const current = await dbKit.messages.getByClientId(localMsg.clientId);
-            if (current && current.status !== "synced") {
-              await dbKit.db.messages.where("clientId").equals(localMsg.clientId).modify({
-                status: "failed" as import("@/shared/lib/local-db/schema").LocalMessageStatus,
-                uploadProgress: undefined,
-              });
+            if (e instanceof DOMException && e.name === "AbortError") {
+              await handleUploadCancelled(dbKit, localMsg.clientId, localBlobUrl);
+            } else {
+              console.error("Failed to send video circle (Dexie path):", e);
+              const current = await dbKit.messages.getByClientId(localMsg.clientId);
+              if (current && current.status !== "synced") {
+                await dbKit.db.messages.where("clientId").equals(localMsg.clientId).modify({
+                  status: "failed" as LocalMessageStatus,
+                  uploadProgress: undefined,
+                  uploadPhase: undefined,
+                });
+              }
             }
+          } finally {
+            unregisterUploadAbort(localMsg.clientId);
           }
         })();
 
@@ -1872,9 +1959,21 @@ export function useMessages() {
       uploadProgress: 0,
     });
 
-    // Re-run upload pipeline (with timeout to prevent infinite spinner)
+    // Re-run upload pipeline (with abort support)
+    const controller = registerUploadAbort(localMsg.clientId);
+    const { signal } = controller;
+
     try {
+      const checkAbort = () => {
+        if (signal.aborted) throw new DOMException("Upload cancelled", "AbortError");
+      };
+
       await withTimeout((async () => {
+        // Phase 1: Encrypt
+        checkAbort();
+        await dbKit.db.messages.where("clientId").equals(localMsg.clientId)
+          .modify({ uploadPhase: "encrypting" });
+
         const roomCrypto = authStore.pcrypto?.rooms[roomId] as PcryptoRoomInstance | undefined;
         let fileToUpload: Blob = file;
         let secrets: Record<string, unknown> | undefined;
@@ -1885,10 +1984,20 @@ export function useMessages() {
           fileToUpload = encrypted.file;
         }
 
+        // Phase 2: Upload
+        checkAbort();
+        await dbKit.db.messages.where("clientId").equals(localMsg.clientId)
+          .modify({ uploadPhase: "uploading" });
+
         const url = await matrixService.uploadContent(fileToUpload, (progress) => {
           const percent = progress.total > 0 ? Math.round((progress.loaded / progress.total) * 100) : 0;
           dbKit.messages.updateUploadProgress(localMsg.clientId, percent);
-        });
+        }, signal);
+
+        // Phase 3: Send event
+        checkAbort();
+        await dbKit.db.messages.where("clientId").equals(localMsg.clientId)
+          .modify({ uploadPhase: "sending_event", uploadProgress: 100 });
 
         // Build event content based on message type
         const fi = localMsg.fileInfo!;
@@ -1952,14 +2061,22 @@ export function useMessages() {
         if (blobToRevoke) setTimeout(() => URL.revokeObjectURL(blobToRevoke), 5000);
       })(), MEDIA_PIPELINE_TIMEOUT, "Media retry upload");
     } catch (e) {
-      console.error("[retry] Upload failed again:", e);
-      const current = await dbKit.messages.getByClientId(localMsg.clientId);
-      if (current && current.status !== "synced") {
-        await dbKit.db.messages.where("clientId").equals(localMsg.clientId).modify({
-          status: "failed" as import("@/shared/lib/local-db/schema").LocalMessageStatus,
-          uploadProgress: undefined,
-        });
+      if (e instanceof DOMException && e.name === "AbortError") {
+        const blobUrl = localMsg.localBlobUrl || localMsg.fileInfo?.url;
+        await handleUploadCancelled(dbKit, localMsg.clientId, blobUrl);
+      } else {
+        console.error("[retry] Upload failed again:", e);
+        const current = await dbKit.messages.getByClientId(localMsg.clientId);
+        if (current && current.status !== "synced") {
+          await dbKit.db.messages.where("clientId").equals(localMsg.clientId).modify({
+            status: "failed" as LocalMessageStatus,
+            uploadProgress: undefined,
+            uploadPhase: undefined,
+          });
+        }
       }
+    } finally {
+      unregisterUploadAbort(localMsg.clientId);
     }
   };
 
