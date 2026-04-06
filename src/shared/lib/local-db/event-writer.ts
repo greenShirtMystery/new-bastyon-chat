@@ -557,12 +557,11 @@ export class EventWriter {
   // Room updates
   // ---------------------------------------------------------------------------
 
-  /** Increment unread count for a room (when message arrives in non-active room) */
+  /** Increment unread count for a room (when message arrives in non-active room).
+   *  Uses atomic modify() to prevent race with concurrent markAsRead(). */
   async incrementUnread(roomId: string): Promise<void> {
-    const room = await this.roomRepo.getRoom(roomId);
-    if (room) {
-      await this.roomRepo.setUnreadCount(roomId, room.unreadCount + 1);
-    }
+    await this.db.rooms.where("id").equals(roomId)
+      .modify((room: import("./schema").LocalRoom) => { room.unreadCount++; });
   }
 
   /** Reset unread count (user opened the room) */
