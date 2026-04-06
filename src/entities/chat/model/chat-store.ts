@@ -1051,6 +1051,8 @@ export const useChatStore = defineStore(NAMESPACE, () => {
       if (kit) {
         await initDexieRooms(kit);
         await fullRebuildSortedRoomsAsync();
+        // Self-heal unread counts on first load (deferred to not block UI)
+        queueMicrotask(() => healUnreadCounts());
       } else {
         dexieChangesUnsub?.();
         dexieChangesUnsub = null;
@@ -2099,6 +2101,27 @@ export const useChatStore = defineStore(NAMESPACE, () => {
     }
   };
 
+  /** Self-heal unread counts by recalculating from watermarks + actual messages.
+   *  Called on app resume and after initial sync to fix any accumulated drift. */
+  const healUnreadCounts = () => {
+    if (!chatDbKitRef.value) return;
+    const myAddr = useAuthStore().address;
+    if (!myAddr) return;
+
+    const dbKit = chatDbKitRef.value;
+    dbKit.rooms.recalculateAllUnreadCounts(
+      myAddr,
+      (roomId, afterTs, excludeSenderId, clearedAtTs?) =>
+        dbKit.messages.countInboundAfter(roomId, afterTs, excludeSenderId, clearedAtTs),
+    ).then(corrected => {
+      if (corrected > 0) {
+        console.log(`[chat-store] self-healed unreadCount for ${corrected} room(s)`);
+      }
+    }).catch(e => {
+      console.warn("[chat-store] healUnreadCounts failed:", e);
+    });
+  };
+
   // Listen for visibility changes to send pending read receipts
   if (typeof document !== "undefined") {
     document.addEventListener("visibilitychange", () => {
@@ -2138,6 +2161,9 @@ export const useChatStore = defineStore(NAMESPACE, () => {
 
           // 3. Flush pending read receipts
           flushPendingReadWatermarks();
+
+          // 4. Self-heal unread counts — fix any drift accumulated during suspension
+          healUnreadCounts();
         }
       });
     }).catch(() => {});
@@ -4822,6 +4848,30 @@ export const useChatStore = defineStore(NAMESPACE, () => {
 
   /** Handle read receipt events — both from other users (outbound watermark)
    *  and from ourselves on another device (inbound watermark / cross-device sync). */
+  /** Resolve message timestamp for a receipt: try in-memory first, fall back to Dexie.
+   *  Returns 0 if the message is not found anywhere. */
+  const resolveReceiptTimestamp = async (
+    roomId: string,
+    eventId: string,
+    receiptTs: number,
+  ): Promise<number> => {
+    // 1. In-memory (fast path — works for active room)
+    const roomMessages = messages.value[roomId];
+    const msg = roomMessages?.find(m => m.id === eventId);
+    if (msg?.timestamp) return msg.timestamp;
+
+    // 2. Dexie (background rooms where messages.value is empty)
+    if (chatDbKitRef.value) {
+      try {
+        const dexieMsg = await chatDbKitRef.value.messages.getByEventId(eventId);
+        if (dexieMsg?.timestamp) return dexieMsg.timestamp;
+      } catch { /* DB may be torn down */ }
+    }
+
+    // 3. Fallback: receipt's own timestamp (less precise but usable)
+    return receiptTs;
+  };
+
   const handleReceiptEvent = (event: unknown, room: unknown) => {
     try {
       const receiptEvent = event as any;
@@ -4840,33 +4890,37 @@ export const useChatStore = defineStore(NAMESPACE, () => {
         if (!readReceipts) continue;
 
         for (const userId of Object.keys(readReceipts)) {
-          // Find the message timestamp for the watermark
-          const roomMessages = messages.value[roomId];
-          const msg = roomMessages?.find(m => m.id === eventId);
           const receiptData = (readReceipts[userId] as Record<string, unknown>) ?? {};
-          const timestamp = msg?.timestamp ?? (receiptData.ts as number) ?? 0;
-          if (timestamp === 0) continue;
+          const receiptTs = (receiptData.ts as number) ?? 0;
 
           if (userId === myUserId) {
             // Own receipt from another device → advance inbound read watermark.
             // This is the key cross-device sync path: when desktop reads a message,
             // mobile receives our own receipt via /sync and clears unread here.
-            if (chatDbKitRef.value) {
-              chatDbKitRef.value.rooms.markAsRead(roomId, timestamp).catch(() => {});
-            }
             // Also clear in-memory unread for immediate reactivity
             const inMemRoom = getRoomById(roomId);
             if (inMemRoom) inMemRoom.unreadCount = 0;
+
+            // Async: resolve precise timestamp, then commit watermark to Dexie
+            resolveReceiptTimestamp(roomId, eventId, receiptTs).then(timestamp => {
+              if (timestamp > 0 && chatDbKitRef.value) {
+                chatDbKitRef.value.rooms.markAsRead(roomId, timestamp).catch(() => {});
+              }
+            }).catch(() => {});
             continue;
           }
 
           // Other user's receipt → advance outbound watermark (they read our messages)
           if (chatDbKitRef.value) {
-            chatDbKitRef.value.eventWriter.writeReceipt({
-              eventId,
-              readerAddress: matrixIdToAddress(userId),
-              roomId,
-              timestamp,
+            resolveReceiptTimestamp(roomId, eventId, receiptTs).then(timestamp => {
+              if (timestamp > 0 && chatDbKitRef.value) {
+                chatDbKitRef.value.eventWriter.writeReceipt({
+                  eventId,
+                  readerAddress: matrixIdToAddress(userId),
+                  roomId,
+                  timestamp,
+                }).catch(() => {});
+              }
             }).catch(() => {});
           }
         }

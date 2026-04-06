@@ -139,7 +139,16 @@ export class RoomRepository {
             || (update.avatar !== undefined && update.avatar !== prev.avatar)
             || (update.membership !== undefined && update.membership !== prev.membership)
             || (update.topic !== undefined && update.topic !== prev.topic);
-          const unreadReconcile = update.serverUnreadCount === 0 && (prev.unreadCount ?? 0) > 0;
+          // Cross-device reconciliation: only trust server's "0 unread" when:
+          // 1. Room was previously synced (not a first-time seed from Matrix SDK)
+          // 2. There are no messages newer than the read watermark
+          //    (prevents race where EventWriter already incremented unread
+          //     but Matrix SDK's getUnreadNotificationCount() hasn't caught up)
+          const hasUnreadAfterWatermark = (prev.lastMessageTimestamp ?? 0) > (prev.lastReadInboundTs ?? 0);
+          const unreadReconcile = update.serverUnreadCount === 0
+            && (prev.unreadCount ?? 0) > 0
+            && (prev.syncedAt ?? 0) > 0
+            && !hasUnreadAfterWatermark;
           const needsRevive = prev.isDeleted;
 
           if (!tsAdvanced && !metaChanged && !unreadReconcile && !needsRevive) {
@@ -293,6 +302,48 @@ export class RoomRepository {
     await this.db.rooms.update(roomId, { unreadCount: count });
   }
 
+  /** Recalculate unreadCount from watermarks + actual messages in Dexie.
+   *  Self-healing: fixes drift caused by races, stale reconciliation, etc.
+   *  Only corrects if the computed count differs from the stored count.
+   *
+   *  WARNING: Not safe to call during active message ingestion — the read+count+write
+   *  sequence is not atomic. Call only at quiescent points (app resume, after init).
+   *  @param countFn — matches MessageRepository.countInboundAfter signature */
+  async recalculateUnreadCount(
+    roomId: string,
+    myAddress: string,
+    countFn: (roomId: string, afterTs: number, excludeSenderId: string, clearedAtTs?: number) => Promise<number>,
+  ): Promise<void> {
+    const room = await this.getRoom(roomId);
+    if (!room) return;
+
+    const watermark = room.lastReadInboundTs ?? 0;
+    const computed = await countFn(roomId, watermark, myAddress, room.clearedAtTs);
+
+    if (computed !== room.unreadCount) {
+      await this.db.rooms.update(roomId, { unreadCount: computed });
+    }
+  }
+
+  /** Recalculate unreadCount for all joined rooms. */
+  async recalculateAllUnreadCounts(
+    myAddress: string,
+    countFn: (roomId: string, afterTs: number, excludeSenderId: string, clearedAtTs?: number) => Promise<number>,
+  ): Promise<number> {
+    const rooms = await this.getAllRooms();
+    let corrected = 0;
+    for (const room of rooms) {
+      const watermark = room.lastReadInboundTs ?? 0;
+      const computed = await countFn(room.id, watermark, myAddress, room.clearedAtTs);
+
+      if (computed !== room.unreadCount) {
+        await this.db.rooms.update(room.id, { unreadCount: computed });
+        corrected++;
+      }
+    }
+    return corrected;
+  }
+
   /** Update outbound read watermark (other party read our messages up to this timestamp) */
   async updateOutboundWatermark(roomId: string, timestamp: number): Promise<void> {
     const room = await this.getRoom(roomId);
@@ -302,15 +353,15 @@ export class RoomRepository {
     await this.db.rooms.update(roomId, { lastReadOutboundTs: timestamp });
   }
 
-  /** Update inbound read watermark + clear unread (we read messages up to this timestamp) */
+  /** Update inbound read watermark + clear unread (we read messages up to this timestamp).
+   *  Uses atomic modify() to prevent race with concurrent writeMessage() unread increment. */
   async markAsRead(roomId: string, timestamp: number): Promise<void> {
-    const room = await this.getRoom(roomId);
-    if (!room) return;
-    if (timestamp <= (room.lastReadInboundTs ?? 0)) return;
-    await this.db.rooms.update(roomId, {
-      lastReadInboundTs: timestamp,
-      unreadCount: 0,
-    });
+    await this.db.rooms.where("id").equals(roomId)
+      .modify((room: LocalRoom) => {
+        if (timestamp <= (room.lastReadInboundTs ?? 0)) return; // watermark only moves forward
+        room.lastReadInboundTs = timestamp;
+        room.unreadCount = 0;
+      });
   }
 
   /** Update pagination token for a room */
