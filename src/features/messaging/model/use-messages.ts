@@ -1556,8 +1556,9 @@ export function useMessages() {
   };
 
   /** Send a PKOIN transfer message.
-   *  Embeds transfer metadata as JSON in the body, then encrypts with Pcrypto
-   *  like any regular message so it goes through the same send/receive pipeline. */
+   *  Uses Dexie optimistic UI (createLocal → syncEngine) so the transfer bubble
+   *  appears instantly, just like regular text messages. Falls back to legacy
+   *  in-memory path if Dexie is not ready. */
   const sendTransferMessage = async (
     txId: string,
     amount: number,
@@ -1567,41 +1568,77 @@ export function useMessages() {
     const roomId = chatStore.activeRoomId;
     if (!roomId) return;
 
-    const matrixService = getMatrixClientService();
-    if (!matrixService.isReady()) return;
-
-    // Encode transfer data as JSON body — parseSingleEvent will detect the _transfer marker
-    const transferBody = JSON.stringify({
-      _transfer: true,
+    const transferInfo = {
       txId,
       amount,
       from: authStore.address ?? "",
       to: receiverAddress,
       message: message || undefined,
-    });
+    };
+    const displayContent = message || `Sent ${amount} PKOIN`;
 
-    // Optimistic local message
+    // ── Dexie path: optimistic insert FIRST, then enqueue for sync ──
+    if (isChatDbReady()) {
+      let localClientId: string | undefined;
+      try {
+        const dbKit = getChatDb();
+
+        // 1. Optimistic insert — transfer appears in UI immediately via liveQuery
+        const localMsg = await dbKit.messages.createLocal({
+          roomId,
+          senderId: authStore.address ?? "",
+          content: displayContent,
+          type: MessageType.transfer,
+          transferInfo,
+        });
+        localClientId = localMsg.clientId;
+
+        // 2. Validate readiness AFTER insert — if not ready, mark as failed
+        const matrixService = getMatrixClientService();
+        if (!matrixService.isReady()) {
+          console.error("[sendTransferMessage] Matrix client not ready — saved locally as failed");
+          await dbKit.messages.markFailed(localClientId);
+          return;
+        }
+
+        // 3. Enqueue for background sync — SyncEngine.syncSendTransfer() handles
+        //    encryption and Matrix API call, then confirms via messageRepo.confirmSent()
+        await dbKit.syncEngine.enqueue(
+          "send_transfer",
+          roomId,
+          { txId, amount, from: authStore.address ?? "", to: receiverAddress, message: message || undefined },
+          localMsg.clientId,
+        );
+        return;
+      } catch (e) {
+        console.error("[sendTransferMessage] Dexie path failed:", e);
+        if (localClientId) {
+          try { await getChatDb().messages.markFailed(localClientId); } catch { /* already logging */ }
+          return; // message IS visible as failed
+        }
+        console.warn("[sendTransferMessage] Falling back to legacy path");
+      }
+    }
+
+    // ── Legacy path: in-memory optimistic + direct Matrix API call ──
+    const matrixService = getMatrixClientService();
+    if (!matrixService.isReady()) return;
+
+    const transferBody = JSON.stringify({ _transfer: true, ...transferInfo });
     const tempId = `msg_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
     const optimistic: Message = {
       id: tempId,
       roomId,
       senderId: authStore.address ?? "",
-      content: message || `Sent ${amount} PKOIN`,
+      content: displayContent,
       timestamp: Date.now(),
       status: MessageStatus.sending,
       type: MessageType.transfer,
-      transferInfo: {
-        txId,
-        amount,
-        from: authStore.address ?? "",
-        to: receiverAddress,
-        message: message || undefined,
-      },
+      transferInfo,
     };
     chatStore.addMessage(roomId, optimistic);
 
     try {
-      // Encrypt with Pcrypto like regular messages
       const roomCrypto = authStore.pcrypto?.rooms[roomId] as PcryptoRoomInstance | undefined;
       let serverEventId: string;
       if (roomCrypto?.canBeEncrypt()) {
