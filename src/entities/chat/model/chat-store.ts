@@ -708,25 +708,32 @@ export const useChatStore = defineStore(NAMESPACE, () => {
       }
 
       msgs = raw.map(local => {
-        const id = local.eventId ?? local.clientId;
-        const prev = prevById.get(id);
-        const isOwnMessage = myAddr && local.senderId === myAddr;
-        // Reuse if content unchanged AND status wouldn't change.
-        // Own messages must be re-derived when watermark changes (read receipt arrived).
-        // Also invalidate when reactions or poll votes change — these update the LocalMessage
-        // in Dexie without changing its timestamp.
-        if (prev && prev.timestamp === local.timestamp
-            && !(watermarkChanged && isOwnMessage)
-            && reactionsShallowEqual(prev.reactions, local.reactions)
-            && pollInfoShallowEqual(prev.pollInfo, local.pollInfo)
-            && prev.deleted === local.deleted
-            && prev.edited === local.edited
-            && prev.status === localStatusToMessageStatus(local.status)
-            && prev.uploadProgress === local.uploadProgress
-            && prev.fileInfo?.url === (local.localBlobUrl || local.fileInfo?.url)) {
-          return prev;
+        try {
+          const id = local.eventId ?? local.clientId;
+          const prev = id ? prevById.get(id) : undefined;
+          const isOwnMessage = myAddr && local.senderId === myAddr;
+          // Reuse if content unchanged AND status wouldn't change.
+          // Own messages must be re-derived when watermark changes (read receipt arrived).
+          // Also invalidate when reactions or poll votes change — these update the LocalMessage
+          // in Dexie without changing its timestamp.
+          if (prev && prev.timestamp === local.timestamp
+              && !(watermarkChanged && isOwnMessage)
+              && reactionsShallowEqual(prev.reactions, local.reactions)
+              && pollInfoShallowEqual(prev.pollInfo, local.pollInfo)
+              && prev.deleted === local.deleted
+              && prev.edited === local.edited
+              && prev.status === localStatusToMessageStatus(local.status)
+              && prev.uploadProgress === local.uploadProgress
+              && prev.fileInfo?.url === (local.localBlobUrl || local.fileInfo?.url)) {
+            return prev;
+          }
+          return localToMessages([local], watermark, myAddr)[0];
+        } catch (err) {
+          // Fault-tolerant: one corrupted LocalMessage must never crash the entire
+          // computed and leave the user with a black screen. Log and substitute.
+          console.error("[activeMessages] Failed to convert message, using placeholder:", local.eventId ?? local.clientId, err);
+          return localToMessages([local], watermark, myAddr)[0]; // localToMessages already has its own try/catch with placeholder
         }
-        return localToMessages([local], watermark, myAddr)[0];
       });
 
       _prevDexieInput = raw;

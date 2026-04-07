@@ -547,6 +547,14 @@ export const useAuthStore = defineStore(NAMESPACE, () => {
 
             pushService.setActiveRoomGetter(() => chatStore.activeRoomId);
 
+            // Wire optimistic room preview update from push notifications.
+            // Uses chatDbKit.rooms (RoomRepository) which is already initialized above.
+            // The monotonic guard inside optimisticUpdateFromPush prevents stale
+            // push data from overwriting newer /sync data.
+            pushService.setOptimisticRoomUpdater((roomId, preview, timestamp, senderId) =>
+              chatDbKit.rooms.optimisticUpdateFromPush(roomId, preview, timestamp, senderId),
+            );
+
             pushService.setRoomInfoGetter((roomId) => {
               // Use Dexie-backed store (has resolved names) instead of Matrix SDK (may return hash)
               const chatRoom = chatStore.rooms.find(r => r.id === roomId);

@@ -12,6 +12,9 @@ class PushService {
   private getActiveRoomId: (() => string | null) | null = null;
   private getAllRoomNames: (() => Record<string, string>) | null = null;
   private getAllSenderNames: (() => Record<string, string>) | null = null;
+  /** Callback to optimistically update room preview in Dexie when push arrives.
+   *  Wired from auth store after ChatDbKit is initialized. */
+  private optimisticRoomUpdate: ((roomId: string, preview: string, timestamp: number, senderId?: string) => Promise<boolean>) | null = null;
 
   setCallHandler(handler: typeof this.onCallPush) {
     this.onCallPush = handler;
@@ -31,6 +34,12 @@ class PushService {
 
   setAllSenderNamesGetter(getter: () => Record<string, string>) {
     this.getAllSenderNames = getter;
+  }
+
+  /** Set the callback for optimistic room preview updates from push notifications.
+   *  Called from auth store once ChatDbKit is ready. */
+  setOptimisticRoomUpdater(updater: typeof this.optimisticRoomUpdate) {
+    this.optimisticRoomUpdate = updater;
   }
 
   /** Push all known room names to native SharedPreferences for offline display */
@@ -303,6 +312,21 @@ class PushService {
     if (!document.hidden && this.getActiveRoomId?.() === roomId) {
       PushData.cancelNotification({ roomId }).catch(() => {});
       return;
+    }
+
+    // Optimistic room preview update — make the room list reflect this push
+    // IMMEDIATELY, before /sync completes. Fire-and-forget: errors are non-fatal.
+    // The monotonic guard in optimisticUpdateFromPush ensures this never
+    // overwrites newer data that EventWriter already wrote from /sync.
+    if (this.optimisticRoomUpdate) {
+      // Build a minimal content-like object for formatBody (it expects { msgtype, body })
+      const preview = this.formatBody({
+        msgtype: data.content_msgtype || 'm.text',
+        body: tRaw('push.newMessage'),
+      });
+      const ts = Date.now(); // Server timestamp not available in push — use local time.
+                             // EventWriter's updateLastMessage will overwrite with real ts.
+      this.optimisticRoomUpdate(roomId, preview, ts, data.sender).catch(() => {});
     }
 
     // Try to decrypt and show rich notification

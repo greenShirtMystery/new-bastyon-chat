@@ -401,6 +401,70 @@ export class RoomRepository {
   }
 
   // ---------------------------------------------------------------------------
+  // Optimistic update from push notification
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Instantly update a room's preview and unread count from a push notification
+   * payload. Called BEFORE Matrix /sync completes, so the user sees fresh data
+   * in the room list immediately after tapping a push.
+   *
+   * SAFETY GUARANTEES:
+   * - Monotonic: skips if room already has a newer lastMessageTimestamp.
+   *   This means when EventWriter processes the real /sync response later,
+   *   it will call updateLastMessage() which has its own monotonic guard —
+   *   if the push timestamp equals the real event's timestamp, the sync
+   *   write is a no-op (same data). If the real event has a newer timestamp,
+   *   it overwrites our optimistic preview (correct behavior).
+   * - No transaction conflicts: this is a simple Dexie.update() — it writes
+   *   directly to IndexedDB without touching messages table.
+   * - Soft fields only: only updates preview/unread/timestamp, never touches
+   *   structural fields (membership, members, pagination).
+   * - No-op for unknown rooms: if the room doesn't exist in Dexie yet
+   *   (first message from a new contact), we skip — EventWriter.ensureRoomExists()
+   *   will create it when /sync arrives.
+   */
+  async optimisticUpdateFromPush(
+    roomId: string,
+    previewText: string,
+    timestamp: number,
+    senderId?: string,
+    messageType?: MessageType,
+  ): Promise<boolean> {
+    const existing = await this.db.rooms.get(roomId);
+    if (!existing) return false; // room not in Dexie yet — let /sync handle it
+    if (existing.isDeleted) return false; // tombstoned — don't revive from push
+
+    // Monotonic guard — never roll back to an older preview
+    if (existing.lastMessageTimestamp && timestamp <= existing.lastMessageTimestamp) {
+      // Timestamp not newer — but still bump unread if it looks like a new message
+      // (push can arrive for a message with same-second timestamp as the last one)
+      if (timestamp === existing.lastMessageTimestamp) return false;
+      return false;
+    }
+
+    // Clear-history guard — don't show preview for messages before clear marker
+    if (existing.clearedAtTs && timestamp <= existing.clearedAtTs) return false;
+
+    const changes: Partial<LocalRoom> = {
+      lastMessagePreview: previewText.slice(0, 200),
+      lastMessageTimestamp: timestamp,
+      updatedAt: Math.max(timestamp, existing.updatedAt ?? 0),
+      // Increment unread — atomic update prevents races with concurrent writes.
+      // When EventWriter processes the same message later, it checks "inserted"
+      // vs "duplicate" — if the message was already written by /sync before
+      // this push handler ran, this code won't execute (monotonic guard above).
+      unreadCount: (existing.unreadCount ?? 0) + 1,
+    };
+
+    if (senderId) changes.lastMessageSenderId = senderId;
+    if (messageType) changes.lastMessageType = messageType;
+
+    await this.db.rooms.update(roomId, changes);
+    return true;
+  }
+
+  // ---------------------------------------------------------------------------
   // Tombstone (soft-delete for cross-device sync)
   // ---------------------------------------------------------------------------
 

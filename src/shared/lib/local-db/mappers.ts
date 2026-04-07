@@ -48,9 +48,37 @@ export function localToMessage(
   };
 }
 
-/** Map LocalMessage[] to Message[] (preserves order) */
+/** Map LocalMessage[] to Message[] (preserves order).
+ *  Fault-tolerant: if a single LocalMessage fails to convert (corrupt data,
+ *  missing fields), it is replaced with a placeholder instead of crashing
+ *  the entire computed. This prevents one bad Dexie row from causing
+ *  a black screen / infinite loading. */
 export function localToMessages(locals: LocalMessage[], outboundWatermark?: number, myAddress?: string): Message[] {
-  return locals.map(l => localToMessage(l, outboundWatermark, myAddress));
+  return locals.map(l => {
+    try {
+      return localToMessage(l, outboundWatermark, myAddress);
+    } catch (err) {
+      console.error("[localToMessages] Failed to convert LocalMessage, using placeholder:", l.eventId ?? l.clientId, err);
+      return createCorruptedPlaceholder(l);
+    }
+  });
+}
+
+/** Create a safe placeholder Message for a LocalMessage that failed conversion.
+ *  Ensures the pipeline never crashes — the user sees an error indicator
+ *  instead of a black screen. */
+function createCorruptedPlaceholder(local: LocalMessage): Message {
+  return {
+    id: local.eventId ?? local.clientId ?? `corrupt_${local.localId ?? Date.now()}`,
+    _key: local.clientId ?? local.eventId ?? `corrupt_${local.localId ?? Date.now()}`,
+    roomId: local.roomId ?? "",
+    senderId: local.senderId ?? "",
+    content: "[message error]",
+    timestamp: local.timestamp ?? Date.now(),
+    status: MessageStatus.sent,
+    type: local.type ?? ("text" as any),
+    deleted: false,
+  };
 }
 
 export function localStatusToMessageStatus(status: LocalMessageStatus): MessageStatus {

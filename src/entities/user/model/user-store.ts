@@ -95,11 +95,19 @@ export const useUserStore = defineStore(NAMESPACE, () => {
   /** Load a single user profile. Deduplicated via PromisePool — 140 concurrent
    *  calls for the same address produce exactly 1 network request.
    *  Re-fetches if cached profile has an empty name (e.g. fetched before
-   *  blockchain confirmation during registration). */
+   *  blockchain confirmation during registration).
+   *  STALE-WHILE-REVALIDATE: stale profiles with a name trigger background
+   *  revalidation without blocking — the UI always has data to show. */
   const loadUserIfMissing = (address: string): void => {
     if (!address) return;
     const cached = users.value[address];
-    if (cached && cached.name) return; // has real name — skip
+    if (cached && cached.name) {
+      // Has real name — check if stale and schedule background revalidation
+      if (cached.cachedAt && Date.now() - cached.cachedAt > USER_TTL_MS) {
+        _scheduleBackgroundRevalidation([address]);
+      }
+      return;
+    }
     if (cached && cached.cachedAt && Date.now() - cached.cachedAt < EMPTY_NAME_RETRY_MS) return; // empty but recently tried
     if (profilePool.has(address)) return;
 
@@ -129,16 +137,34 @@ export const useUserStore = defineStore(NAMESPACE, () => {
 
   /** Batch-load user profiles. Uses PromisePool.dedupeBatch to register
    *  all addresses SYNCHRONOUSLY before any await — closing the race window
-   *  that existed between filter() and pendingLoads.set() in the old code. */
+   *  that existed between filter() and pendingLoads.set() in the old code.
+   *
+   *  STALE-WHILE-REVALIDATE: profiles with a name are returned from cache
+   *  immediately (no blocking). If they're older than USER_TTL_MS, a background
+   *  revalidation is queued — but the UI never sees a blank/loading state. */
   const loadUsersBatch = async (addresses: string[]): Promise<void> => {
     const now = Date.now();
-    const toLoad = addresses.filter(a => {
-      if (!a) return false;
+    const toLoad: string[] = [];
+    const toRevalidate: string[] = [];
+
+    for (const a of addresses) {
+      if (!a) continue;
       const cached = users.value[a];
-      if (!cached) return true; // not cached at all
-      if (!cached.name && (!cached.cachedAt || now - cached.cachedAt >= EMPTY_NAME_RETRY_MS)) return true; // empty name, stale
-      return false;
-    });
+      if (!cached) {
+        toLoad.push(a); // not cached at all — must fetch
+      } else if (!cached.name && (!cached.cachedAt || now - cached.cachedAt >= EMPTY_NAME_RETRY_MS)) {
+        toLoad.push(a); // empty name, stale — must fetch
+      } else if (cached.name && cached.cachedAt && now - cached.cachedAt > USER_TTL_MS) {
+        toRevalidate.push(a); // has data but stale — revalidate in background
+      }
+    }
+
+    // Background revalidation: fire-and-forget, never blocks UI.
+    // _scheduleBackgroundRevalidation applies its own REVALIDATE_CAP internally.
+    if (toRevalidate.length > 0) {
+      _scheduleBackgroundRevalidation(toRevalidate);
+    }
+
     if (toLoad.length === 0) return;
 
     await profilePool.dedupeBatch(toLoad, async (uncached) => {
@@ -171,6 +197,72 @@ export const useUserStore = defineStore(NAMESPACE, () => {
       }
     });
   };
+
+  /** Max stale addresses to revalidate in one cycle.
+   *  Stale profiles already have names visible in UI — revalidation is cosmetic.
+   *  Cap prevents network saturation when 500+ profiles expire simultaneously
+   *  (e.g. app reopened after 6+ hours). Excess addresses are silently dropped
+   *  and will be picked up by the periodic refreshStaleUsers cycle. */
+  const REVALIDATE_CAP = 50;
+
+  /** Debounced background revalidation — collects stale addresses and
+   *  processes them in a single batch after a short delay. This prevents
+   *  100+ individual network requests when opening the room list. */
+  let _revalidateTimer: ReturnType<typeof setTimeout> | null = null;
+  let _revalidateQueue = new Set<string>();
+
+  function _scheduleBackgroundRevalidation(addresses: string[]) {
+    for (const a of addresses) {
+      // Hard cap: drop excess stale addresses (UI already shows cached name).
+      // refreshStaleUsers will catch them in the next 6h cycle.
+      if (_revalidateQueue.size >= REVALIDATE_CAP) break;
+      _revalidateQueue.add(a);
+    }
+    if (_revalidateTimer) return; // already scheduled
+
+    _revalidateTimer = setTimeout(async () => {
+      _revalidateTimer = null;
+      const batch = [..._revalidateQueue];
+      _revalidateQueue = new Set();
+      if (batch.length === 0) return;
+
+      // Process in chunks of 10 with yielding — same as refreshStaleUsers
+      const BATCH = 10;
+      for (let i = 0; i < batch.length; i += BATCH) {
+        const chunk = batch.slice(i, i + BATCH);
+        try {
+          const appInit = getAppInit();
+          await appInit.initApi();
+          await appInit.loadUsersBatch(chunk);
+          let updated = false;
+          for (const addr of chunk) {
+            const userData = appInit.getUserData(addr);
+            if (userData) {
+              users.value[addr] = {
+                address: addr,
+                name: userData.name ?? "",
+                about: userData.about ?? "",
+                image: userData.image ?? "",
+                site: userData.site ?? "",
+                language: userData.language ?? "",
+                cachedAt: Date.now(),
+              };
+              updated = true;
+            }
+          }
+          if (updated) {
+            debouncedTrigger();
+            debouncedCacheUsers(users.value);
+          }
+        } catch {
+          // Network issue — stale profiles remain visible, retry on next cycle
+        }
+        if (i + BATCH < batch.length) {
+          await new Promise(r => setTimeout(r, 500));
+        }
+      }
+    }, 200); // 200ms debounce — coalesce concurrent loadUsersBatch calls
+  }
 
   /** DataLoader-style profile loading: collects all requests within a microtick
    *  into batches of 30, with yielding between batches for UI responsiveness.
@@ -253,6 +345,8 @@ export const useUserStore = defineStore(NAMESPACE, () => {
     if (_triggerTimer) { clearTimeout(_triggerTimer); _triggerTimer = null; }
     if (_cacheTimer) { clearTimeout(_cacheTimer); _cacheTimer = null; }
     if (_refreshTimer) { clearInterval(_refreshTimer); _refreshTimer = null; }
+    if (_revalidateTimer) { clearTimeout(_revalidateTimer); _revalidateTimer = null; }
+    _revalidateQueue = new Set();
     localStorage.removeItem(LS_KEY);
   };
 

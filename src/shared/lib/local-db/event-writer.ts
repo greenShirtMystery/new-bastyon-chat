@@ -198,18 +198,23 @@ export class EventWriter {
 
     await this.db.transaction("rw", [this.db.messages, this.db.rooms], async () => {
       for (const item of items) {
-        const result = await this.messageRepo.upsertFromServer(item.localMsg, this.clearedAtTsCache.get(item.roomId));
+        try {
+          const result = await this.messageRepo.upsertFromServer(item.localMsg, this.clearedAtTsCache.get(item.roomId));
 
-        if (result === "inserted" || result === "updated") {
-          await this.ensureRoomExists(item.roomId);
-          await this.updateRoomPreview(item.parsed);
-        }
+          if (result === "inserted" || result === "updated") {
+            await this.ensureRoomExists(item.roomId);
+            await this.updateRoomPreview(item.parsed);
+          }
 
-        if (result === "inserted") {
-          // NOTE: unreadCount is NOT incremented here. Matrix SDK's
-          // getUnreadNotificationCount("total") is the single source of truth,
-          // synced to Dexie via bulkSyncRooms during room refresh cycles.
-          changedRooms.add(item.roomId);
+          if (result === "inserted") {
+            // NOTE: unreadCount is NOT incremented here. Matrix SDK's
+            // getUnreadNotificationCount("total") is the single source of truth,
+            // synced to Dexie via bulkSyncRooms during room refresh cycles.
+            changedRooms.add(item.roomId);
+          }
+        } catch (err) {
+          // Fault-tolerant: one corrupted message must not abort the entire batch.
+          console.error("[EventWriter] flushBatch: failed to write message, skipping:", item.parsed.eventId, err);
         }
       }
     });
@@ -614,13 +619,29 @@ export class EventWriter {
     return content;
   }
 
-  /** Update room metadata after a new message */
+  /** Update room metadata after a new message.
+   *  Fault-tolerant: if preview generation fails for any reason (corrupt content,
+   *  missing fields), falls back to a safe placeholder so the sidebar never shows
+   *  an empty grey strip. */
   private async updateRoomPreview(parsed: ParsedMessage): Promise<void> {
-    const preview = this.getPreviewText(
-      parsed.type,
-      parsed.content,
-      parsed.transferInfo?.amount,
-    );
+    let preview: string;
+    try {
+      preview = this.getPreviewText(
+        parsed.type,
+        parsed.content,
+        parsed.transferInfo?.amount,
+      );
+    } catch (err) {
+      console.error("[EventWriter] getPreviewText failed, using fallback:", parsed.eventId, err);
+      preview = "[message]";
+    }
+
+    // Guard: never store an empty/whitespace-only preview — sidebar shows a grey strip.
+    if (!preview || !preview.trim()) {
+      const isEncrypted = parsed.content === "[encrypted]" || parsed.encryptedRaw;
+      preview = isEncrypted ? "[encrypted message]" : "[message]";
+    }
+
     await this.roomRepo.updateLastMessage(
       parsed.roomId,
       preview,
@@ -641,13 +662,26 @@ export class EventWriter {
     }
   }
 
-  /** Update room preview from an existing LocalMessage (used after deletion) */
+  /** Update room preview from an existing LocalMessage (used after deletion).
+   *  Same fault-tolerance as updateRoomPreview — never stores empty preview. */
   private async updateRoomPreviewFromLocal(msg: LocalMessage): Promise<void> {
-    const preview = this.getPreviewText(
-      msg.type,
-      msg.content,
-      msg.transferInfo?.amount,
-    );
+    let preview: string;
+    try {
+      preview = this.getPreviewText(
+        msg.type,
+        msg.content,
+        msg.transferInfo?.amount,
+      );
+    } catch (err) {
+      console.error("[EventWriter] getPreviewText failed for local msg:", msg.eventId ?? msg.clientId, err);
+      preview = "[message]";
+    }
+
+    if (!preview || !preview.trim()) {
+      const isEncrypted = msg.decryptionStatus === "pending" || msg.decryptionStatus === "failed";
+      preview = isEncrypted ? "[encrypted message]" : "[message]";
+    }
+
     await this.roomRepo.updateLastMessage(
       msg.roomId,
       preview,

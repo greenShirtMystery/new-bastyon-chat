@@ -2,7 +2,6 @@ import type { UserData } from "./types";
 
 import { PocketnetInstanceConfigurator } from "../chat-scripts";
 import { PocketnetInstance } from "../chat-scripts/config/pocketnetinstance";
-import { isNative } from "@/shared/lib/platform";
 
 export interface BastyonPostData {
   txid: string;
@@ -552,28 +551,28 @@ export class AppInitializer {
     }
   }
 
-  /** Direct node URL for RPC calls unsupported by proxy nodes.
-   *  Only usable on native platforms (Android/iOS) where mixed content is allowed. */
-  private static readonly BASTYON_NODE_URL = "http://94.156.128.149:38081/rpc";
+  private static readonly PROXY_URL = "https://1.pocketnet.app:8899";
+  private static readonly NODE_ID = "94.156.128.149:38081";
 
-  /** Fetch channels the user is subscribed to.
-   *  Only available on native platforms — proxy nodes do not support this method. */
   async getSubscribesChannels(
     address: string,
     blockNumber = 0,
     page = 0,
     pageSize = 20
   ): Promise<{ channels: any[]; height: number } | undefined> {
-    if (!isNative) return undefined;
     try {
-      const response = await fetch(AppInitializer.BASTYON_NODE_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          method: "getsubscribeschannels",
-          params: [address, blockNumber, page, pageSize, 1],
-        }),
-      });
+      const response = await fetch(
+        `${AppInitializer.PROXY_URL}/rpc/getsubscribeschannels`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            method: "getsubscribeschannels",
+            parameters: [address, blockNumber, page, pageSize, 1],
+            options: { node: AppInitializer.NODE_ID },
+          }),
+        }
+      );
       if (!response.ok) {
         console.error("[appInit] getSubscribesChannels HTTP error:", response.status);
         return undefined;
@@ -583,7 +582,7 @@ export class AppInitializer {
         console.error("[appInit] getSubscribesChannels RPC error:", json.error);
         return undefined;
       }
-      const result = json.result ?? json;
+      const result = json.data ?? json.result ?? json;
       return {
         height: result.height ?? 0,
         channels: result.channels ?? [],
@@ -594,35 +593,36 @@ export class AppInitializer {
     }
   }
 
-  /** Fetch posts for a specific channel/user profile.
-   *  Only available on native platforms — proxy nodes do not support this method. */
   async getProfileFeed(
     authorAddress: string,
     options?: { height?: number; startTxid?: string; count?: number }
   ): Promise<any[]> {
-    if (!isNative) return [];
     try {
       const opts = options ?? {};
-      const response = await fetch(AppInitializer.BASTYON_NODE_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          method: "getprofilefeed",
-          params: [
-            Number(opts.height ?? 0),
-            opts.startTxid ?? "",
-            opts.count ?? 10,
-            "",   // lang
-            [],   // tagsfilter
-            [],   // type
-            [],   // reserved
-            [],   // reserved
-            [],   // tagsexcluded
-            "",   // keyword
-            authorAddress,
-          ],
-        }),
-      });
+      const response = await fetch(
+        `${AppInitializer.PROXY_URL}/rpc/getprofilefeed`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            method: "getprofilefeed",
+            parameters: [
+              Number(opts.height ?? 0),
+              opts.startTxid ?? "",
+              opts.count ?? 10,
+              "",   // lang
+              [],   // tagsfilter
+              [],   // type
+              [],   // reserved
+              [],   // reserved
+              [],   // tagsexcluded
+              "",   // keyword
+              authorAddress,
+            ],
+            options: { node: AppInitializer.NODE_ID },
+          }),
+        }
+      );
       if (!response.ok) {
         console.error("[appInit] getProfileFeed HTTP error:", response.status);
         return [];
@@ -632,7 +632,7 @@ export class AppInitializer {
         console.error("[appInit] getProfileFeed RPC error:", json.error);
         return [];
       }
-      const result = json.result ?? json;
+      const result = json.data ?? json.result ?? json;
       return Array.isArray(result) ? result : result?.contents ?? [];
     } catch (e) {
       console.error("[appInit] getProfileFeed error:", e);

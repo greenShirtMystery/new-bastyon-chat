@@ -11,6 +11,18 @@
  *
  * All items are rendered (no windowing). messageWindowSize in the store
  * already limits the count to 50-200 items — well within DOM budget.
+ *
+ * PAGINATION STRATEGY:
+ * Dexie-level pagination is handled by chat-store:
+ *   1. messageWindowSize starts at 50 (reset on room switch)
+ *   2. useLiveQuery passes it as `limit` to MessageRepository.getMessages()
+ *   3. getMessages() uses compound index [roomId+timestamp] with .limit()
+ *      → physically reads only N newest records from IndexedDB
+ *   4. On scroll-up, expandMessageWindow(25) bumps the limit
+ *   5. useLiveQuery auto-reruns with new limit → more messages appear
+ *
+ * This means this component never receives more than ~200 items.
+ * No progressive rendering or windowing needed here.
  */
 import {
   ref,
