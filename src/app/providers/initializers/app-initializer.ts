@@ -16,6 +16,7 @@ export interface BastyonPostData {
   scoreSum?: number;
   scoreCnt?: number;
   myVal?: number;
+  repost?: BastyonPostData;
 }
 
 export interface PostScore {
@@ -332,6 +333,31 @@ export class AppInitializer {
         settings: (content.s as { v?: string }) ?? (content.settings as { v?: string }) ?? {},
         time: (raw.time as number) ?? (content.time as number) ?? 0,
       };
+
+      // Parse repost data
+      const repostRaw = raw.repost ?? raw.relayedBy ?? raw.share ?? content.repost ?? content.relayedBy;
+      if (repostRaw && typeof repostRaw === "object" && (repostRaw as any).txid) {
+        const r = repostRaw as Record<string, unknown>;
+        const rc = (r.msg ?? r.p ?? r) as Record<string, unknown>;
+        const rImages = rc.i ?? rc.images;
+        const rTags = rc.t ?? rc.tags;
+        post.repost = {
+          txid: (r.txid as string) ?? "",
+          address: (r.address as string) ?? (rc.address as string) ?? "",
+          caption: tryDecode(rc.c ?? rc.caption),
+          message: tryDecode(rc.m ?? rc.message),
+          images: Array.isArray(rImages) ? (rImages as string[]) : [],
+          url: tryDecode(rc.u ?? rc.url),
+          tags: Array.isArray(rTags) ? (rTags as string[]) : [],
+          settings: (rc.s as { v?: string }) ?? (rc.settings as { v?: string }) ?? {},
+          time: (r.time as number) ?? (rc.time as number) ?? 0,
+        };
+        // Cache repost separately so nested PostCard can find it
+        if (post.repost.txid && !this.postCache.has(post.repost.txid)) {
+          this.postCache.set(post.repost.txid, post.repost);
+        }
+      }
+
       this.postCache.set(txid, post);
       return post;
     } catch (e) {
@@ -368,6 +394,30 @@ export class AppInitializer {
       settings: (raw.s as { v?: string }) ?? (raw.settings as { v?: string }) ?? {},
       time: Number(raw.time ?? 0),
     };
+
+    // Parse repost (shared post) data
+    const repostRaw = raw.repost ?? raw.relayedBy ?? raw.share;
+    if (repostRaw && typeof repostRaw === "object" && (repostRaw as any).txid) {
+      const r = repostRaw as Record<string, unknown>;
+      const rImages = r.i ?? r.images;
+      const rTags = r.t ?? r.tags;
+      post.repost = {
+        txid: (r.txid as string) ?? "",
+        address: (r.address as string) ?? "",
+        caption: tryDecode(r.c ?? r.caption),
+        message: tryDecode(r.m ?? r.message),
+        images: Array.isArray(rImages) ? (rImages as string[]) : [],
+        url: tryDecode(r.u ?? r.url),
+        tags: Array.isArray(rTags) ? (rTags as string[]) : [],
+        settings: (r.s as { v?: string }) ?? (r.settings as { v?: string }) ?? {},
+        time: Number(r.time ?? 0),
+      };
+      // Cache repost separately so nested PostCard can find it
+      if (post.repost.txid && !this.postCache.has(post.repost.txid)) {
+        this.postCache.set(post.repost.txid, post.repost);
+      }
+    }
+
     this.postCache.set(txid, post);
   }
 
@@ -390,14 +440,25 @@ export class AppInitializer {
 
   async loadPostComments(txid: string, userAddress?: string): Promise<PostComment[]> {
     if (!this.api) return [];
-    try {
-      // SDK format: getcomments(['', '', userAddress, [txids]])
-      const addr = userAddress || "";
-      const data = await this.api.rpc("getcomments", ["", "", addr, [txid]]);
-      console.log("[appInit] loadPostComments raw response:", data);
+
+    const extractMessage = (raw: unknown): string => {
+      if (typeof raw !== "string") return "";
+      // msg may be a JSON string like {"message":"text","url":"","images":[],"info":""}
+      const trimmed = raw.trim();
+      if (trimmed.startsWith("{")) {
+        try {
+          const parsed = JSON.parse(trimmed);
+          if (typeof parsed.message === "string") return parsed.message;
+        } catch { /* not JSON, fall through */ }
+      }
+      // Otherwise try URL-decoding
+      try { return decodeURIComponent(raw); } catch { return raw; }
+    };
+
+    const parseComments = (data: unknown): PostComment[] => {
       if (!data) return [];
       // Response may be an object with nested data or a flat array
-      const items = Array.isArray(data) ? data : (data as any)?.data ?? [];
+      const items = Array.isArray(data) ? data : (data as any)?.data ?? (data as any)?.result ?? [];
       if (!Array.isArray(items)) return [];
       return items.map((c: any) => ({
         id: c.id ?? c.txid ?? "",
@@ -405,12 +466,28 @@ export class AppInitializer {
         parentid: c.parentid ?? "",
         answerid: c.answerid ?? "",
         address: c.address ?? "",
-        message: typeof c.msg === "string" ? decodeURIComponent(c.msg) : (c.message ?? ""),
+        message: typeof c.msg === "string" ? extractMessage(c.msg) : (c.message ?? ""),
         time: Number(c.time ?? 0),
         scoreUp: Number(c.scoreUp ?? 0),
         scoreDown: Number(c.scoreDown ?? 0),
         myScore: c.myScore != null ? Number(c.myScore) : undefined,
       }));
+    };
+
+    try {
+      const addr = userAddress || "";
+      console.log("[appInit] loadPostComments: txid=", txid, "addr=", addr, "api available=", !!this.api);
+
+      // SDK bulk format: getcomments(['', '', userAddress, [txids]])
+      const data = await this.api.rpc("getcomments", ["", "", addr, [txid]]);
+      console.log("[appInit] loadPostComments bulk response:", JSON.stringify(data)?.slice(0, 500));
+      const comments = parseComments(data);
+      if (comments.length > 0) return comments;
+
+      // Fallback: satolist single-post format: getcomments([txid, '', userAddress])
+      const data2 = await this.api.rpc("getcomments", [txid, "", addr]);
+      console.log("[appInit] loadPostComments fallback response:", JSON.stringify(data2)?.slice(0, 500));
+      return parseComments(data2);
     } catch (e) {
       console.error("[appInit] loadPostComments error:", e);
       return [];
@@ -451,32 +528,49 @@ export class AppInitializer {
     }
   }
 
-  async submitComment(txid: string, message: string, parentId?: string): Promise<boolean> {
-    if (!this.actions) {
-      console.error("[appInit] submitComment: actions not available");
+  async submitComment(txid: string, message: string, parentId?: string, userAddress?: string): Promise<boolean> {
+    if (!this.actions || !this.api) {
+      console.error("[appInit] submitComment: actions/api not available");
       return false;
     }
     try {
-      // Comment is a global Pocketnet SDK class from kit.js (replaces DOM Comment)
+      // Ensure node time is synced and actions are prepared before sending
+      await this.syncNodeTime();
+
+      // Comment is a global Pocketnet SDK class from kit.js
       const PocketComment = (window as any).Comment;
-      console.log("[appInit] submitComment: PocketComment available:", !!PocketComment, "txid:", txid, "msg:", message.slice(0, 50));
-      if (!PocketComment) {
+      if (!PocketComment || typeof PocketComment !== "function") {
         console.error("[appInit] submitComment: Comment class not found on window");
         return false;
       }
+
       const comment = new PocketComment(txid);
-      console.log("[appInit] submitComment: comment created:", comment);
+
+      // Set message content
       if (typeof comment.message?.set === "function") {
         comment.message.set(message);
       } else {
-        // Fallback: try direct assignment
-        console.warn("[appInit] submitComment: comment.message.set not a function, trying direct");
         comment.msg = message;
       }
+
+      // Set parent for reply threads
       if (parentId) comment.parentid = parentId;
-      const result = await (this.actions as any).addActionAndSendIfCan(comment);
-      console.log("[appInit] submitComment: action result:", result);
-      return true;
+
+      // Ensure account is registered in actions system
+      const addr = userAddress || undefined;
+      if (addr) {
+        (this.actions as any).addAccount(addr);
+      }
+
+      // Submit with priority=2 (normal), matching pocketnet's comments.send()
+      const result = await (this.actions as any).addActionAndSendIfCan(
+        comment,
+        2,        // priority — same as pocketnet
+        addr,     // user address for tx signing
+        { rejectIfError: ["actions_noinputs_wait"] }
+      );
+      console.log("[appInit] submitComment: action result:", !!result);
+      return !!result;
     } catch (e) {
       console.error("[appInit] submitComment error:", e);
       return false;

@@ -16,6 +16,12 @@ const newComment = ref("");
 
 const authorNames = ref<Record<string, string>>({});
 const authorAvatars = ref<Record<string, string>>({});
+const avatarErrors = ref<Record<string, boolean>>({});
+
+function fixAvatarUrl(raw: string): string {
+  const url = raw.startsWith("http") ? raw : `https://bastyon.com/images/${raw}`;
+  return url.replace("bastyon.com:8092", "pocketnet.app:8092");
+}
 
 const resolveAuthors = async (comments: PostComment[]) => {
   const addresses = [...new Set(comments.map((c) => c.address))];
@@ -25,9 +31,7 @@ const resolveAuthors = async (comments: PostComment[]) => {
     const user = authStore.getBastyonUserData(addr);
     if (user) {
       authorNames.value[addr] = user.name || addr.slice(0, 10);
-      authorAvatars.value[addr] = user.image
-        ? (user.image.startsWith("http") ? user.image : `https://bastyon.com/images/${user.image}`)
-        : "";
+      authorAvatars.value[addr] = user.image ? fixAvatarUrl(user.image) : "";
     } else {
       authorNames.value[addr] = addr.slice(0, 10);
     }
@@ -73,12 +77,14 @@ const formatTime = (ts: number) => {
         :id="`comment-${comment.id}`"
         :key="comment.id"
         class="flex gap-2 rounded-lg bg-neutral-grad-0/50 p-2.5 transition-colors"
+        :class="{ 'opacity-50': comment.id.startsWith('temp-') }"
       >
         <img
-          v-if="authorAvatars[comment.address]"
+          v-if="authorAvatars[comment.address] && !avatarErrors[comment.address]"
           :src="authorAvatars[comment.address]"
           alt=""
           class="h-6 w-6 flex-shrink-0 rounded-full object-cover"
+          @error="avatarErrors[comment.address] = true"
         />
         <div
           v-else
@@ -108,11 +114,12 @@ const formatTime = (ts: number) => {
         @keydown.enter="handleSubmit"
       />
       <button
-        class="rounded-lg bg-color-bg-ac px-3 py-2 text-xs font-medium text-text-on-bg-ac-color transition-opacity disabled:opacity-40"
+        class="flex items-center gap-1.5 rounded-lg bg-color-bg-ac px-3 py-2 text-xs font-medium text-text-on-bg-ac-color transition-opacity disabled:opacity-40"
         :disabled="!newComment.trim() || submitting"
         @click="handleSubmit"
       >
-        {{ t("postPlayer.send") }}
+        <div v-if="submitting" class="h-3 w-3 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+        {{ submitting ? t("post.loading") : t("postPlayer.send") }}
       </button>
     </div>
   </div>
