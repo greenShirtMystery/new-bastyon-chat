@@ -59,11 +59,13 @@ const truncatedMessage = computed(() => {
     : post.value.message;
 });
 
+const authorAvatarError = ref(false);
 const authorAvatarUrl = computed(() => {
   if (!authorImage.value) return "";
-  return authorImage.value.startsWith("http")
+  const url = authorImage.value.startsWith("http")
     ? authorImage.value
     : `https://bastyon.com/images/${authorImage.value}`;
+  return url.replace("bastyon.com:8092", "pocketnet.app:8092");
 });
 
 const formattedReputation = computed(() => {
@@ -200,10 +202,11 @@ onMounted(async () => {
     >
       <!-- Avatar -->
       <img
-        v-if="authorAvatarUrl"
+        v-if="authorAvatarUrl && !authorAvatarError"
         :src="authorAvatarUrl"
         alt=""
         class="h-10 w-10 shrink-0 rounded-full object-cover sm:h-12 sm:w-12"
+        @error="authorAvatarError = true"
       />
       <div
         v-else
@@ -267,6 +270,15 @@ onMounted(async () => {
           class="rounded-full px-2 py-0.5 text-[10px] font-medium sm:px-2.5 sm:py-1 sm:text-xs"
           :class="isOwn ? 'bg-white/10 text-white/70' : 'bg-neutral-grad-0 text-text-color/80'"
         >#{{ tag }}</span>
+      </div>
+
+      <!-- Repost (shared post) -->
+      <div
+        v-if="post.repost"
+        class="mt-1 rounded-xl border p-2"
+        :class="isOwn ? 'border-white/10 bg-white/5' : 'border-neutral-grad-1/50 bg-neutral-grad-0/30'"
+      >
+        <PostCard :txid="post.repost.txid" :is-own="isOwn" />
       </div>
     </div>
 

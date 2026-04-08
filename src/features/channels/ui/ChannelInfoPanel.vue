@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import type { Channel } from "@/entities/channel/model/types";
 import { useChatStore } from "@/entities/chat";
-import { getMatrixClientService } from "@/entities/matrix";
-import { hexEncode } from "@/shared/lib/matrix/functions";
+import { useContacts } from "@/features/contacts/model/use-contacts";
 import Avatar from "@/shared/ui/avatar/Avatar.vue";
 
 interface Props {
@@ -14,6 +13,7 @@ const props = defineProps<Props>();
 const emit = defineEmits<{ close: []; selectRoom: [] }>();
 const { t } = useI18n();
 const chatStore = useChatStore();
+const { getOrCreateRoom } = useContacts();
 
 const copiedAddress = ref(false);
 const creatingChat = ref(false);
@@ -23,32 +23,19 @@ watch(
   (v) => { if (!v) copiedAddress.value = false; },
 );
 
+const openInBastyon = () => {
+  if (!props.channel?.address) return;
+  const url = `https://bastyon.com/${props.channel.address}`;
+  window.open(url, "_blank", "noopener,noreferrer");
+};
+
 const navigateToChat = async () => {
   if (!props.channel?.address || creatingChat.value) return;
-  const addr = props.channel.address;
-  const hexAddr = hexEncode(addr).toLowerCase();
-  const existingRoom = chatStore.sortedRooms.find(
-    (r) => !r.isGroup && r.members.includes(hexAddr),
-  );
-  if (existingRoom) {
-    chatStore.setActiveRoom(existingRoom.id);
-    emit("close");
-    emit("selectRoom");
-    return;
-  }
-  // Create new DM
   creatingChat.value = true;
   try {
-    const matrixService = getMatrixClientService();
-    if (!matrixService) return;
-    const result = await matrixService.createRoom({
-      is_direct: true,
-      invite: [hexAddr],
-      visibility: "private",
-      preset: "trusted_private_chat",
-    });
-    if (result?.room_id) {
-      chatStore.setActiveRoom(result.room_id);
+    const roomId = await getOrCreateRoom(props.channel.address);
+    if (roomId) {
+      chatStore.setActiveRoom(roomId);
       emit("close");
       emit("selectRoom");
     }
@@ -123,10 +110,7 @@ const copyAddress = async () => {
               </button>
 
               <!-- Open in Bastyon -->
-              <a
-                :href="`bastyon://channel?address=${props.channel.address}`"
-                class="flex flex-col items-center gap-1"
-              >
+              <button class="flex flex-col items-center gap-1" @click="openInBastyon">
                 <div class="flex h-10 w-10 items-center justify-center rounded-full bg-color-bg-ac/10 text-color-bg-ac transition-colors hover:bg-color-bg-ac/20">
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
@@ -135,7 +119,7 @@ const copyAddress = async () => {
                   </svg>
                 </div>
                 <span class="text-[11px] text-text-on-main-bg-color">{{ t("channels.openInApp") }}</span>
-              </a>
+              </button>
             </div>
 
             <!-- Channel info section -->

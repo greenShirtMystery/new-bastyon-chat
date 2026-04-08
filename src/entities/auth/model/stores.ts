@@ -1151,7 +1151,7 @@ export const useAuthStore = defineStore(NAMESPACE, () => {
   const loadPostComments = (txid: string) => appInitializer.loadPostComments(txid, address.value || undefined);
   const loadMyPostScore = (txid: string) => appInitializer.loadMyPostScore(txid, address.value!);
   const submitUpvote = (txid: string, value: number) => appInitializer.submitUpvote(txid, value, address.value!);
-  const submitComment = (txid: string, message: string, parentId?: string) => appInitializer.submitComment(txid, message, parentId);
+  const submitComment = (txid: string, message: string, parentId?: string) => appInitializer.submitComment(txid, message, parentId, address.value || undefined);
 
   /** Get cached user data by raw address */
   const getBastyonUserData = (addr: string) => appInitializer.getUserData(addr);

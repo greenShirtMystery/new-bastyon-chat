@@ -22,10 +22,12 @@ const { t } = useI18n();
       class="flex items-center gap-1.5 rounded-lg bg-color-bg-ac/10 px-3 py-1.5 text-xs font-medium text-color-bg-ac transition-colors hover:bg-color-bg-ac/20"
       @click="emit('boost')"
     >
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="10" />
+        <path d="M10 8h4a2 2 0 0 1 0 4h-4v4" />
+        <line x1="10" y1="12" x2="15" y2="12" />
       </svg>
-      {{ t("postPlayer.boost") }}
+      PKOIN
     </button>
 
     <button
