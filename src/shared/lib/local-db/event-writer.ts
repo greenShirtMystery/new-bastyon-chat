@@ -636,10 +636,16 @@ export class EventWriter {
       preview = "[message]";
     }
 
-    // Guard: never store an empty/whitespace-only preview — sidebar shows a grey strip.
-    if (!preview || !preview.trim()) {
-      const isEncrypted = parsed.content === "[encrypted]" || parsed.encryptedRaw;
-      preview = isEncrypted ? "[encrypted message]" : "[message]";
+    // Encrypted message awaiting decryption: clear preview to trigger skeleton in sidebar.
+    // DecryptionWorker will call updateRoomPreview again once decrypted.
+    const isEncryptedPending = parsed.content === "[encrypted]" && parsed.encryptedRaw;
+    if (isEncryptedPending) {
+      preview = "";
+    }
+
+    // Guard: never store an empty/whitespace-only preview for NON-encrypted messages.
+    if (!isEncryptedPending && (!preview || !preview.trim())) {
+      preview = "[message]";
     }
 
     await this.roomRepo.updateLastMessage(
@@ -654,8 +660,7 @@ export class EventWriter {
     );
 
     // Set decryption status on room preview for encrypted messages
-    const isEncryptedPreview = parsed.content === "[encrypted]" && parsed.encryptedRaw;
-    if (isEncryptedPreview) {
+    if (isEncryptedPending) {
       await this.db.rooms.update(parsed.roomId, {
         lastMessageDecryptionStatus: "pending",
       });
