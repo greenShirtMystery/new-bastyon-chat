@@ -32,7 +32,7 @@ const emit = defineEmits<{ donate: [] }>();
 const chatStore = useChatStore();
 const themeStore = useThemeStore();
 const { t } = useI18n();
-const { sendMessage, sendFile, sendImage, sendAudio, sendVideoCircle, sendReply, editMessage, setTyping, sendPoll, sendGif } = useMessages();
+const { sendMessage, sendFile, sendImage, sendAudio, sendVideoCircle, sendReply, sendForward, editMessage, setTyping, sendPoll, sendGif } = useMessages();
 const mediaUpload = useMediaUpload();
 const pasteDrop = usePasteDrop({
   onMediaFiles: (files) => mediaUpload.addFiles(files),
@@ -112,6 +112,10 @@ watch(() => chatStore.replyingTo, (reply) => {
   if (reply) nextTick(() => textareaRef.value?.focus());
 });
 
+watch(() => chatStore.forwardingMessage, (fwd) => {
+  if (fwd) nextTick(() => textareaRef.value?.focus());
+});
+
 const peerKeysOk = computed(() => {
   const roomId = chatStore.activeRoomId;
   if (!roomId) return true;
@@ -157,7 +161,7 @@ const autoResize = autoGrow;
 const showSecondaryActions = computed(() => !isMobile.value || !text.value.trim());
 
 const handleSend = async () => {
-  if (!text.value.trim() || !peerKeysOk.value) return;
+  if ((!text.value.trim() && !chatStore.forwardingMessage) || !peerKeysOk.value) return;
   const rawText = mention.resolveText();
   const savedText = text.value;
 
@@ -175,6 +179,16 @@ const handleSend = async () => {
       editMessage(chatStore.editingMessage!.id, rawText);
       chatStore.editingMessage = null;
       inserted = true;
+    } else if (chatStore.forwardingMessage) {
+      const fwd = chatStore.forwardingMessage;
+      const forwardMeta = {
+        senderId: fwd.senderId,
+        senderName: fwd.senderName,
+      };
+      // Use user's text if provided, otherwise original message content
+      const forwardContent = rawText || fwd.content;
+      inserted = await sendForward(forwardContent, forwardMeta, fwd.type);
+      if (inserted !== false) chatStore.cancelForward();
     } else if (chatStore.replyingTo) {
       inserted = await sendReply(rawText, linkPreview.dismissed.value);
     } else {
@@ -285,6 +299,20 @@ const replyInputPreviewText = computed(() => {
   const t = stripBastyonLinks(stripMentionAddresses(reply.content));
   return (t.length > 100 ? t.slice(0, 100) + "\u2026" : t) || "...";
 });
+
+const forwardPreviewText = computed(() => {
+  const fwd = chatStore.forwardingMessage;
+  if (!fwd) return "";
+  if (fwd.type === MessageType.image) return "Photo";
+  if (fwd.type === MessageType.video) return "Video";
+  if (fwd.type === MessageType.videoCircle) return "Video message";
+  if (fwd.type === MessageType.audio) return "Voice message";
+  if (fwd.type === MessageType.file) return fwd.content || "File";
+  const txt = stripBastyonLinks(stripMentionAddresses(fwd.content));
+  return (txt.length > 100 ? txt.slice(0, 100) + "\u2026" : txt) || "...";
+});
+
+const cancelForward = () => { chatStore.cancelForward(); };
 
 // --- Recording handlers ---
 const handleVoiceSend = async () => {
@@ -554,6 +582,25 @@ const handleKitchenSelect = async (imageUrl: string) => {
       </div>
     </transition>
 
+    <!-- Forward preview bar -->
+    <transition name="input-bar">
+      <div v-if="!isEditing && !chatStore.replyingTo && chatStore.forwardingMessage" class="mx-auto flex max-w-6xl items-center gap-2 border-b border-neutral-grad-0 px-3 py-2">
+        <div class="flex h-8 w-8 items-center justify-center text-color-bg-ac">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="15 17 20 12 15 7" /><path d="M4 18v-2a4 4 0 0 1 4-4h12" />
+          </svg>
+        </div>
+        <div class="h-8 w-0.5 shrink-0 rounded-full bg-color-bg-ac" />
+        <div class="min-w-0 flex-1">
+          <div class="truncate text-xs font-medium text-color-bg-ac">{{ chatStore.forwardingMessage.senderName || t("forward.message") }}</div>
+          <div class="truncate text-xs text-text-on-main-bg-color">{{ forwardPreviewText }}</div>
+        </div>
+        <button class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-text-on-main-bg-color hover:bg-neutral-grad-0" @click="cancelForward">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18" /><path d="M6 6l12 12" /></svg>
+        </button>
+      </div>
+    </transition>
+
     <!-- Link preview bar -->
     <transition name="input-bar">
       <div v-if="!isEditing && !chatStore.replyingTo && (linkPreview.loading.value || linkPreview.activePreview.value)" class="mx-auto flex max-w-6xl items-center gap-2 border-b border-neutral-grad-0 px-3 py-2">
@@ -641,9 +688,9 @@ const handleKitchenSelect = async (imageUrl: string) => {
 
         <!-- Send OR record button -->
         <transition name="btn-morph" mode="out-in">
-          <button v-if="text.trim() || sending" key="send"
+          <button v-if="text.trim() || sending || chatStore.forwardingMessage" key="send"
             class="send-btn flex h-10 w-10 min-h-tap min-w-tap shrink-0 items-center justify-center rounded-full bg-color-bg-ac text-white transition-all hover:bg-color-bg-ac-1 disabled:opacity-50"
-            :disabled="!text.trim() || sending || !peerKeysOk" @click="handleSend">
+            :disabled="(!text.trim() && !chatStore.forwardingMessage) || sending || !peerKeysOk" @click="handleSend">
             <svg v-if="sending" class="h-5 w-5 animate-spin rounded-full border-2 border-white border-t-transparent" viewBox="0 0 24 24" />
             <svg v-else-if="isEditing" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12" /></svg>
             <svg v-else width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" /></svg>
