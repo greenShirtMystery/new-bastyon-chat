@@ -191,13 +191,33 @@ const handleSend = async () => {
       inserted = true;
     } else if (chatStore.forwardingMessage) {
       const fwd = chatStore.forwardingMessage;
-      const forwardMeta = fwd.withSenderInfo
-        ? { senderId: fwd.senderId, senderName: fwd.senderName }
-        : undefined;
-      // Use user's text if provided, otherwise original content, or fallback description for media
-      const forwardContent = rawText || fwd.content || forwardPreviewText.value;
-      inserted = await sendForward(forwardContent, forwardMeta);
-      if (inserted !== false) chatStore.cancelForward();
+
+      // External share with file: send file directly instead of text forward
+      if (fwd.isExternalShare && fwd.fileInfo?.url) {
+        try {
+          const response = await fetch(fwd.fileInfo.url);
+          const blob = await response.blob();
+          const fileName = fwd.fileInfo.name || "shared_file";
+          const file = new File([blob], fileName, { type: fwd.fileInfo.mimetype || blob.type });
+
+          if (fwd.type === MessageType.image) {
+            inserted = await sendImage(file);
+          } else {
+            inserted = await sendFile(file);
+          }
+        } catch (e) {
+          console.error("[MessageInput] Failed to send external share file:", e);
+          inserted = false;
+        }
+        if (inserted !== false) chatStore.cancelForward();
+      } else {
+        const forwardMeta = fwd.withSenderInfo
+          ? { senderId: fwd.senderId, senderName: fwd.senderName }
+          : undefined;
+        const forwardContent = rawText || fwd.content || forwardPreviewText.value;
+        inserted = await sendForward(forwardContent, forwardMeta);
+        if (inserted !== false) chatStore.cancelForward();
+      }
     } else if (chatStore.replyingTo) {
       inserted = await sendReply(rawText, linkPreview.dismissed.value);
     } else {
