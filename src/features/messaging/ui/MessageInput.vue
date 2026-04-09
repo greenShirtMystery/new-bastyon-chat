@@ -185,9 +185,9 @@ const handleSend = async () => {
         senderId: fwd.senderId,
         senderName: fwd.senderName,
       };
-      // Use user's text if provided, otherwise original message content
-      const forwardContent = rawText || fwd.content;
-      inserted = await sendForward(forwardContent, forwardMeta, fwd.type);
+      // Use user's text if provided, otherwise original content, or fallback description for media
+      const forwardContent = rawText || fwd.content || forwardPreviewText.value;
+      inserted = await sendForward(forwardContent, forwardMeta);
       if (inserted !== false) chatStore.cancelForward();
     } else if (chatStore.replyingTo) {
       inserted = await sendReply(rawText, linkPreview.dismissed.value);

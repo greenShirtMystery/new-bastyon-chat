@@ -236,16 +236,10 @@ export const en = {
   "emoji.searchPlaceholder": "Search emoji...",
   "emoji.recent": "Recent",
 
-  // ── Forward picker ──
+  // ── Forward ──
   "forward.title": "Forward to...",
-  "forward.selected": "{count} selected",
   "forward.searchPlaceholder": "Search chats...",
   "forward.noChats": "No chats found",
-  "forward.includeSender": "Include sender info",
-  "forward.sending": "Sending...",
-  "forward.button": "Forward ({count})",
-  "forward.success": "Forwarded {msgCount} message(s) to {roomCount} chat(s)",
-  "forward.failed": "Failed to forward",
   "forward.message": "Forwarded message",
 
   // ── Pinned bar ──

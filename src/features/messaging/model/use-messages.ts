@@ -1278,17 +1278,16 @@ export function useMessages() {
     return true;
   };
 
-  /** Send a forwarded message with optimistic UI. Returns true if insert succeeded. */
+  /** Send a forwarded text message with optimistic UI. Returns true if insert succeeded.
+   *  For media forwards (image/video/audio/file), the content is the text body or caption. */
   const sendForward = async (
     content: string,
     forwardMeta: { senderId: string; senderName?: string },
-    originalType: MessageType,
   ): Promise<boolean> => {
     const roomId = chatStore.activeRoomId;
-    if (!roomId) return false;
+    if (!roomId || !content.trim()) return false;
 
     const trimmed = content.trim();
-    if (!trimmed) return false;
 
     // ── Dexie path: optimistic insert FIRST ──
     if (isChatDbReady()) {
@@ -1345,21 +1344,21 @@ export function useMessages() {
       if (!matrixService.isReady()) return false;
 
       const roomCrypto = authStore.pcrypto?.rooms[roomId] as PcryptoRoomInstance | undefined;
-      const forwardContent: Record<string, unknown> = {
-        body: trimmed,
-        msgtype: "m.text",
-        forwarded_from: {
-          sender_id: forwardMeta.senderId,
-          sender_name: forwardMeta.senderName,
-        },
+      const fwdMeta = {
+        sender_id: forwardMeta.senderId,
+        sender_name: forwardMeta.senderName,
       };
 
       if (roomCrypto?.canBeEncrypt()) {
         const encrypted = await roomCrypto.encryptEvent(trimmed);
-        (encrypted as Record<string, unknown>)["forwarded_from"] = forwardContent["forwarded_from"];
+        (encrypted as Record<string, unknown>)["forwarded_from"] = fwdMeta;
         await matrixService.sendEncryptedText(roomId, encrypted);
       } else {
-        await matrixService.sendEncryptedText(roomId, forwardContent);
+        await matrixService.sendEncryptedText(roomId, {
+          body: trimmed,
+          msgtype: "m.text",
+          forwarded_from: fwdMeta,
+        });
       }
       return true;
     } catch (e) {
