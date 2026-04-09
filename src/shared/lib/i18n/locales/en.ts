@@ -626,6 +626,7 @@ export const en = {
   // ── Misc ──
   "chat.messageNotFound": "Message not found",
   "chat.peerKeysMissing": "Peer hasn't published encryption keys yet. Messaging is temporarily unavailable.",
+  "chat.unencryptedRoom": "Messages in this room are not encrypted",
   "tor.disable": "Disable Tor",
   "register.registrationFailed": "Registration failed",
   "register.captchaLoadFailed": "Failed to load captcha",

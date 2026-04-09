@@ -3080,6 +3080,22 @@ export const useChatStore = defineStore(NAMESPACE, () => {
     }
   };
 
+  /** Get actual member count from Matrix server summary.
+   *  Falls back to local room.members.length if server data unavailable.
+   *  Unlike room.members (which may be partially loaded with lazyLoadMembers),
+   *  getJoinedMemberCount() uses the room summary from /sync. */
+  const getRoomMemberCount = (roomId: string): number => {
+    try {
+      const matrixService = getMatrixClientService();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const matrixRoom = matrixService.getRoom(roomId) as any;
+      const serverCount = matrixRoom?.getJoinedMemberCount?.() ?? 0;
+      if (serverCount > 0) return serverCount;
+    } catch { /* fallback below */ }
+    const room = getRoomById(roomId);
+    return room?.members.length ?? 0;
+  };
+
   /** Check if room has public join rules */
   const isRoomPublic = (roomId: string): boolean => {
     try {
@@ -3375,6 +3391,9 @@ export const useChatStore = defineStore(NAMESPACE, () => {
     const matrixService = getMatrixClientService();
     const matrixRoom = matrixService.getRoom(roomId);
     if (!matrixRoom) return undefined;
+
+    // Skip encryption setup for public rooms (matches Bastyon's prepareChat behavior)
+    if (isRoomPublic(roomId)) return undefined;
 
     try {
       return await pcrypto.addRoom(matrixRoom as Record<string, unknown>);
@@ -5560,9 +5579,19 @@ export const useChatStore = defineStore(NAMESPACE, () => {
     return 0;
   };
 
-  /** Check if all peers in a room have published encryption keys.
-   *  Updates peerKeysStatus map and returns the status. */
+  /** Check encryption status for a room.
+   *  Updates peerKeysStatus map and returns the status.
+   *  - "available": room supports encryption and all peers have keys
+   *  - "missing": room could support encryption but peers lack keys
+   *  - "not-encrypted": room is public or too large for encryption
+   *  - "unknown": crypto not initialized yet */
   const checkPeerKeys = async (roomId: string): Promise<PeerKeysStatus> => {
+    // Public rooms — encryption disabled by design
+    if (isRoomPublic(roomId)) {
+      peerKeysStatus.set(roomId, "not-encrypted");
+      return "not-encrypted";
+    }
+
     const authStore = useAuthStore();
     const roomCrypto = authStore.pcrypto?.rooms[roomId];
     if (!roomCrypto) {
@@ -5571,9 +5600,23 @@ export const useChatStore = defineStore(NAMESPACE, () => {
     }
 
     const canEncrypt = roomCrypto.canBeEncrypt();
-    const status: PeerKeysStatus = canEncrypt ? "available" : "missing";
-    peerKeysStatus.set(roomId, status);
-    return status;
+    if (!canEncrypt) {
+      // canBeEncrypt returns false for rooms with ≥50 members or missing peer keys.
+      // Distinguish "too large" from "missing keys":
+      const matrixService = getMatrixClientService();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const matrixRoom = matrixService.getRoom(roomId) as any;
+      const memberCount = matrixRoom?.getJoinedMemberCount?.() ?? 0;
+      if (memberCount >= 50) {
+        peerKeysStatus.set(roomId, "not-encrypted");
+        return "not-encrypted";
+      }
+      peerKeysStatus.set(roomId, "missing");
+      return "missing";
+    }
+
+    peerKeysStatus.set(roomId, "available");
+    return "available";
   };
 
   /** Reset all in-memory state and account-specific localStorage (called on logout) */
@@ -5634,6 +5677,7 @@ export const useChatStore = defineStore(NAMESPACE, () => {
     exitSelectionMode,
     forwardingMessages,
     getDisplayName,
+    getRoomMemberCount,
     getRoomPowerLevels,
     getTypingUsers,
     handleKicked,

@@ -637,8 +637,14 @@ export class Pcrypto {
         if (!pcrypto.user?.private || pcrypto.user.private.length !== 12) return false;
         if (!pcrypto.user.userinfo?.id || !users[pcrypto.user.userinfo.id]) return false;
 
+        // Use the MAXIMUM of server summary count and locally loaded users.
+        // getJoinedMemberCount() comes from /sync summary — accurate for large rooms.
+        // usersinfo may only have lazy-loaded fraction (e.g. 19 out of 800).
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const serverCount = (chat as any).getJoinedMemberCount?.() ?? 0;
         const usersinfoArray = Object.values(usersinfo);
-        if (usersinfoArray.length <= 1 || usersinfoArray.length >= 50) return false;
+        const memberCount = Math.max(serverCount, usersinfoArray.length);
+        if (memberCount <= 1 || memberCount >= 50) return false;
 
         // ALL participants must have 12 published keys for ECDH to work
         return usersinfoArray.every(u => u.keys && u.keys.length >= m);
@@ -651,7 +657,11 @@ export class Pcrypto {
         // when there are ≥50 participants (canBeEncrypt returns false),
         // so fetching everyone's crypto keys is wasted work that blocks
         // message rendering for seconds in 1000+ member rooms.
-        const memberCount = Object.keys(users).length;
+        // Use getJoinedMemberCount (from server summary) as primary check —
+        // Object.keys(users) may be incomplete with lazyLoadMembers.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const actualMemberCount = (chat as any).getJoinedMemberCount?.() ?? 0;
+        const memberCount = Math.max(actualMemberCount, Object.keys(users).length);
         if (memberCount < 50) {
           await getusersinfo();
         }

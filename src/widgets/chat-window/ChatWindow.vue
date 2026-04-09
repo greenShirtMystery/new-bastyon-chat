@@ -85,13 +85,15 @@ watch(() => chatStore.activeRoomId, (_newId, oldId) => {
 const peerKeysMissing = computed(() => {
   const roomId = chatStore.activeRoomId;
   if (!roomId) return false;
-  // Only show warning for 1:1 chats — group chats don't require all members to have keys
+  const status = chatStore.peerKeysStatus.get(roomId);
+  // Show warning only when peers lack keys (not for public/large rooms)
   if (chatStore.activeRoom?.isGroup) return false;
-  return chatStore.peerKeysStatus.get(roomId) === "missing";
+  return status === "missing";
 });
 
+
 watch(() => chatStore.activeRoomId, async (roomId) => {
-  if (roomId && !chatStore.activeRoom?.isGroup) {
+  if (roomId) {
     await chatStore.checkPeerKeys(roomId);
   }
 }, { immediate: true });
@@ -279,7 +281,7 @@ const subtitle = computed(() => {
   if (typingText.value) return typingText.value;
   const room = chatStore.activeRoom;
   if (!room) return "";
-  if (room.isGroup) return t("chat.members", { count: room.members.length });
+  if (room.isGroup) return t("chat.members", { count: chatStore.getRoomMemberCount(room.id) });
   return "";
 });
 
@@ -485,7 +487,7 @@ onUnmounted(() => {
             <template v-if="chatStore.activeRoom?.isGroup">
               {{ t("chat.inviteGroup", { name: activeRoomTitle.text }) }}
               <br />
-              <span class="text-xs">{{ t("chat.members", { count: chatStore.activeRoom.members.length }) }}</span>
+              <span class="text-xs">{{ t("chat.members", { count: chatStore.getRoomMemberCount(chatStore.activeRoom.id) }) }}</span>
             </template>
             <template v-else>
               {{ t("chat.invitePersonal", { name: activeRoomTitle.text }) }}
