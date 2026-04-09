@@ -77,7 +77,7 @@ const filteredRooms = computed(() => {
 
 const getRoomSubtitle = (room: ChatRoom): string => {
   if (room.isGroup) {
-    const count = room.members.length;
+    const count = chatStore.getRoomMemberCount(room.id);
     if (count > 0) return t("forward.members", { count });
     return t("tabs.groups");
   }
