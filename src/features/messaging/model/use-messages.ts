@@ -1278,6 +1278,96 @@ export function useMessages() {
     return true;
   };
 
+  /** Send a forwarded message with optimistic UI. Returns true if insert succeeded. */
+  const sendForward = async (
+    content: string,
+    forwardMeta: { senderId: string; senderName?: string },
+    originalType: MessageType,
+  ): Promise<boolean> => {
+    const roomId = chatStore.activeRoomId;
+    if (!roomId) return false;
+
+    const trimmed = content.trim();
+    if (!trimmed) return false;
+
+    // ── Dexie path: optimistic insert FIRST ──
+    if (isChatDbReady()) {
+      let localClientId: string | undefined;
+      try {
+        const dbKit = getChatDb();
+
+        // 1. Optimistic insert — message appears instantly
+        const localMsg = await dbKit.messages.createLocal({
+          roomId,
+          senderId: authStore.address ?? "",
+          content: trimmed,
+          type: MessageType.text,
+          forwardedFrom: forwardMeta,
+        });
+        localClientId = localMsg.clientId;
+
+        // 2. Validate Matrix readiness
+        const matrixService = getMatrixClientService();
+        if (!matrixService.isReady()) {
+          console.error("[sendForward] Matrix client not ready — message saved locally as failed", {
+            roomId, clientId: localClientId,
+          });
+          await dbKit.messages.markFailed(localClientId);
+          return true;
+        }
+
+        // 3. Enqueue for sync
+        await dbKit.syncEngine.enqueue(
+          "send_message",
+          roomId,
+          { content: trimmed, forwardedFrom: forwardMeta },
+          localMsg.clientId,
+        );
+
+        return true;
+      } catch (e) {
+        console.error("[sendForward] Dexie path failed:", {
+          roomId, clientId: localClientId, error: (e as Error).message, stack: (e as Error).stack,
+        });
+        if (localClientId) {
+          try {
+            await getChatDb().messages.markFailed(localClientId);
+          } catch { /* already logging above */ }
+          return true;
+        }
+        console.warn("[sendForward] Falling back to legacy path");
+      }
+    }
+
+    // ── Legacy fallback (no Dexie) ──
+    try {
+      const matrixService = getMatrixClientService();
+      if (!matrixService.isReady()) return false;
+
+      const roomCrypto = authStore.pcrypto?.rooms[roomId] as PcryptoRoomInstance | undefined;
+      const forwardContent: Record<string, unknown> = {
+        body: trimmed,
+        msgtype: "m.text",
+        forwarded_from: {
+          sender_id: forwardMeta.senderId,
+          sender_name: forwardMeta.senderName,
+        },
+      };
+
+      if (roomCrypto?.canBeEncrypt()) {
+        const encrypted = await roomCrypto.encryptEvent(trimmed);
+        (encrypted as Record<string, unknown>)["forwarded_from"] = forwardContent["forwarded_from"];
+        await matrixService.sendEncryptedText(roomId, encrypted);
+      } else {
+        await matrixService.sendEncryptedText(roomId, forwardContent);
+      }
+      return true;
+    } catch (e) {
+      console.error("[sendForward] Legacy path failed:", e);
+      return false;
+    }
+  };
+
   /** Edit an existing message (Matrix m.replace relation) */
   const editMessage = async (messageId: string, newContent: string) => {
     const roomId = chatStore.activeRoomId;
@@ -2177,6 +2267,7 @@ export function useMessages() {
     retryMessage,
     sendAudio,
     sendFile,
+    sendForward,
     sendGif,
     sendImage,
     sendMessage,
