@@ -452,7 +452,6 @@ export const useChatStore = defineStore(NAMESPACE, () => {
   // Selection/forward state (Batch 4)
   const selectionMode = ref(false);
   const selectedMessageIds = ref<Set<string>>(new Set());
-  const forwardingMessages = ref(false);
 
   const enterSelectionMode = (messageId: string) => {
     selectionMode.value = true;
@@ -469,7 +468,6 @@ export const useChatStore = defineStore(NAMESPACE, () => {
   const exitSelectionMode = () => {
     selectionMode.value = false;
     selectedMessageIds.value = new Set();
-    forwardingMessages.value = false;
   };
 
   const initForward = (message: Message) => {
@@ -5655,7 +5653,6 @@ export const useChatStore = defineStore(NAMESPACE, () => {
     userDisplayNames.value = {};
     selectionMode.value = false;
     selectedMessageIds.value = new Set();
-    forwardingMessages.value = false;
     forwardingMessage.value = null;
     pinnedMessages.value = [];
     pinnedMessageIndex.value = 0;
@@ -5696,7 +5693,6 @@ export const useChatStore = defineStore(NAMESPACE, () => {
     enterSelectionMode,
     exitSelectionMode,
     forwardingMessage,
-    forwardingMessages,
     initForward,
     cancelForward,
     getDisplayName,

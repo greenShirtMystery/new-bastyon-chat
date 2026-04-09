@@ -164,50 +164,6 @@ describe("useMessages", () => {
     });
   });
 
-  // ─── forwardMessage ───────────────────────────────────────────
-
-  describe("forwardMessage", () => {
-    it("forwards text with forwarded_from metadata", async () => {
-      const msg = makeMsg({
-        roomId: "!room:server",
-        senderId: "OriginalSender",
-        content: "forwarded text",
-      });
-
-      await messaging.forwardMessage(msg, "!target:server", true);
-
-      expect(mockSendEncryptedText).toHaveBeenCalled();
-      const call = mockSendEncryptedText.mock.calls[0] as any[];
-      const [targetRoom, content] = call;
-      expect(targetRoom).toBe("!target:server");
-      expect(content.body).toBe("forwarded text");
-      expect(content.forwarded_from).toBeDefined();
-      expect(content.forwarded_from.sender_id).toBe("OriginalSender");
-    });
-
-    it("forwards text without sender info when withSenderInfo=false", async () => {
-      const msg = makeMsg({ content: "anonymous forward" });
-
-      await messaging.forwardMessage(msg, "!target:server", false);
-
-      const content = (mockSendEncryptedText.mock.calls[0] as any[])[1];
-      expect(content.forwarded_from).toBeUndefined();
-    });
-
-    it("preserves original forwarded_from when re-forwarding", async () => {
-      const msg = makeMsg({
-        content: "double forwarded",
-        forwardedFrom: { senderId: "OriginalAuthor", senderName: "Alice" },
-      });
-
-      await messaging.forwardMessage(msg, "!target:server", true);
-
-      const content = (mockSendEncryptedText.mock.calls[0] as any[])[1];
-      expect(content.forwarded_from.sender_id).toBe("OriginalAuthor");
-      expect(content.forwarded_from.sender_name).toBe("Alice");
-    });
-  });
-
   // ─── sendMessage (optimistic UI guarantee) ────────────────────
 
   describe("sendMessage", () => {

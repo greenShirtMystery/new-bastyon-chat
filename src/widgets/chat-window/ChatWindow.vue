@@ -228,10 +228,6 @@ const handleScrollToMessage = (messageId: string) => {
   messageListRef.value?.scrollToMessage(messageId);
 };
 
-const handleSelectionForward = () => {
-  showForwardPicker.value = true;
-};
-
 // Auto-open ForwardPicker when "forward" is selected from context menu
 watch(() => chatStore.forwardingMessage, (v) => {
   if (v) showForwardPicker.value = true;
@@ -533,7 +529,6 @@ onUnmounted(() => {
         <MessageList ref="messageListRef" />
         <SelectionBar
           v-if="chatStore.selectionMode"
-          @forward="handleSelectionForward"
           @copy="handleSelectionCopy"
           @delete="handleSelectionDelete"
         />
