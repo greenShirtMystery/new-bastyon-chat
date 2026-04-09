@@ -248,6 +248,7 @@ export const ru: Record<TranslationKey, string> = {
   "forward.button": "Переслать ({count})",
   "forward.success": "Переслано {msgCount} сообщ. в {roomCount} чат(ов)",
   "forward.failed": "Не удалось переслать",
+  "forward.message": "Пересланное сообщение",
 
   // ── Pinned bar ──
   "pinned.message": "Закреплённое сообщение",

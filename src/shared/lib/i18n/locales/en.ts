@@ -246,6 +246,7 @@ export const en = {
   "forward.button": "Forward ({count})",
   "forward.success": "Forwarded {msgCount} message(s) to {roomCount} chat(s)",
   "forward.failed": "Failed to forward",
+  "forward.message": "Forwarded message",
 
   // ── Pinned bar ──
   "pinned.message": "Pinned Message",
