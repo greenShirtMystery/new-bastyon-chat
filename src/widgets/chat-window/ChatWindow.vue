@@ -91,12 +91,6 @@ const peerKeysMissing = computed(() => {
   return status === "missing";
 });
 
-/** True when the active room does not use encryption (public or ≥50 members) */
-const isUnencryptedRoom = computed(() => {
-  const roomId = chatStore.activeRoomId;
-  if (!roomId) return false;
-  return chatStore.peerKeysStatus.get(roomId) === "not-encrypted";
-});
 
 watch(() => chatStore.activeRoomId, async (roomId) => {
   if (roomId) {
@@ -535,13 +529,6 @@ onUnmounted(() => {
             <path d="M12 9v4m0 4h.01M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/>
           </svg>
           <span>{{ t("chat.peerKeysMissing") }}</span>
-        </div>
-        <div v-else-if="isUnencryptedRoom" class="mx-4 my-2 rounded-lg bg-slate-50 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-700 px-3 py-2 text-xs text-slate-500 dark:text-slate-400 flex items-center gap-2">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="shrink-0">
-            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
-            <path d="M7 11V7a5 5 0 0 1 9.9-1"/>
-          </svg>
-          <span>{{ t("chat.unencryptedRoom") }}</span>
         </div>
         <MessageList ref="messageListRef" />
         <SelectionBar

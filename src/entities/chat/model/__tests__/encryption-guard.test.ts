@@ -9,7 +9,8 @@ import type { PeerKeysStatus } from "../types";
  * 1. PeerKeysStatus type includes "not-encrypted"
  * 2. checkPeerKeys distinguishes public/large rooms from missing keys
  * 3. ensureRoomCrypto skips public rooms
- * 4. peerKeysOk allows send for all statuses except "missing"
+ * 4. canBeEncrypt uses getJoinedMemberCount for accurate member count
+ * 5. peerKeysOk allows send for all statuses except "missing"
  */
 
 describe("peerKeysOk guard", () => {
@@ -38,7 +39,6 @@ describe("checkPeerKeys logic branches", () => {
   });
 
   it("returns 'missing' when canBeEncrypt is false for small private rooms", () => {
-    // The 'missing' branch: canBeEncrypt false + memberCount < 50
     expect(source).toContain('peerKeysStatus.set(roomId, "missing")');
   });
 
@@ -51,18 +51,31 @@ describe("ensureRoomCrypto public room guard", () => {
   const source = readFileSync(resolve(__dirname, "../chat-store.ts"), "utf-8");
 
   it("skips pcrypto.addRoom for public rooms", () => {
-    // Matches Bastyon's prepareChat behavior: public rooms skip encryption setup
     expect(source).toContain("// Skip encryption setup for public rooms");
     expect(source).toContain("if (isRoomPublic(roomId)) return undefined;");
   });
 });
 
+describe("canBeEncrypt uses actual member count", () => {
+  const source = readFileSync(
+    resolve(__dirname, "../../../matrix/model/matrix-crypto.ts"),
+    "utf-8",
+  );
+
+  it("checks getJoinedMemberCount before usersinfo length", () => {
+    // getJoinedMemberCount comes from server summary — accurate even with lazyLoadMembers
+    expect(source).toContain("getJoinedMemberCount");
+    expect(source).toContain("actualMemberCount >= 50");
+  });
+
+  it("prepare() also uses getJoinedMemberCount for skip threshold", () => {
+    // prepare() should use actual count to skip expensive key fetching
+    expect(source).toContain("Math.max(actualMemberCount, Object.keys(users).length)");
+  });
+});
+
 describe("PeerKeysStatus type", () => {
   const source = readFileSync(resolve(__dirname, "../types.ts"), "utf-8");
-
-  it("includes 'not-encrypted' value", () => {
-    expect(source).toContain('"not-encrypted"');
-  });
 
   it("has all four status values", () => {
     expect(source).toContain('"unknown"');
