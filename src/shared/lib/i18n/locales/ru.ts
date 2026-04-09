@@ -628,6 +628,7 @@ export const ru: Record<TranslationKey, string> = {
   // ── Misc ──
   "chat.messageNotFound": "Сообщение не найдено",
   "chat.peerKeysMissing": "Собеседник ещё не опубликовал ключи шифрования. Отправка сообщений временно недоступна.",
+  "chat.unencryptedRoom": "Сообщения в этой комнате не шифруются",
   "tor.disable": "Отключить Tor",
   "register.registrationFailed": "Ошибка регистрации",
   "register.captchaLoadFailed": "Не удалось загрузить капчу",

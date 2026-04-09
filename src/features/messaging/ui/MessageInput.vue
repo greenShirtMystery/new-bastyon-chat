@@ -116,6 +116,8 @@ const peerKeysOk = computed(() => {
   const roomId = chatStore.activeRoomId;
   if (!roomId) return true;
   const status = chatStore.peerKeysStatus.get(roomId);
+  // Block send only when peers are missing keys in a private room.
+  // "not-encrypted" rooms (public / large) allow plain-text send.
   return status !== "missing";
 });
 

@@ -160,4 +160,4 @@ export interface TransferInfo {
 }
 
 /** Peer encryption key status for a room */
-export type PeerKeysStatus = "unknown" | "available" | "missing";
+export type PeerKeysStatus = "unknown" | "available" | "missing" | "not-encrypted";
