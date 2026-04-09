@@ -198,7 +198,7 @@ const handleSend = async () => {
           const response = await fetch(fwd.fileInfo.url);
           const blob = await response.blob();
           const fileName = fwd.fileInfo.name || "shared_file";
-          const file = new File([blob], fileName, { type: fwd.fileInfo.mimetype || blob.type });
+          const file = new File([blob], fileName, { type: fwd.fileInfo.type || blob.type });
 
           if (fwd.type === MessageType.image) {
             inserted = await sendImage(file);

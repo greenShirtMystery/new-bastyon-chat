@@ -509,7 +509,7 @@ export const useChatStore = defineStore(NAMESPACE, () => {
       senderId: "",
       content,
       type,
-      fileInfo: isMedia ? { url: data.fileUri!, name: data.fileName, mimetype: data.mimeType } as any : undefined,
+      fileInfo: isMedia ? { url: data.fileUri!, name: data.fileName || "shared_file", type: data.mimeType!, size: 0 } : undefined,
       withSenderInfo: false,
       isExternalShare: true,
     };

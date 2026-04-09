@@ -43,7 +43,7 @@ export async function initShareTargetListener(
       data.text = event.texts.join("\n");
     }
 
-    // First file (single file for now; SEND_MULTIPLE can be extended later)
+    // First file only (single-file sharing)
     if (event.files?.length) {
       const file = event.files[0];
       data.fileUri = file.uri;
