@@ -17,6 +17,7 @@ import { createChatStorage, type ChatStorageInstance } from "@/shared/lib/matrix
 import { getmatrixid } from "@/shared/lib/matrix/functions";
 import { withTimeout } from "@/shared/lib/with-timeout";
 
+import { getStoredDeviceId, storeDeviceId } from "./device-id-storage";
 import type { MatrixCredentials, MatrixClient, MatrixSDK } from "./types";
 
 export type SyncCallback = (state: "PREPARED" | "SYNCING" | "ERROR" | "STOPPED" | "RECONNECTING") => void;
@@ -160,12 +161,23 @@ export class MatrixClientService {
 
     const client = this.createMtrxClient(opts);
 
+    // Reuse the persisted device_id if we already have one for this account.
+    // This stops Synapse from spawning a fresh device on every login, which
+    // otherwise causes device_inbox to grow without bound because undelivered
+    // messages pile up for each abandoned device.
+    const storedDeviceId = getStoredDeviceId(this.credentials.address);
+
     let userData;
     try {
-      userData = await client.login("m.login.password", {
+      const loginParams: Record<string, unknown> = {
         user: this.credentials.username,
-        password: this.credentials.password
-      });
+        password: this.credentials.password,
+        initial_device_display_name: "Forta Chat",
+      };
+      if (storedDeviceId) {
+        loginParams.device_id = storedDeviceId;
+      }
+      userData = await client.login("m.login.password", loginParams);
     } catch (e: unknown) {
       const errStr = typeof e === "string" ? e : (e as Error)?.message ?? "";
       if (errStr.indexOf("M_USER_DEACTIVATED") > -1) {
@@ -187,6 +199,11 @@ export class MatrixClientService {
       } catch (regErr) {
         throw regErr;
       }
+    }
+
+    // Persist the device_id so the next login reuses the same device.
+    if (userData?.device_id) {
+      storeDeviceId(this.credentials.address, userData.device_id);
     }
 
     localStorage.accessToken = userData.access_token;
