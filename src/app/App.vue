@@ -21,6 +21,12 @@ import { initAndroidBackListener, useAndroidBackHandler } from "@/shared/lib/com
 import { initShareTargetListener, consumeShareData, saveShareData, type ExternalShareData } from "@/shared/lib/share-target";
 import RegistrationStepper from "@/features/auth/ui/RegistrationStepper.vue";
 import { AppDownloadBanner } from "@/features/app-download-banner";
+import {
+  BugReportStatusSheet,
+  useBugReportStatus,
+  shouldCheckOnBoot,
+  markBootCheckCompleted,
+} from "@/features/bug-report";
 import { useI18n } from "@/shared/lib/i18n";
 
 import { useKeyboardFallback } from "@/shared/lib/composables/use-keyboard-fallback";
@@ -205,6 +211,76 @@ watch(
 const isMobile = ref(window.innerWidth < 768);
 const onResize = () => { isMobile.value = window.innerWidth < 768; };
 
+// ─── Bug-report sheet: auto-open from local cache on version change / 3-day idle ───
+const {
+  allIssues: bugStatusIssues,
+  sheetOpen: bugStatusSheetOpen,
+  loadAllIssues: loadBugIssues,
+  openSheet: openBugStatusSheet,
+  closeSheet: closeBugStatusSheet,
+  resetState: resetBugStatus,
+} = useBugReportStatus();
+
+let pendingBugCheckVersion: string | null = null;
+
+async function runBugStatusCheck() {
+  if (!authStore.address) return;
+  let version = "web";
+  if (isNative) {
+    try {
+      const { App } = await import("@capacitor/app");
+      const info = await App.getInfo();
+      version = info.version ?? "native";
+    } catch {
+      version = "native";
+    }
+  } else if ((window as any).electronAPI?.getVersion) {
+    try {
+      version = await (window as any).electronAPI.getVersion();
+    } catch {
+      version = "electron";
+    }
+  }
+  if (!shouldCheckOnBoot(version)) return;
+  loadBugIssues(authStore.address);
+  if (bugStatusIssues.value.length > 0) {
+    pendingBugCheckVersion = version;
+    openBugStatusSheet();
+  } else {
+    markBootCheckCompleted(version);
+  }
+}
+
+function handleBugStatusSheetClose() {
+  closeBugStatusSheet();
+  if (pendingBugCheckVersion) {
+    markBootCheckCompleted(pendingBugCheckVersion);
+    pendingBugCheckVersion = null;
+  }
+}
+
+let bugStatusCheckTriggered = false;
+watch(
+  () => authStore.address,
+  (addr) => {
+    if (addr && !bugStatusCheckTriggered) {
+      bugStatusCheckTriggered = true;
+      runBugStatusCheck().catch((e) =>
+        console.warn("[App] bug status check failed:", e),
+      );
+    }
+  },
+  { immediate: true },
+);
+
+// Reset on logout so another account on the same tab starts clean.
+watch(
+  () => authStore.isAuthenticated,
+  (isAuthed, was) => {
+    if (was && !isAuthed) resetBugStatus();
+  },
+);
+
 const showQuickSearch = ref(false);
 
 // Android back: close quick search
@@ -296,6 +372,13 @@ onUnmounted(() => {
       v-if="showQuickSearch"
       @close="showQuickSearch = false"
       @select-room="showQuickSearch = false"
+    />
+    <BugReportStatusSheet
+      v-if="authStore.address"
+      :show="bugStatusSheetOpen"
+      :address="authStore.address"
+      mode="manage"
+      @close="handleBugStatusSheetClose"
     />
   </div>
 </template>
