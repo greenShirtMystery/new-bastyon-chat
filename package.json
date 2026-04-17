@@ -42,6 +42,8 @@
     "bn.js": "^5.2.0",
     "buffer": "^6.0.3",
     "class-variance-authority": "^0.7.0",
+    "cordova-plugin-device": "^3.0.0",
+    "cordova-plugin-tor-runner": "github:Gedsh/cordova-plugin-tor-runner",
     "create-hash": "^1.2.0",
     "dexie": "^4.3.0",
     "emoji-kitchen-mart": "^6.0.5",

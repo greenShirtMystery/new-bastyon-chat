@@ -17,9 +17,13 @@ dependencies {
     implementation project(':capacitor-push-notifications')
     implementation project(':capacitor-share')
     implementation project(':capacitor-status-bar')
-
+    implementation "com.google.dagger:dagger:2.55"
+    implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2"
+    implementation "androidx.lifecycle:lifecycle-process:2.9.1"
+    implementation "com.jrummyapps:android-shell:1.0.1"
+    implementation "androidx.preference:preference-ktx:1.2.1"
 }
-
+apply from: "../../node_modules/cordova-plugin-tor-runner/torplugin/gradle/custom-build.gradle"
 
 if (hasProperty('postBuildExtras')) {
   postBuildExtras()

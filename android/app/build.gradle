@@ -1,5 +1,6 @@
 apply plugin: 'com.android.application'
 apply plugin: 'kotlin-android'
+apply plugin: 'com.google.devtools.ksp'
 
 android {
     namespace = "com.forta.chat"
@@ -38,10 +39,23 @@ android {
             }
         }
     }
+    sourceSets {
+        main {
+            jniLibs.srcDirs 'jniLibs/'
+        }
+    }
     packagingOptions {
         jniLibs {
             useLegacyPackaging = true
+            doNotStrip '*/*/libreverseproxy.so'
+            doNotStrip '*/*/libtor.so'
+            doNotStrip '*/*/libobfs4proxy.so'
+            doNotStrip '*/*/libsnowflake.so'
+            doNotStrip '*/*/libwebtunnel.so'
         }
+    }
+    lintOptions {
+        disable 'NullSafeMutableLiveData'
     }
 }
 
@@ -60,13 +74,20 @@ dependencies {
 
     // Auto-update: HTTP client + JSON parsing + coroutines
     implementation 'com.squareup.okhttp3:okhttp:4.12.0'
-    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1'
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2'
 
     // Native WebRTC — hardware-accelerated video/audio for calls
     implementation 'io.github.webrtc-sdk:android:144.7559.01'
 
     // Firebase Cloud Messaging — for native push handling when app is killed
     implementation 'com.google.firebase:firebase-messaging:25.0.1'
+
+    //For cordova-plugin-tor-runner
+    implementation "com.google.dagger:dagger:$daggerVersion"
+    ksp "com.google.dagger:dagger-compiler:$daggerVersion"
+    implementation "androidx.lifecycle:lifecycle-process:$lifecycleProcessVersion"
+    implementation "com.jrummyapps:android-shell:$androidShellVersion"
+    implementation "androidx.preference:preference-ktx:$androidxPreferenceVersion"
 
     testImplementation "junit:junit:$junitVersion"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
